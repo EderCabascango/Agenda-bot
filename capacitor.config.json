@@ -1,0 +1,9 @@
+{
+  "appId": "com.example.midiario",
+  "appName": "Mi Diario",
+  "webDir": "web",
+  "bundledWebRuntime": false,
+  "plugins": {
+    "LocalNotifications": {}
+  }
+}

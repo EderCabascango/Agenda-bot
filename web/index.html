@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mi Diario – Agenda Inteligente</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css?v=3" />
+</head>
+<body>
+
+  <!-- ========== MAIN APP ========== -->
+  <div class="app-wrapper" id="app-wrapper">
+
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <span class="logo-icon material-icons-round">auto_stories</span>
+          <span class="logo-text">Mi Diario</span>
+        </div>
+        <button class="sidebar-close material-icons-round" id="sidebar-close">close</button>
+      </div>
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-view="dashboard">
+          <span class="material-icons-round">dashboard</span>
+          <span>Dashboard</span>
+        </button>
+        <button class="nav-item" data-view="activities">
+          <span class="material-icons-round">checklist</span>
+          <span>Actividades</span>
+        </button>
+        <button class="nav-item" data-view="calendar">
+          <span class="material-icons-round">calendar_month</span>
+          <span>Calendario</span>
+        </button>
+        <button class="nav-item" data-view="stats">
+          <span class="material-icons-round">analytics</span>
+          <span>Estadísticas</span>
+        </button>
+        <button class="nav-item" data-view="settings">
+          <span class="material-icons-round">settings</span>
+          <span>Ajustes</span>
+        </button>
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="main-wrapper">
+      <!-- Top Bar -->
+      <header class="topbar">
+        <button class="menu-toggle material-icons-round" id="menu-toggle">menu</button>
+        <div class="topbar-date" id="topbar-date"></div>
+        <div class="topbar-actions">
+          <button class="topbar-btn" id="btn-search" title="Buscar (Ctrl+K)">
+            <span class="material-icons-round">search</span>
+          </button>
+          <button class="topbar-btn" id="btn-notifications" title="Notificaciones">
+            <span class="material-icons-round">notifications_none</span>
+            <span class="notif-dot" id="notif-dot"></span>
+          </button>
+          <div class="user-avatar" id="user-avatar">U</div>
+          <span class="topbar-username" id="topbar-username"></span>
+        </div>
+      </header>
+
+      <!-- Views Container -->
+      <main class="content">
+
+        <!-- ========== DASHBOARD VIEW ========== -->
+        <section class="view active" id="view-dashboard">
+          <div class="view-header">
+            <h2 id="greeting-text">Buenos días 👋</h2>
+            <p class="subtitle" id="dashboard-subtitle"></p>
+          </div>
+
+          <!-- Quick Stats -->
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-icon" style="background: linear-gradient(135deg, #00C9A7, #03DAC5);">
+                <span class="material-icons-round">task_alt</span>
+              </div>
+              <div class="stat-info">
+                <span class="stat-value" id="stat-completed">0</span>
+                <span class="stat-label">Completadas</span>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon" style="background: linear-gradient(135deg, #FFB347, #FFCC02);">
+                <span class="material-icons-round">pending_actions</span>
+              </div>
+              <div class="stat-info">
+                <span class="stat-value" id="stat-pending">0</span>
+                <span class="stat-label">Pendientes</span>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon" style="background: linear-gradient(135deg, #FF6B6B, #EE5A24);">
+                <span class="material-icons-round">priority_high</span>
+              </div>
+              <div class="stat-info">
+                <span class="stat-value" id="stat-high">0</span>
+                <span class="stat-label">Alta prioridad</span>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon" style="background: linear-gradient(135deg, #6C5CE7, #A29BFE);">
+                <span class="material-icons-round">schedule</span>
+              </div>
+              <div class="stat-info">
+                <span class="stat-value" id="stat-hours">0h</span>
+                <span class="stat-label">Horas planeadas</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Diario Monthly Grid -->
+          <div class="section-header" style="margin-bottom:12px">
+            <h3>📊 Panel de actividad mensual</h3>
+          </div>
+          <div class="diario-wrapper" id="diario-wrapper">
+            <div class="diario-title" id="diario-title">D I A R I O</div>
+            <div class="diario-month-nav">
+              <button class="diario-nav-btn material-icons-round" id="diario-prev">chevron_left</button>
+              <h4 id="diario-month-label"></h4>
+              <button class="diario-nav-btn material-icons-round" id="diario-next">chevron_right</button>
+            </div>
+            <div class="diario-table-wrap">
+              <table class="diario-table" id="diario-table"></table>
+            </div>
+            <!-- Add custom activity row to tracker -->
+            <div class="diario-add-row" style="margin-top: 16px; display: flex; gap: 8px; align-items: center; max-width: 480px; background: rgba(255,255,255,0.02); padding: 6px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
+              <input type="text" id="diario-new-row-label" placeholder="Nueva actividad a trackear..." style="flex: 1; padding: 6px 10px; font-size: 0.75rem; height: 30px;" />
+              <select id="diario-new-row-category" style="width: auto; font-size: 0.72rem; height: 30px; padding: 0 8px; background: var(--bg-input); border: 1px solid var(--border-medium); border-radius: var(--radius-sm); color: var(--text-primary); cursor: pointer;">
+                <option value="#48A6C8">🔵 Cuerpo / Ej.</option>
+                <option value="#3BA55D">🟢 Desarrollo</option>
+                <option value="#D1B83B">🟡 Ingresos</option>
+                <option value="#E67E22">🟠 Disfruto</option>
+              </select>
+              <button class="btn-primary" id="diario-add-row-btn" style="padding: 0 12px; height: 30px; font-size: 0.75rem; display: flex; align-items: center; justify-content: center; gap: 4px; flex-shrink: 0;" title="Añadir al Diario">
+                <span class="material-icons-round" style="font-size: 16px;">add</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Today's Timeline -->
+          <div class="section-header" style="margin-top:28px">
+            <h3>Actividades de hoy</h3>
+            <button class="btn-text" id="btn-add-from-dashboard">
+              <span class="material-icons-round">add</span> Nueva
+            </button>
+          </div>
+          <div class="timeline" id="timeline-today"></div>        </section>
+
+        <!-- ========== ACTIVITIES VIEW ========== -->
+        <section class="view" id="view-activities">
+          <div class="view-header" style="margin-bottom: 12px;">
+            <h2>Cronograma Diario</h2>
+            <div class="diario-day-nav" style="display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
+              <button class="btn-outline" id="btn-day-prev" style="padding: 6px 12px; display: flex; align-items: center; justify-content: center;">
+                <span class="material-icons-round">chevron_left</span>
+              </button>
+              <span id="label-day-current" style="font-weight: 700; font-size: 1.05rem; min-width: 180px; text-align: center; color: var(--accent-teal);"></span>
+              <button class="btn-outline" id="btn-day-next" style="padding: 6px 12px; display: flex; align-items: center; justify-content: center;">
+                <span class="material-icons-round">chevron_right</span>
+              </button>
+              <button class="btn-outline" id="btn-day-today" style="font-size: 0.8rem; padding: 6px 14px;">Hoy</button>
+            </div>
+            <div class="view-controls" style="margin-top: 16px;">
+              <div class="filter-group">
+                <button class="filter-btn active" data-filter="all">Todas</button>
+                <button class="filter-btn" data-filter="pending">Pendientes</button>
+                <button class="filter-btn" data-filter="completed">Completadas</button>
+              </div>
+            </div>
+          </div>
+          <div class="activity-list" id="activity-list"></div>
+        </section>
+
+        <!-- ========== CALENDAR VIEW ========== -->
+        <section class="view" id="view-calendar">
+          <div class="view-header"><h2>Calendario</h2></div>
+          <div class="calendar-container">
+            <div class="calendar-nav">
+              <button class="cal-nav-btn material-icons-round" id="cal-prev">chevron_left</button>
+              <h3 id="cal-month-label"></h3>
+              <button class="cal-nav-btn material-icons-round" id="cal-next">chevron_right</button>
+            </div>
+            <div class="calendar-grid">
+              <div class="cal-header">
+                <span>Lun</span><span>Mar</span><span>Mié</span><span>Jue</span><span>Vie</span><span>Sáb</span><span>Dom</span>
+              </div>
+              <div class="cal-body" id="cal-body"></div>
+            </div>
+            <div class="cal-day-detail" id="cal-day-detail">
+              <h4 id="cal-detail-title">Selecciona un día</h4>
+              <div id="cal-detail-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ========== STATS VIEW ========== -->
+        <section class="view" id="view-stats">
+          <div class="view-header"><h2>Estadísticas</h2></div>
+          <div class="stats-detail-grid">
+            <div class="detail-card">
+              <h4>Resumen semanal</h4>
+              <div class="week-bars" id="week-bars"></div>
+            </div>
+            <div class="detail-card">
+              <h4>Por prioridad</h4>
+              <div class="priority-breakdown" id="priority-breakdown"></div>
+            </div>
+            <div class="detail-card full-width">
+              <h4>Productividad (últimos 7 días)</h4>
+              <div class="productivity-chart" id="productivity-chart"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ========== SETTINGS VIEW ========== -->
+        <section class="view" id="view-settings">
+          <div class="view-header"><h2>Ajustes</h2></div>
+          <div class="settings-list">
+            <div class="settings-group">
+              <h4>Perfil</h4>
+              <div class="setting-item">
+                <div class="setting-info">
+                  <span class="material-icons-round">person</span>
+                  <div>
+                    <p class="setting-title">Tu nombre</p>
+                    <p class="setting-desc">Aparece en el saludo del dashboard</p>
+                  </div>
+                </div>
+                <input type="text" class="setting-input" id="setting-username" placeholder="Escribe tu nombre..." />
+              </div>
+            </div>
+            <div class="settings-group">
+              <h4>Notificaciones y Alarmas</h4>
+              <div class="setting-item">
+
+                <div class="setting-info">
+                  <span class="material-icons-round">notifications_active</span>
+                  <div>
+                    <p class="setting-title">Activar notificaciones</p>
+                    <p class="setting-desc">Recibe alertas cuando una actividad esté por comenzar</p>
+                  </div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="setting-notifications" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-item">
+                <div class="setting-info">
+                  <span class="material-icons-round">alarm</span>
+                  <div>
+                    <p class="setting-title">Sonido de alarma</p>
+                    <p class="setting-desc">Reproduce un tono al notificar</p>
+                  </div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="setting-alarm-sound" checked />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-item">
+                <div class="setting-info">
+                  <span class="material-icons-round">timer</span>
+                  <div>
+                    <p class="setting-title">Anticipación (minutos)</p>
+                    <p class="setting-desc">Minutos antes de la actividad para alertar</p>
+                  </div>
+                </div>
+                <select id="setting-alarm-advance" style="max-width:100px">
+                  <option value="0">0 min</option>
+                  <option value="5" selected>5 min</option>
+                  <option value="10">10 min</option>
+                  <option value="15">15 min</option>
+                  <option value="30">30 min</option>
+                </select>
+              </div>
+            </div>
+            <div class="settings-group">
+              <h4>Datos</h4>
+              <div class="setting-item">
+                <div class="setting-info">
+                  <span class="material-icons-round">download</span>
+                  <div>
+                    <p class="setting-title">Exportar datos</p>
+                    <p class="setting-desc">Descargar actividades en JSON</p>
+                  </div>
+                </div>
+                <button class="btn-outline" id="btn-export">Exportar</button>
+              </div>
+              <div class="setting-item">
+                <div class="setting-info">
+                  <span class="material-icons-round">upload</span>
+                  <div>
+                    <p class="setting-title">Importar datos</p>
+                    <p class="setting-desc">Restaurar desde archivo JSON</p>
+                  </div>
+                </div>
+                <button class="btn-outline" id="btn-import">Importar</button>
+                <input type="file" id="import-file" accept=".json" style="display:none" />
+              </div>
+              <div class="setting-item">
+                <div class="setting-info">
+                  <span class="material-icons-round">table_chart</span>
+                  <div>
+                    <p class="setting-title">Cargar Rutina Excel</p>
+                    <p class="setting-desc">Distribuye tu rutina de semana/fin de semana en el mes</p>
+                  </div>
+                </div>
+                <button class="btn-outline" id="btn-open-routine-modal">Cargar Rutina</button>
+              </div>
+              <div class="setting-item danger">
+                <div class="setting-info">
+                  <span class="material-icons-round">delete_forever</span>
+                  <div>
+                    <p class="setting-title">Borrar todos los datos</p>
+                    <p class="setting-desc">Esta acción no se puede deshacer</p>
+                  </div>
+                </div>
+                <button class="btn-danger" id="btn-clear-data">Borrar</button>
+              </div>
+              <div class="setting-item">
+                <div class="setting-info">
+                  <span class="material-icons-round">restart_alt</span>
+                  <div>
+                    <p class="setting-title">Restaurar Rutina Base</p>
+                    <p class="setting-desc">Carga la rutina base de la semana actual (borra datos existentes)</p>
+                  </div>
+                </div>
+                <button class="btn-outline" id="btn-restore-routine">Restaurar</button>
+              </div>
+            </div>
+            <div class="settings-group">
+              <h4>Asistente IA (Groq / n8n)</h4>
+              <div class="setting-item">
+                <div class="setting-info">
+                  <span class="material-icons-round">vpn_key</span>
+                  <div>
+                    <p class="setting-title">Groq API Key</p>
+                    <p class="setting-desc">Clave gratuita de Groq (Llama 3.3)</p>
+                  </div>
+                </div>
+                <input type="password" class="setting-input" id="setting-groq-key" placeholder="gsk_..." />
+              </div>
+              <div class="setting-item">
+                <div class="setting-info">
+                  <span class="material-icons-round">alt_route</span>
+                  <div>
+                    <p class="setting-title">Webhook de n8n</p>
+                    <p class="setting-desc">URL del webhook de n8n (opcional)</p>
+                  </div>
+                </div>
+                <input type="text" class="setting-input" id="setting-n8n-url" placeholder="http://localhost:5678/..." />
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+
+    <!-- FAB -->
+    <button class="fab" id="fab-add">
+      <span class="material-icons-round">add</span>
+    </button>
+
+    <!-- Modal: Add/Edit Activity -->
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" id="modal-activity">
+        <div class="modal-header">
+          <h3 id="modal-title">Nueva Actividad</h3>
+          <button class="modal-close material-icons-round" id="modal-close">close</button>
+        </div>
+        <form id="activity-form" class="modal-body">
+          <input type="hidden" id="form-id" />
+          <div class="form-group">
+            <label for="form-title">Título *</label>
+            <input type="text" id="form-title" placeholder="¿Qué vas a hacer?" required />
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="form-date">Fecha</label>
+              <input type="date" id="form-date" />
+            </div>
+            <div class="form-group">
+              <label for="form-start">Hora inicio</label>
+              <input type="time" id="form-start" />
+            </div>
+            <div class="form-group">
+              <label for="form-end">Hora fin</label>
+              <input type="time" id="form-end" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="form-desc">Descripción</label>
+            <textarea id="form-desc" rows="3" placeholder="Notas adicionales..."></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="form-priority">Prioridad</label>
+              <select id="form-priority">
+                <option value="low">🟢 Baja</option>
+                <option value="medium" selected>🟡 Media</option>
+                <option value="high">🔴 Alta</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="form-tags">Etiquetas</label>
+              <input type="text" id="form-tags" placeholder="trabajo, personal..." />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="form-alarm" checked />
+              <span>🔔 Activar alarma para esta actividad</span>
+            </label>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn-secondary" id="btn-cancel">Cancelar</button>
+            <button type="submit" class="btn-primary">Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Modal: Confirm Delete -->
+    <div class="modal-overlay" id="delete-overlay">
+      <div class="modal modal-sm">
+        <div class="modal-header">
+          <h3>Confirmar eliminación</h3>
+          <button class="modal-close material-icons-round" id="delete-close">close</button>
+        </div>
+        <div class="modal-body">
+          <p>¿Estás seguro de que quieres eliminar esta actividad?</p>
+          <div class="modal-actions">
+            <button class="btn-secondary" id="delete-cancel">Cancelar</button>
+            <button class="btn-danger" id="delete-confirm">Eliminar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Search Overlay -->
+    <div class="search-overlay" id="search-overlay">
+      <div class="search-container">
+        <span class="material-icons-round search-icon">search</span>
+        <input type="text" id="search-input" placeholder="Buscar actividades..." />
+        <button class="search-close material-icons-round" id="search-close">close</button>
+      </div>
+      <div class="search-results" id="search-results"></div>
+    </div>
+
+    <!-- Notification Panel -->
+    <div class="notif-panel" id="notif-panel">
+      <div class="notif-panel-header">
+        <h4>Notificaciones</h4>
+        <button class="btn-link" id="notif-clear-all">Limpiar</button>
+      </div>
+      <div class="notif-list" id="notif-list">
+        <p class="notif-empty">Sin notificaciones</p>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast">
+      <span class="toast-icon material-icons-round" id="toast-icon">check_circle</span>
+      <span class="toast-msg" id="toast-msg"></span>
+    </div>
+
+    <!-- Bottom Nav (Mobile) -->
+    <nav class="bottom-nav" id="bottom-nav">
+      <button class="bnav-item active" data-view="dashboard">
+        <span class="material-icons-round">dashboard</span>
+        <span>Inicio</span>
+      </button>
+      <button class="bnav-item" data-view="activities">
+        <span class="material-icons-round">checklist</span>
+        <span>Tareas</span>
+      </button>
+      <button class="bnav-item" data-view="calendar">
+        <span class="material-icons-round">calendar_month</span>
+        <span>Calendario</span>
+      </button>
+      <button class="bnav-item" data-view="stats">
+        <span class="material-icons-round">analytics</span>
+        <span>Stats</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Modal: Import Routine -->
+  <div class="modal-overlay" id="routine-overlay">
+    <div class="modal" id="modal-routine">
+      <div class="modal-header">
+        <h3>Cargar Rutina Excel</h3>
+        <button class="modal-close material-icons-round" id="routine-close">close</button>
+      </div>
+      <div class="modal-body">
+        <p class="setting-desc" style="margin-bottom: 15px; color: var(--text-secondary);">
+          Sube un archivo Excel (.xlsx) con dos hojas: <b>Semana</b> (Lunes a Viernes) y <b>Fin_de_Semana</b> (Sábado y Domingo). Las actividades se distribuirán automáticamente en el rango de fechas seleccionado.
+        </p>
+        <div style="margin-bottom: 20px;">
+          <button class="btn-outline" id="btn-download-template" type="button" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <span class="material-icons-round">download</span> Descargar Plantilla Excel
+          </button>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="routine-start-date">Fecha Inicio</label>
+            <input type="date" id="routine-start-date" required />
+          </div>
+          <div class="form-group">
+            <label for="routine-end-date">Fecha Fin</label>
+            <input type="date" id="routine-end-date" required />
+          </div>
+        </div>
+        <div class="form-group" style="margin-top: 15px;">
+          <label class="checkbox-label">
+            <input type="checkbox" id="routine-clear-existing" checked />
+            <span>Limpiar actividades existentes en este rango de fechas</span>
+          </label>
+        </div>
+        <div class="form-group" style="margin-top: 20px;">
+          <div class="file-drop-area" id="routine-drop-area" style="border: 2px dashed var(--border-medium); padding: 30px; text-align: center; border-radius: var(--radius-md); cursor: pointer; background: rgba(255,255,255,0.02); transition: var(--transition);">
+            <span class="material-icons-round" style="font-size: 40px; color: var(--accent-teal); margin-bottom: 10px;">upload_file</span>
+            <p style="font-weight: 500;">Arrastra tu archivo Excel aquí o haz clic para buscar</p>
+            <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 5px;">Soporta archivos .xlsx o .xls</p>
+            <input type="file" id="routine-file-input" accept=".xlsx, .xls" style="display: none;" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="routine-cancel">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chat Widget (AI Agent) -->
+  <div class="chat-widget" id="chat-widget">
+    <button class="chat-toggle" id="chat-toggle" title="Preguntar al Agente IA">
+      <span class="material-icons-round">smart_toy</span>
+      <span class="chat-badge" id="chat-badge" style="display: none;">1</span>
+    </button>
+    <div class="chat-window" id="chat-window">
+      <div class="chat-header">
+        <div class="chat-agent-info">
+          <span class="material-icons-round chat-agent-icon" style="color: var(--accent-teal);">smart_toy</span>
+          <div>
+            <h4 style="font-size: 0.9rem; margin: 0; color: var(--text-primary);">Agente de Diario IA</h4>
+            <span class="chat-agent-status" style="font-size: 0.7rem; color: var(--text-muted);">En línea (Groq Llama 3.3)</span>
+          </div>
+        </div>
+        <button class="chat-close material-icons-round" id="chat-close-btn" style="background: none; border: none; color: var(--text-muted); cursor: pointer;">close</button>
+      </div>
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-message agent">
+          Hola 👋 Soy tu agente de productividad. ¿En qué te puedo ayudar hoy? Puedes pedirme cosas como:
+          <ul style="margin-top: 8px; padding-left: 20px; font-size: 0.8rem; line-height: 1.4;">
+            <li>"¿Qué actividades tengo hoy?"</li>
+            <li>"Mueve la reunión de las 9 a las 11"</li>
+            <li>"Cancela el ejercicio de hoy"</li>
+            <li>"Reorganiza mi tarde"</li>
+          </ul>
+        </div>
+      </div>
+      <div class="chat-input-area">
+        <textarea id="chat-input" placeholder="Pregunta algo al agente..." rows="1"></textarea>
+        <button class="chat-send material-icons-round" id="chat-send-btn">send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SheetJS & App script -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="app.js?v=3"></script>
+</body>
+</html>

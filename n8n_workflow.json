@@ -1,0 +1,112 @@
+{
+  "name": "Agente de Diario Inteligente - Groq",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "app-agenda-agent",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "webhook-id",
+      "name": "Webhook Recibir Mensaje"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer TU_GROQ_API_KEY_AQUI"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "llama-3.3-70b-versatile"
+            },
+            {
+              "name": "temperature",
+              "value": "0.1"
+            },
+            {
+              "name": "response_format.type",
+              "value": "json_object"
+            }
+          ]
+        },
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"temperature\": 0.1,\n  \"response_format\": { \"type\": \"json_object\" },\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Eres un asistente de productividad para la app 'Mi Diario'. Debes responder en formato JSON válido con los campos:\\n1. \\\"reply\\\" (string): Tu respuesta al usuario en español, de forma amable y concisa.\\n2. \\\"actions\\\" (array de objetos): Acciones a realizar en la base de datos de actividades.\\n\\nAcciones permitidas:\\n- { \\\"type\\\": \\\"add\\\", \\\"title\\\": string, \\\"date\\\": \\\"YYYY-MM-DD\\\", \\\"startTime\\\": \\\"HH:MM\\\" (opcional), \\\"endTime\\\": \\\"HH:MM\\\" (opcional), \\\"priority\\\": \\\"high\\\"|\\\"medium\\\"|\\\"low\\\" (opcional), \\\"tags\\\": [string] (opcional), \\\"description\\\": string (opcional) }\\n- { \\\"type\\\": \\\"cancel\\\", \\\"id\\\": string }\\n- { \\\"type\\\": \\\"complete\\\", \\\"id\\\": string }\\n- { \\\"type\\\": \\\"uncomplete\\\", \\\"id\\\": string }\\n- { \\\"type\\\": \\\"update\\\", \\\"id\\\": string, ...campos... }\\n\\nLa fecha y hora actuales son: \" + new Date().toLocaleString() + \".\\nActividades relevantes en base de datos:\\n\" + JSON.stringify($json.body.activities) + \"\\n\\nSi el usuario pide cancelar, cambiar horas o añadir actividades, traduce esto a los objetos correspondientes en \\\"actions\\\". Si solo es una consulta, deja \\\"actions\\\" vacío.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"={{ $json.body.message }}\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "id": "http-request-id",
+      "name": "Groq API Request"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        0
+      ],
+      "id": "respond-to-webhook-id",
+      "name": "Responder a Webhook"
+    }
+  ],
+  "connections": {
+    "Webhook Recibir Mensaje": {
+      "main": [
+        [
+          {
+            "node": "Groq API Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq API Request": {
+      "main": [
+        [
+          {
+            "node": "Responder a Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "n8n-workflow-v1",
+  "id": "n8n-workflow-diario"
+}
