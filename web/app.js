@@ -933,8 +933,8 @@
     if (groqKeyInput) {
       groqKeyInput.value = settings.groqKey || '';
       groqKeyInput.addEventListener('input', () => {
-        settings.groqKey = groqKeyInput.value.trim();
-        saveSettings(settings);
+        $('#settings-save-status') && ($('#settings-save-status').textContent = 'Sin guardar — haz clic en Guardar');
+        $('#settings-save-status') && ($('#settings-save-status').style.color = 'var(--accent-amber)');
       });
     }
 
@@ -942,8 +942,45 @@
     if (n8nUrlInput) {
       n8nUrlInput.value = settings.n8nUrl || '';
       n8nUrlInput.addEventListener('input', () => {
-        settings.n8nUrl = n8nUrlInput.value.trim();
+        $('#settings-save-status') && ($('#settings-save-status').textContent = 'Sin guardar — haz clic en Guardar');
+        $('#settings-save-status') && ($('#settings-save-status').style.color = 'var(--accent-amber)');
+      });
+    }
+
+    // Update status badge on load based on whether key exists
+    const statusEl = $('#settings-save-status');
+    if (statusEl) {
+      if (settings.groqKey) {
+        statusEl.textContent = '✅ Configuración guardada correctamente';
+        statusEl.style.color = 'var(--accent-teal)';
+      } else {
+        statusEl.textContent = 'Ingresa tu API Key y guarda';
+        statusEl.style.color = 'var(--text-muted)';
+      }
+    }
+
+    // Save button for IA settings
+    const btnSaveAI = $('#btn-save-ai-settings');
+    if (btnSaveAI) {
+      btnSaveAI.addEventListener('click', () => {
+        if (groqKeyInput) {
+          settings.groqKey = groqKeyInput.value.trim();
+        }
+        if (n8nUrlInput) {
+          settings.n8nUrl = n8nUrlInput.value.trim();
+        }
         saveSettings(settings);
+        const st = $('#settings-save-status');
+        if (st) {
+          if (settings.groqKey) {
+            st.textContent = '✅ Configuración guardada correctamente';
+            st.style.color = 'var(--accent-teal)';
+          } else {
+            st.textContent = '⚠️ API Key vacía — el agente no funcionará';
+            st.style.color = 'var(--accent-amber)';
+          }
+        }
+        showToast('Configuración guardada ✓', 'check_circle', 'var(--accent-teal)');
       });
     }
 
