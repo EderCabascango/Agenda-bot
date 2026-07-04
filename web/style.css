@@ -760,9 +760,6 @@ input:focus, select:focus, textarea:focus {
   background: rgba(255,255,255,0.03) !important;
   font-weight: 700;
   font-size: 0.65rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   position: relative;
   border-radius: 5px;
   border: 1px dashed rgba(255,255,255,0.08);
@@ -770,6 +767,9 @@ input:focus, select:focus, textarea:focus {
 .diario-table .act-cell.missed::after {
   content: '✕';
   position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   font-family: inherit;
   font-weight: 900;
   color: var(--text-muted) !important;
