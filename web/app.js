@@ -172,6 +172,7 @@
     return s.toLowerCase()
             .normalize("NFD")
             .replace(/[\u0300-\u036f]/g, "")
+            .replace(/\s+/g, ' ')
             .trim();
   }
 
@@ -181,9 +182,10 @@
       if (!stored) return DEFAULT_ROWS;
       let parsed = JSON.parse(stored);
       
-      // Remove duplicates by normalized label name
+      // Remove duplicates by normalized label name and filter out empty labels
       const seen = new Set();
       parsed = parsed.filter(r => {
+        if (!r.label || r.label.trim() === '') return false;
         const norm = normalizeLabel(r.label);
         if (seen.has(norm)) return false;
         seen.add(norm);
