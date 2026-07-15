@@ -147,9 +147,25 @@
     attachTimelineEvents(timeline);
   }
 
-  // ── Diario Grid state ──
-  let diarioYear  = new Date().getFullYear();
-  let diarioMonth = new Date().getMonth(); // 0-indexed
+  // ── Diario Grid state (15th of current month to 14th of next month) ──
+  const initialDate = new Date();
+  if (initialDate.getDate() < 15) {
+    initialDate.setMonth(initialDate.getMonth() - 1);
+  }
+  let diarioYear  = initialDate.getFullYear();
+  let diarioMonth = initialDate.getMonth(); // 0-indexed
+
+  function getDiarioCycleDates(year, month) {
+    const dates = [];
+    const start = new Date(year, month, 15);
+    const end = new Date(year, month + 1, 14);
+    let curr = new Date(start);
+    while (curr <= end) {
+      dates.push(new Date(curr));
+      curr.setDate(curr.getDate() + 1);
+    }
+    return dates;
+  }
 
   const TRACKED_ROWS_KEY = 'diary_tracked_rows';
   const DEFAULT_ROWS = [
@@ -217,22 +233,19 @@
 
   let diarioRows = loadTrackedRows();
 
-  // ── Diario Grid Rendering ──
+  // ── Diario Grid Rendering (15th to 14th) ──
   function renderDiarioGrid() {
     const table = $('#diario-table');
     const monthLabel = $('#diario-month-label');
     if (!table) return;
 
-    const today = new Date();
-    const todayDay   = today.getDate();
-    const todayMonth = today.getMonth();
-    const todayYear  = today.getFullYear();
-
-    const daysInMonth = new Date(diarioYear, diarioMonth + 1, 0).getDate();
-    const isCurrentMonth = diarioMonth === todayMonth && diarioYear === todayYear;
+    const cycleDates = getDiarioCycleDates(diarioYear, diarioMonth);
 
     if (monthLabel) {
-      monthLabel.textContent = `${MONTHS_ES[diarioMonth]} ${diarioYear}`;
+      const nextMonth = (diarioMonth + 1) % 12;
+      const displayNextMonthName = MONTHS_ES[nextMonth].substring(0, 3);
+      const displayCurrentMonthName = MONTHS_ES[diarioMonth].substring(0, 3);
+      monthLabel.textContent = `15 ${displayCurrentMonthName} - 14 ${displayNextMonthName} ${diarioYear}`;
     }
 
     // Build a lookup: dateStr → Set of lowercased activity titles that are completed
@@ -267,12 +280,13 @@
     // Build HTML
     let html = '<thead><tr>';
     // First cell: empty corner
-    html += `<th class="act-label" style="background:var(--bg-secondary);"></th>`;
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dateStr = `${diarioYear}-${String(diarioMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-      const isToday = isCurrentMonth && d === todayDay;
-      html += `<th class="day-head${isToday ? ' is-today' : ''}" data-date="${dateStr}">${d}</th>`;
-    }
+    html += `<th class="act-label" style="background:var(--bg-secondary); border-bottom: 2px solid var(--border-medium);"></th>`;
+    cycleDates.forEach(dateObj => {
+      const dateStr = toDateStr(dateObj);
+      const d = dateObj.getDate();
+      const isToday = dateStr === todayStr();
+      html += `<th class="day-head${isToday ? ' is-today' : ''}" data-date="${dateStr}" style="border-bottom: 2px solid var(--border-medium);">${d}</th>`;
+    });
     html += '</tr></thead><tbody>';
 
     diarioRows.forEach(row => {
@@ -280,10 +294,12 @@
       // Label cell
       html += `<td class="act-label" style="background:${row.color || '#5B6FA0'};color:#fff;" title="${row.label}">${row.label}</td>`;
 
-      for (let d = 1; d <= daysInMonth; d++) {
-        const dateStr = `${diarioYear}-${String(diarioMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-        const isFuture = isCurrentMonth && d > todayDay;
-        const isToday  = isCurrentMonth && d === todayDay;
+      cycleDates.forEach(dateObj => {
+        const dateStr = toDateStr(dateObj);
+        const d = dateObj.getDate();
+        const m = dateObj.getMonth() + 1;
+        const isFuture = dateStr > todayStr();
+        const isToday  = dateStr === todayStr();
         const done = isDone(dateStr, row.keys);
         const missed = isRowMissed(dateStr, row.keys);
         const has  = hasAct(dateStr, row.keys);
@@ -294,9 +310,9 @@
         if (isFuture) cls += ' is-future';
         if (isToday)  cls += ' is-today-col';
 
-        const tooltip = `${row.label} – ${d}/${diarioMonth+1}: ${done ? '✅ completado' : missed ? '✕ no realizado' : has ? '⬜ pendiente' : '—'}`;
+        const tooltip = `${row.label} – ${d}/${m}: ${done ? '✅ completado' : missed ? '✕ no realizado' : has ? '⬜ pendiente' : '—'}`;
         html += `<td class="${cls}" data-date="${dateStr}" data-row="${row.label}" title="${tooltip}"></td>`;
-      }
+      });
       html += `</tr>`;
     });
 
@@ -1844,110 +1860,121 @@ SIEMPRE devuelve un JSON válido.
     activities = [
       // ══ LUNES ══
       block(lun, '00:00', '06:30', 'Dormir', 'high', ['salud'], 'Sueño reparador'),
-      block(lun, '06:30', '07:30', 'Calistenia', 'high', ['salud','ejercicio'], 'Rutina de calistenia mañanera'),
+      block(lun, '06:30', '07:30', 'Calistenia', 'high', ['salud','ejercicio'], ''),
       block(lun, '07:30', '08:00', 'Desayunar', 'medium', ['personal'], ''),
-      block(lun, '08:00', '09:00', 'Inglés', 'high', ['estudio','idiomas'], 'Práctica de inglés'),
-      block(lun, '09:00', '12:30', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(lun, '12:30', '14:00', 'Almuerzo', 'low', ['personal'], ''),
-      block(lun, '14:00', '15:30', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(lun, '15:30', '16:40', 'Benja', 'medium', ['personal','familia'], 'Tiempo con Benja'),
-      block(lun, '16:40', '17:50', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(lun, '18:20', '19:00', 'Benja', 'medium', ['personal','familia'], 'Tiempo con Benja'),
-      block(lun, '19:00', '21:00', 'AI-300', 'high', ['estudio','ia'], 'Curso AI-300'),
-      block(lun, '21:00', '22:00', 'Entretenimiento', 'low', ['personal'], 'Descanso y entretenimiento'),
-      block(lun, '22:00', '22:30', 'Leer', 'medium', ['personal','lectura'], 'Lectura de libro'),
-      block(lun, '22:30', '23:00', 'Meditar', 'medium', ['personal','bienestar'], 'Meditación de cierre'),
+      block(lun, '08:00', '10:00', 'Inglés', 'high', ['estudio','idiomas'], ''),
+      block(lun, '10:00', '10:45', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(lun, '10:45', '11:10', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(lun, '11:10', '11:45', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(lun, '12:00', '13:00', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(lun, '13:00', '14:00', 'Almuerzo', 'low', ['personal'], ''),
+      block(lun, '14:00', '15:10', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(lun, '15:10', '15:40', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(lun, '15:40', '16:50', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(lun, '16:50', '17:20', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(lun, '17:20', '19:00', 'Estudiar/Proyectos', 'high', ['estudio','proyectos'], ''),
+      block(lun, '19:00', '21:00', 'AI-300', 'high', ['estudio','ia'], ''),
+      block(lun, '21:00', '22:00', 'Entretenimiento', 'low', ['personal'], ''),
+      block(lun, '22:00', '23:00', 'Libro/Meditar', 'medium', ['personal','lectura'], ''),
 
       // ══ MARTES ══
       block(mar, '00:00', '06:30', 'Dormir', 'high', ['salud'], 'Sueño reparador'),
-      block(mar, '06:30', '07:30', 'Correr', 'high', ['salud','ejercicio'], 'Carrera matutina'),
+      block(mar, '06:30', '07:30', 'Correr', 'high', ['salud','ejercicio'], ''),
       block(mar, '07:30', '08:00', 'Desayunar', 'medium', ['personal'], ''),
-      block(mar, '08:00', '09:00', 'Inglés', 'high', ['estudio','idiomas'], 'Práctica de inglés'),
-      block(mar, '09:00', '12:30', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(mar, '12:30', '14:00', 'Almuerzo', 'low', ['personal'], ''),
-      block(mar, '14:00', '15:30', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(mar, '15:30', '16:40', 'Benja', 'medium', ['personal','familia'], 'Tiempo con Benja'),
-      block(mar, '16:40', '17:50', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(mar, '18:20', '19:00', 'Benja', 'medium', ['personal','familia'], 'Tiempo con Benja'),
-      block(mar, '19:00', '21:00', 'MLOPS', 'high', ['estudio','ia'], 'Estudio MLOps'),
-      block(mar, '21:00', '22:00', 'Entretenimiento', 'low', ['personal'], 'Descanso y entretenimiento'),
-      block(mar, '22:00', '22:30', 'Leer', 'medium', ['personal','lectura'], 'Lectura de libro'),
-      block(mar, '22:30', '23:00', 'Meditar', 'medium', ['personal','bienestar'], 'Meditación de cierre'),
+      block(mar, '08:00', '10:00', 'Inglés', 'high', ['estudio','idiomas'], ''),
+      block(mar, '10:00', '10:45', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(mar, '10:45', '11:10', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(mar, '11:10', '11:45', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(mar, '12:00', '13:00', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(mar, '13:00', '14:00', 'Almuerzo', 'low', ['personal'], ''),
+      block(mar, '14:00', '15:10', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(mar, '15:10', '15:40', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(mar, '15:40', '16:50', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(mar, '16:50', '17:20', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(mar, '17:20', '19:00', 'Estudiar/Proyectos', 'high', ['estudio','proyectos'], ''),
+      block(mar, '19:00', '21:00', 'MLOPS', 'high', ['estudio','ia'], ''),
+      block(mar, '21:00', '22:00', 'Entretenimiento', 'low', ['personal'], ''),
+      block(mar, '22:00', '23:00', 'Libro/Meditar', 'medium', ['personal','lectura'], ''),
 
       // ══ MIÉRCOLES ══
       block(mie, '00:00', '06:30', 'Dormir', 'high', ['salud'], 'Sueño reparador'),
-      block(mie, '06:30', '07:30', 'Calistenia', 'high', ['salud','ejercicio'], 'Rutina de calistenia mañanera'),
+      block(mie, '06:30', '07:30', 'Calistenia', 'high', ['salud','ejercicio'], ''),
       block(mie, '07:30', '08:00', 'Desayunar', 'medium', ['personal'], ''),
-      block(mie, '08:00', '09:00', 'Inglés', 'high', ['estudio','idiomas'], 'Práctica de inglés'),
-      block(mie, '09:00', '12:30', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(mie, '12:30', '14:00', 'Almuerzo', 'low', ['personal'], ''),
-      block(mie, '14:00', '15:30', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(mie, '15:30', '16:40', 'Benja', 'medium', ['personal','familia'], 'Tiempo con Benja'),
-      block(mie, '16:40', '17:50', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(mie, '18:20', '19:00', 'Benja', 'medium', ['personal','familia'], 'Tiempo con Benja'),
-      block(mie, '19:00', '21:00', 'AI-300', 'high', ['estudio','ia'], 'Curso AI-300'),
-      block(mie, '21:00', '22:00', 'Entretenimiento', 'low', ['personal'], 'Descanso y entretenimiento'),
-      block(mie, '22:00', '22:30', 'Leer', 'medium', ['personal','lectura'], 'Lectura de libro'),
-      block(mie, '22:30', '23:00', 'Meditar', 'medium', ['personal','bienestar'], 'Meditación de cierre'),
+      block(mie, '08:00', '10:00', 'Inglés', 'high', ['estudio','idiomas'], ''),
+      block(mie, '10:00', '10:45', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(mie, '10:45', '11:10', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(mie, '11:10', '11:45', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(mie, '12:00', '13:00', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(mie, '13:00', '14:00', 'Almuerzo', 'low', ['personal'], ''),
+      block(mie, '14:00', '15:10', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(mie, '15:10', '15:40', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(mie, '15:40', '16:50', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(mie, '16:50', '17:20', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(mie, '17:20', '19:00', 'Estudiar/Proyectos', 'high', ['estudio','proyectos'], ''),
+      block(mie, '19:00', '21:00', 'AI-300', 'high', ['estudio','ia'], ''),
+      block(mie, '21:00', '22:00', 'Entretenimiento', 'low', ['personal'], ''),
+      block(mie, '22:00', '23:00', 'Libro/Meditar', 'medium', ['personal','lectura'], ''),
 
       // ══ JUEVES ══
       block(jue, '00:00', '06:30', 'Dormir', 'high', ['salud'], 'Sueño reparador'),
-      block(jue, '06:30', '07:30', 'Correr', 'high', ['salud','ejercicio'], 'Carrera matutina'),
+      block(jue, '06:30', '07:30', 'Correr', 'high', ['salud','ejercicio'], ''),
       block(jue, '07:30', '08:00', 'Desayunar', 'medium', ['personal'], ''),
-      block(jue, '08:00', '09:00', 'Inglés', 'high', ['estudio','idiomas'], 'Práctica de inglés'),
-      block(jue, '09:00', '12:30', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(jue, '12:30', '14:00', 'Almuerzo', 'low', ['personal'], ''),
-      block(jue, '14:00', '15:30', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(jue, '15:30', '16:40', 'Benja', 'medium', ['personal','familia'], 'Tiempo con Benja'),
-      block(jue, '16:40', '17:50', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(jue, '18:20', '19:00', 'Benja', 'medium', ['personal','familia'], 'Tiempo con Benja'),
-      block(jue, '19:00', '21:00', 'MLOPS', 'high', ['estudio','ia'], 'Estudio MLOps'),
-      block(jue, '21:00', '22:00', 'Entretenimiento', 'low', ['personal'], 'Descanso y entretenimiento'),
-      block(jue, '22:00', '22:30', 'Leer', 'medium', ['personal','lectura'], 'Lectura de libro'),
-      block(jue, '22:30', '23:00', 'Meditar', 'medium', ['personal','bienestar'], 'Meditación de cierre'),
+      block(jue, '08:00', '10:00', 'Inglés', 'high', ['estudio','idiomas'], ''),
+      block(jue, '10:00', '10:45', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(jue, '10:45', '11:10', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(jue, '11:10', '11:45', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(jue, '12:00', '13:00', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(jue, '13:00', '14:00', 'Almuerzo', 'low', ['personal'], ''),
+      block(jue, '14:00', '15:10', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(jue, '15:10', '15:40', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(jue, '15:40', '16:50', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(jue, '16:50', '17:20', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(jue, '17:20', '19:00', 'Estudiar/Proyectos', 'high', ['estudio','proyectos'], ''),
+      block(jue, '19:00', '21:00', 'MLOPS', 'high', ['estudio','ia'], ''),
+      block(jue, '21:00', '22:00', 'Entretenimiento', 'low', ['personal'], ''),
+      block(jue, '22:00', '23:00', 'Libro/Meditar', 'medium', ['personal','lectura'], ''),
 
       // ══ VIERNES ══
       block(vie, '00:00', '06:30', 'Dormir', 'high', ['salud'], 'Sueño reparador'),
-      block(vie, '06:30', '07:30', 'Calistenia', 'high', ['salud','ejercicio'], 'Rutina de calistenia mañanera'),
+      block(vie, '06:30', '07:30', 'Calistenia', 'high', ['salud','ejercicio'], ''),
       block(vie, '07:30', '08:00', 'Desayunar', 'medium', ['personal'], ''),
-      block(vie, '08:00', '09:00', 'Inglés', 'high', ['estudio','idiomas'], 'Práctica de inglés'),
-      block(vie, '09:00', '12:30', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(vie, '12:30', '14:00', 'Almuerzo', 'low', ['personal'], ''),
-      block(vie, '14:00', '15:30', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(vie, '15:30', '16:40', 'Benja', 'medium', ['personal','familia'], 'Tiempo con Benja'),
-      block(vie, '16:40', '17:50', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(vie, '18:20', '19:00', 'Benja', 'medium', ['personal','familia'], 'Tiempo con Benja'),
-      block(vie, '19:00', '21:00', 'AI-300', 'high', ['estudio','ia'], 'Curso AI-300'),
-      block(vie, '21:00', '22:00', 'Entretenimiento', 'low', ['personal'], 'Descanso y entretenimiento'),
-      block(vie, '22:00', '22:30', 'Leer', 'medium', ['personal','lectura'], 'Lectura de libro'),
-      block(vie, '22:30', '23:00', 'Meditar', 'medium', ['personal','bienestar'], 'Meditación de cierre'),
+      block(vie, '08:00', '10:00', 'Inglés', 'high', ['estudio','idiomas'], ''),
+      block(vie, '10:00', '10:45', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(vie, '10:45', '11:10', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(vie, '11:10', '11:45', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(vie, '12:00', '13:00', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(vie, '13:00', '14:00', 'Almuerzo', 'low', ['personal'], ''),
+      block(vie, '14:00', '15:10', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(vie, '15:10', '15:40', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(vie, '15:40', '16:50', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(vie, '16:50', '17:20', 'Benja Recorrido', 'medium', ['personal','familia'], ''),
+      block(vie, '17:20', '19:00', 'Estudiar/Proyectos', 'high', ['estudio','proyectos'], ''),
+      block(vie, '19:00', '21:00', 'AI-300', 'high', ['estudio','ia'], ''),
+      block(vie, '21:00', '22:00', 'Entretenimiento', 'low', ['personal'], ''),
+      block(vie, '22:00', '23:00', 'Libro/Meditar', 'medium', ['personal','lectura'], ''),
 
       // ══ SÁBADO ══
       block(sab, '00:00', '06:30', 'Dormir', 'high', ['salud'], 'Sueño reparador'),
-      block(sab, '06:30', '07:30', 'Correr', 'high', ['salud','ejercicio'], 'Carrera matutina'),
+      block(sab, '06:30', '07:30', 'Correr', 'high', ['salud','ejercicio'], ''),
       block(sab, '07:30', '08:00', 'Desayunar', 'medium', ['personal'], ''),
-      block(sab, '09:00', '12:30', 'MLOPS', 'high', ['estudio','ia'], 'Estudio MLOps – bloque largo'),
-      block(sab, '12:30', '14:00', 'Almuerzo', 'low', ['personal'], ''),
-      block(sab, '14:00', '15:30', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(sab, '15:30', '16:40', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(sab, '16:40', '17:50', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(sab, '18:20', '19:00', 'Fuyu', 'high', ['trabajo','fuyu'], 'Trabajo en proyecto Fuyu'),
-      block(sab, '19:00', '21:00', 'Entretenimiento', 'low', ['personal'], 'Descanso y entretenimiento'),
-      block(sab, '21:00', '22:00', 'Entretenimiento', 'low', ['personal'], 'Descanso y entretenimiento'),
-      block(sab, '22:00', '22:30', 'Leer', 'medium', ['personal','lectura'], 'Lectura de libro'),
-      block(sab, '22:30', '23:00', 'Meditar', 'medium', ['personal','bienestar'], 'Meditación de cierre'),
+      block(sab, '08:00', '10:00', 'Inglés', 'high', ['estudio','idiomas'], ''),
+      block(sab, '10:00', '11:45', 'Fuyu', 'high', ['trabajo','fuyu'], ''),
+      block(sab, '12:00', '13:00', 'Entretenimiento', 'low', ['personal'], ''),
+      block(sab, '13:00', '14:00', 'Almuerzo', 'low', ['personal'], ''),
+      block(sab, '14:00', '15:10', 'Entretenimiento', 'low', ['personal'], ''),
+      block(sab, '15:10', '19:00', 'Estudiar/Proyectos', 'high', ['estudio','proyectos'], ''),
+      block(sab, '19:00', '22:00', 'Entretenimiento', 'low', ['personal'], ''),
+      block(sab, '22:00', '23:00', 'Entretenimiento', 'low', ['personal'], ''),
 
       // ══ DOMINGO ══
-      block(dom, '00:00', '07:30', 'Dormir', 'high', ['salud'], 'Sueño largo reparador'),
+      block(dom, '00:00', '07:30', 'Dormir', 'high', ['salud'], 'Sueño reparador'),
       block(dom, '07:30', '08:00', 'Desayunar', 'medium', ['personal'], ''),
-      block(dom, '08:00', '09:00', 'AI-300', 'high', ['estudio','ia'], 'Curso AI-300'),
-      block(dom, '09:00', '12:30', 'Estudio', 'high', ['estudio'], 'Bloque de estudio libre'),
-      block(dom, '12:30', '14:00', 'Almuerzo', 'low', ['personal'], ''),
-      block(dom, '14:00', '15:30', 'Leer', 'low', ['personal','bienestar'], 'Lectura de libro'),
-      block(dom, '15:30', '19:00', 'Entretenimiento', 'low', ['personal'], 'Descanso y entretenimiento'),
-      block(dom, '19:00', '21:00', 'Entretenimiento', 'low', ['personal'], 'Descanso y entretenimiento'),
-      block(dom, '21:00', '22:00', 'Entretenimiento', 'low', ['personal'], 'Descanso y entretenimiento'),
-      block(dom, '22:00', '23:00', 'Planificación', 'high', ['trabajo','personal'], 'Planificación de la semana siguiente'),
+      block(dom, '08:00', '10:00', 'Libro/Meditar', 'medium', ['personal','lectura','bienestar'], ''),
+      block(dom, '10:00', '10:45', 'Libro', 'medium', ['personal','lectura'], ''),
+      block(dom, '10:45', '13:00', 'Estudiar/Proyectos', 'high', ['estudio','proyectos'], ''),
+      block(dom, '13:00', '14:00', 'Almuerzo', 'low', ['personal'], ''),
+      block(dom, '14:00', '22:00', 'Entretenimiento', 'low', ['personal'], ''),
+      block(dom, '22:00', '23:00', 'Planificación', 'high', ['personal'], ''),
     ];
     saveActivities(activities);
     renderDashboard();
