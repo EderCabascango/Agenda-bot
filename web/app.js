@@ -2032,17 +2032,19 @@ SIEMPRE devuelve un JSON válido.
           return d >= rangeStart && d <= rangeEnd;
         });
 
-        if (settings.backendUrl) {
+        const isLocal = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
+
+        if (settings.backendUrl || isLocal) {
           addTypingIndicator();
           callBackendAgent(text);
-        } else if (settings.n8nUrl) {
-          addTypingIndicator();
-          callN8n(text, relevantActs);
         } else if (settings.groqKey) {
           addTypingIndicator();
           callGroq(text, settings.groqKey, relevantActs);
+        } else if (settings.n8nUrl) {
+          addTypingIndicator();
+          callN8n(text, relevantActs);
         } else {
-          addAgentMessage("⚠️ Por favor, configura tu API Key de Groq o la URL de n8n en la pestaña Ajustes.");
+          addAgentMessage("⚠️ Para usar el asistente:<br>• En local: El backend ya está activo en <code>127.0.0.1:8000</code>.<br>• En Vercel: Configura tu API Key o URL del backend en la pestaña <strong>Ajustes</strong>.");
         }
       };
 
