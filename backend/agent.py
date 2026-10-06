@@ -12,7 +12,7 @@ from langgraph.types import interrupt
 
 from tools import ALL_TOOLS, DESTRUCTIVE
 
-MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 TZ = ZoneInfo(os.getenv("AGENDA_TZ", "America/Bogota"))
 
 SYSTEM = """Eres el asistente de la app "Mi Diario". Gestionas las actividades del usuario con herramientas.
