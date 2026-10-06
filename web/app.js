@@ -1015,6 +1015,10 @@
       });
     }
 
+    const bkUrl = $('#setting-backend-url'), bkTok = $('#setting-backend-token');
+    if (bkUrl) bkUrl.value = settings.backendUrl || '';
+    if (bkTok) bkTok.value = settings.backendToken || '';
+
     const n8nUrlInput = $('#setting-n8n-url');
     if (n8nUrlInput) {
       n8nUrlInput.value = settings.n8nUrl || '';
@@ -1046,6 +1050,9 @@
         if (n8nUrlInput) {
           settings.n8nUrl = n8nUrlInput.value.trim();
         }
+        const bu = $('#setting-backend-url'), bt = $('#setting-backend-token');
+        if (bu) settings.backendUrl = bu.value.trim();
+        if (bt) settings.backendToken = bt.value.trim();
         saveSettings(settings);
         const st = $('#settings-save-status');
         if (st) {
@@ -1544,6 +1551,65 @@ SIEMPRE devuelve un JSON válido.
     }
   }
 
+  // ── Backend LangGraph agent ──
+  function backendHeaders() {
+    const h = { 'Content-Type': 'application/json' };
+    if (settings.backendToken) h['X-App-Token'] = settings.backendToken;
+    return h;
+  }
+
+  async function backendPost(path, body) {
+    const base = settings.backendUrl.replace(/\/+$/, '');
+    const res = await fetch(base + path, { method: 'POST', headers: backendHeaders(), body: JSON.stringify(body) });
+    if (!res.ok) {
+      let detail = '';
+      try { detail = (await res.json()).detail; } catch (e) { detail = await res.text(); }
+      throw new Error(`(${res.status}) ${detail}`);
+    }
+    return res.json();
+  }
+
+  async function pullActivitiesFromBackend() {
+    const base = settings.backendUrl.replace(/\/+$/, '');
+    const res = await fetch(base + '/activities', { headers: backendHeaders() });
+    if (!res.ok) return;
+    activities = await res.json();
+    saveActivities(activities);
+    renderDashboard();
+    renderActivityList();
+    renderCalendar();
+    scheduleWebAlarms();
+  }
+
+  async function handleBackendResult(data) {
+    if (data.reply) addAgentMessage(data.reply);
+    if (data.pending) {
+      const list = (data.pending.actions || []).map(a => `${a.tool}(${JSON.stringify(a.args)})`).join('\n');
+      const ok = window.confirm(`El asistente quiere ejecutar:\n${list}\n\n¿Confirmas?`);
+      addTypingIndicator();
+      const next = await backendPost('/agent/confirm', { thread_id: 'web', approved: ok });
+      removeTypingIndicator();
+      return handleBackendResult(next);
+    }
+  }
+
+  async function callBackendAgent(userText) {
+    try {
+      const base = settings.backendUrl.replace(/\/+$/, '');
+      // Sube el estado local para que el agente vea lo mismo que el usuario
+      const sync = await fetch(base + '/activities', { method: 'PUT', headers: backendHeaders(), body: JSON.stringify(activities) });
+      if (!sync.ok) throw new Error(`No se pudo sincronizar (${sync.status})`);
+      const data = await backendPost('/agent/chat', { message: userText, thread_id: 'web' });
+      removeTypingIndicator();
+      await handleBackendResult(data);
+      await pullActivitiesFromBackend();
+    } catch (err) {
+      console.error(err);
+      removeTypingIndicator();
+      addAgentMessage(`⚠️ Backend: ${err.message}`);
+    }
+  }
+
   async function callN8n(userText, relevantActs) {
     const url = settings.n8nUrl;
     const now = new Date();
@@ -1837,7 +1903,10 @@ SIEMPRE devuelve un JSON válido.
           return d >= rangeStart && d <= rangeEnd;
         });
 
-        if (settings.n8nUrl) {
+        if (settings.backendUrl) {
+          addTypingIndicator();
+          callBackendAgent(text);
+        } else if (settings.n8nUrl) {
           addTypingIndicator();
           callN8n(text, relevantActs);
         } else if (settings.groqKey) {

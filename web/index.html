@@ -379,6 +379,17 @@
                 </div>
                 <input type="text" class="setting-input" id="setting-n8n-url" placeholder="http://localhost:5678/..." />
               </div>
+              <div class="setting-item" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="material-icons-round">smart_toy</span>
+                  <div>
+                    <p class="setting-title">Agente LangGraph (backend)</p>
+                    <p class="setting-desc">URL del backend y token. Tiene prioridad sobre Groq directo y n8n.</p>
+                  </div>
+                </div>
+                <input type="text" class="setting-input" id="setting-backend-url" placeholder="http://localhost:8000" />
+                <input type="password" class="setting-input" id="setting-backend-token" placeholder="Token (APP_TOKEN, opcional)" />
+              </div>
               <div class="setting-item" style="justify-content: space-between; align-items: center; gap: 12px; background: rgba(3,218,197,0.04); border-color: rgba(3,218,197,0.15);">
                 <div style="display: flex; align-items: center; gap: 8px;">
                   <span class="material-icons-round" style="font-size:18px; color: var(--accent-teal);" id="settings-save-icon">save</span>

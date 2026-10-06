@@ -5,3 +5,8 @@ Thumbs.db
 .gemini/
 .agents/
 .system_generated/
+backend/.venv/
+backend/agenda.db
+backend/.env
+__pycache__/
+.pytest_cache/
