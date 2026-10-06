@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=5" />
+  <link rel="stylesheet" href="style.css?v=6" />
 </head>
 <body>
 
@@ -72,88 +72,107 @@
 
         <!-- ========== DASHBOARD VIEW ========== -->
         <section class="view active" id="view-dashboard">
-          <div class="view-header">
-            <h2 id="greeting-text">Buenos días 👋</h2>
-            <p class="subtitle" id="dashboard-subtitle"></p>
-          </div>
 
-          <!-- Quick Stats -->
-          <div class="stats-grid">
-            <div class="stat-card">
-              <div class="stat-icon" style="background: linear-gradient(135deg, #00C9A7, #03DAC5);">
-                <span class="material-icons-round">task_alt</span>
-              </div>
-              <div class="stat-info">
-                <span class="stat-value" id="stat-completed">0</span>
-                <span class="stat-label">Completadas</span>
-              </div>
+          <!-- Hero strip -->
+          <div class="db-hero">
+            <div class="db-hero-left">
+              <p class="db-greeting" id="greeting-text">Buenos días 👋</p>
+              <h1 class="db-date" id="dashboard-subtitle"></h1>
+              <p class="db-cycle-label" id="db-cycle-label"></p>
             </div>
-            <div class="stat-card">
-              <div class="stat-icon" style="background: linear-gradient(135deg, #FFB347, #FFCC02);">
-                <span class="material-icons-round">pending_actions</span>
-              </div>
-              <div class="stat-info">
-                <span class="stat-value" id="stat-pending">0</span>
-                <span class="stat-label">Pendientes</span>
-              </div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-icon" style="background: linear-gradient(135deg, #FF6B6B, #EE5A24);">
-                <span class="material-icons-round">priority_high</span>
-              </div>
-              <div class="stat-info">
-                <span class="stat-value" id="stat-high">0</span>
-                <span class="stat-label">Alta prioridad</span>
-              </div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-icon" style="background: linear-gradient(135deg, #6C5CE7, #A29BFE);">
-                <span class="material-icons-round">schedule</span>
-              </div>
-              <div class="stat-info">
-                <span class="stat-value" id="stat-hours">0h</span>
-                <span class="stat-label">Horas planeadas</span>
+            <div class="db-progress-ring-wrap">
+              <svg class="db-ring" viewBox="0 0 80 80">
+                <circle class="db-ring-bg" cx="40" cy="40" r="34"/>
+                <circle class="db-ring-fg" id="db-ring-fg" cx="40" cy="40" r="34"/>
+              </svg>
+              <div class="db-ring-label">
+                <span id="db-ring-pct">0%</span>
+                <span>hoy</span>
               </div>
             </div>
           </div>
 
-          <!-- Diario Monthly Grid -->
-          <div class="section-header" style="margin-bottom:12px">
-            <h3>📊 Panel de actividad mensual</h3>
+          <!-- Quick stat chips -->
+          <div class="db-chips" id="db-chips">
+            <div class="db-chip db-chip--teal">
+              <span class="material-icons-round">task_alt</span>
+              <span id="stat-completed">0</span>
+              <span>completadas</span>
+            </div>
+            <div class="db-chip db-chip--amber">
+              <span class="material-icons-round">radio_button_unchecked</span>
+              <span id="stat-pending">0</span>
+              <span>pendientes</span>
+            </div>
+            <div class="db-chip db-chip--red">
+              <span class="material-icons-round">priority_high</span>
+              <span id="stat-high">0</span>
+              <span>urgentes</span>
+            </div>
+            <div class="db-chip db-chip--purple">
+              <span class="material-icons-round">schedule</span>
+              <span id="stat-hours">0h</span>
+              <span>programadas</span>
+            </div>
           </div>
-          <div class="diario-wrapper" id="diario-wrapper">
-            <div class="diario-title" id="diario-title">D I A R I O</div>
-            <div class="diario-month-nav">
-              <button class="diario-nav-btn material-icons-round" id="diario-prev">chevron_left</button>
-              <h4 id="diario-month-label"></h4>
-              <button class="diario-nav-btn material-icons-round" id="diario-next">chevron_right</button>
+
+          <!-- Two-column layout -->
+          <div class="db-columns">
+
+            <!-- LEFT: Today's habits checklist -->
+            <div class="db-panel">
+              <div class="db-panel-header">
+                <span class="material-icons-round">checklist</span>
+                <h3>Hábitos de hoy</h3>
+                <span class="db-panel-sub" id="db-habits-sub"></span>
+              </div>
+              <div id="db-habits-list" class="db-habits-list"></div>
             </div>
-            <div class="diario-table-wrap">
-              <table class="diario-table" id="diario-table"></table>
+
+            <!-- RIGHT: Diario monthly grid -->
+            <div class="db-panel db-panel--wide">
+              <div class="db-panel-header">
+                <span class="material-icons-round">calendar_view_month</span>
+                <h3>Ciclo mensual</h3>
+                <div class="db-cycle-nav">
+                  <button class="diario-nav-btn material-icons-round" id="diario-prev">chevron_left</button>
+                  <span id="diario-month-label"></span>
+                  <button class="diario-nav-btn material-icons-round" id="diario-next">chevron_right</button>
+                </div>
+              </div>
+              <div class="diario-table-wrap">
+                <table class="diario-table" id="diario-table"></table>
+              </div>
+              <!-- Add custom activity row -->
+              <div class="db-add-row">
+                <input type="text" id="diario-new-row-label" placeholder="Nueva actividad a trackear..." />
+                <select id="diario-new-row-category">
+                  <option value="#3B82F6">🔵 Cuerpo / Ej.</option>
+                  <option value="#10B981">🟢 Desarrollo</option>
+                  <option value="#F59E0B">🟡 Ingresos</option>
+                  <option value="#F97316">🟠 Disfruto</option>
+                </select>
+                <button class="btn-primary" id="diario-add-row-btn" title="Añadir actividad">
+                  <span class="material-icons-round">add</span>
+                </button>
+              </div>
             </div>
-            <!-- Add custom activity row to tracker -->
-            <div class="diario-add-row" style="margin-top: 16px; display: flex; gap: 8px; align-items: center; max-width: 480px; background: rgba(255,255,255,0.02); padding: 6px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
-              <input type="text" id="diario-new-row-label" placeholder="Nueva actividad a trackear..." style="flex: 1; padding: 6px 10px; font-size: 0.75rem; height: 30px;" />
-              <select id="diario-new-row-category" style="width: auto; font-size: 0.72rem; height: 30px; padding: 0 8px; background: var(--bg-input); border: 1px solid var(--border-medium); border-radius: var(--radius-sm); color: var(--text-primary); cursor: pointer;">
-                <option value="#48A6C8">🔵 Cuerpo / Ej.</option>
-                <option value="#3BA55D">🟢 Desarrollo</option>
-                <option value="#D1B83B">🟡 Ingresos</option>
-                <option value="#E67E22">🟠 Disfruto</option>
-              </select>
-              <button class="btn-primary" id="diario-add-row-btn" style="padding: 0 12px; height: 30px; font-size: 0.75rem; display: flex; align-items: center; justify-content: center; gap: 4px; flex-shrink: 0;" title="Añadir al Diario">
-                <span class="material-icons-round" style="font-size: 16px;">add</span>
+
+          </div>
+
+          <!-- Today's full schedule -->
+          <div class="db-schedule-section">
+            <div class="db-panel-header" style="margin-bottom:14px;">
+              <span class="material-icons-round">view_timeline</span>
+              <h3>Cronograma de hoy</h3>
+              <button class="btn-text" id="btn-add-from-dashboard">
+                <span class="material-icons-round">add</span> Nueva
               </button>
             </div>
+            <div class="timeline" id="timeline-today"></div>
           </div>
 
-          <!-- Today's Timeline -->
-          <div class="section-header" style="margin-top:28px">
-            <h3>Actividades de hoy</h3>
-            <button class="btn-text" id="btn-add-from-dashboard">
-              <span class="material-icons-round">add</span> Nueva
-            </button>
-          </div>
-          <div class="timeline" id="timeline-today"></div>        </section>
+        </section>
 
         <!-- ========== ACTIVITIES VIEW ========== -->
         <section class="view" id="view-activities">
@@ -590,6 +609,6 @@
 
   <!-- SheetJS & App script -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

@@ -102,50 +102,109 @@
     const today = todayStr();
     const todayActs = activities.filter(a => a.date === today);
     const completed = todayActs.filter(a => a.completed).length;
-    const pending = todayActs.filter(a => !a.completed).length;
-    const high = todayActs.filter(a => a.priority === 'high' && !a.completed).length;
+    const pending   = todayActs.filter(a => !a.completed).length;
+    const high      = todayActs.filter(a => a.priority === 'high' && !a.completed).length;
+    const total     = todayActs.length;
 
     let totalMinutes = 0;
     todayActs.forEach(a => {
       if (a.startTime && a.endTime) {
-        const [sh,sm] = a.startTime.split(':').map(Number);
-        const [eh,em] = a.endTime.split(':').map(Number);
-        totalMinutes += (eh*60+em) - (sh*60+sm);
+        const [sh, sm] = a.startTime.split(':').map(Number);
+        const [eh, em] = a.endTime.split(':').map(Number);
+        totalMinutes += (eh * 60 + em) - (sh * 60 + sm);
       }
     });
-    const hours = totalMinutes > 0 ? (totalMinutes/60).toFixed(1) + 'h' : '0h';
+    const hours = totalMinutes > 0 ? (totalMinutes / 60).toFixed(1) + 'h' : '0h';
 
-    $('#stat-completed').textContent = completed;
-    $('#stat-pending').textContent = pending;
-    $('#stat-high').textContent = high;
-    $('#stat-hours').textContent = hours;
+    // ── Stat chips ──
+    const el = id => document.getElementById(id);
+    if (el('stat-completed')) el('stat-completed').textContent = completed;
+    if (el('stat-pending'))   el('stat-pending').textContent   = pending;
+    if (el('stat-high'))      el('stat-high').textContent      = high;
+    if (el('stat-hours'))     el('stat-hours').textContent     = hours;
 
-    // Greeting
+    // ── Hero: greeting & date ──
     const userName = settings.username || '';
-    const greet = getGreeting();
-    const dashHeader = $('.view-header h2', $('#view-dashboard'));
-    if (dashHeader) dashHeader.textContent = `${greet} ${userName ? userName + ' ' : ''}👋`;
-    const sub = $('#dashboard-subtitle');
-    if (sub) sub.textContent = formatDate(new Date());
-    const topbarDate = $('#topbar-date');
+    const greetEl = el('greeting-text');
+    if (greetEl) greetEl.textContent = `${getGreeting()} ${userName ? userName + ' ' : ''}👋`;
+    const subEl = el('dashboard-subtitle');
+    if (subEl) subEl.textContent = formatDate(new Date());
+    const topbarDate = el('topbar-date');
     if (topbarDate) topbarDate.textContent = formatDate(new Date());
 
-    // Diario grid
+    // ── Cycle label in hero ──
+    const cycleStartDate = new Date(diarioYear, diarioMonth, 15);
+    const cycleEndDate   = new Date(diarioYear, diarioMonth + 1, 14);
+    const fmt = d => d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+    const cycleLabelEl = el('db-cycle-label');
+    if (cycleLabelEl) cycleLabelEl.textContent = `Ciclo: ${fmt(cycleStartDate)} – ${fmt(cycleEndDate)}`;
+
+    // ── Progress ring ──
+    const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+    const ringEl = el('db-ring-fg');
+    if (ringEl) {
+      const circumference = 2 * Math.PI * 34; // 213.6
+      ringEl.style.strokeDashoffset = circumference - (pct / 100) * circumference;
+    }
+    const pctEl = el('db-ring-pct');
+    if (pctEl) pctEl.textContent = pct + '%';
+
+    // ── Habits checklist (today's activities as interactive habit items) ──
+    const habitsList = el('db-habits-list');
+    if (habitsList) {
+      const sorted = [...todayActs].sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+      if (sorted.length === 0) {
+        habitsList.innerHTML = `<p style="font-size:0.82rem;color:var(--text-muted);padding:8px 0;">No hay actividades para hoy.</p>`;
+      } else {
+        habitsList.innerHTML = sorted.map(a => {
+          const dot = (a.tags && a.tags[0]) ? '' : '';
+          const tagColor = a.tags && a.tags[0] ? getCategoryColor(a.tags[0]) : '#9CA3AF';
+          const timeStr = a.startTime ? (a.endTime ? `${a.startTime} – ${a.endTime}` : a.startTime) : '';
+          return `<div class="db-habit-item ${a.completed ? 'done' : ''}" data-habit-toggle="${a.id}">
+            <div class="db-habit-check"></div>
+            <span class="db-habit-dot" style="background:${tagColor}"></span>
+            <span class="db-habit-label">${escHTML(a.title)}</span>
+            ${timeStr ? `<span class="db-habit-time">${timeStr}</span>` : ''}
+          </div>`;
+        }).join('');
+        habitsList.querySelectorAll('[data-habit-toggle]').forEach(item => {
+          item.addEventListener('click', () => toggleActivity(item.dataset.habitToggle));
+        });
+      }
+    }
+    const habitsSubEl = el('db-habits-sub');
+    if (habitsSubEl) habitsSubEl.textContent = total > 0 ? `${completed}/${total}` : '';
+
+    // ── Diario grid ──
     renderDiarioGrid();
 
-    // Timeline
-    const timeline = $('#timeline-today');
+    // ── Today's schedule timeline ──
+    const timeline = el('timeline-today');
     if (!timeline) return;
     if (todayActs.length === 0) {
       timeline.innerHTML = '';
       timeline.appendChild(createEmptyState());
       return;
     }
-
-    const sorted = [...todayActs].sort((a,b) => (a.startTime||'').localeCompare(b.startTime||''));
-    timeline.innerHTML = sorted.map(a => createTimelineItem(a)).join('');
+    const sortedFull = [...todayActs].sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+    timeline.innerHTML = sortedFull.map(a => createTimelineItem(a)).join('');
     attachTimelineEvents(timeline);
   }
+
+  // Helper: return a colour for a known category tag
+  function getCategoryColor(tag) {
+    const map = {
+      'calistenia': '#3B82F6', 'ejercicio': '#3B82F6',
+      'correr':     '#F97316',
+      'ai-300':     '#8B5CF6', 'mlops': '#8B5CF6', 'desarrollo': '#8B5CF6',
+      'inglés':     '#06B6D4', 'ingles': '#06B6D4',
+      'fuyu':       '#EC4899',
+      'personal':   '#10B981',
+      'estudio':    '#F59E0B', 'proyectos': '#F59E0B',
+    };
+    return map[tag.toLowerCase()] || '#9CA3AF';
+  }
+
 
   // ── Diario Grid state (15th of current month to 14th of next month) ──
   const initialDate = new Date();
@@ -1442,7 +1501,7 @@ SIEMPRE devuelve un JSON válido.
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'llama-3.3-70b-specdec',
+          model: 'llama-3.3-70b-versatile',
           messages: messages,
           temperature: 0.1,
           response_format: { type: 'json_object' }
@@ -1454,7 +1513,16 @@ SIEMPRE devuelve un JSON válido.
       if (!response.ok) {
         const errText = await response.text();
         console.error('Groq Error:', errText);
-        addAgentMessage('⚠️ Error al conectar con Groq. Verifica tu API Key.');
+        let detail = '';
+        try { detail = JSON.parse(errText).error.message; } catch (e) { detail = errText.slice(0, 200); }
+        const hint = response.status === 401
+          ? 'La API Key no es válida.'
+          : response.status === 429
+            ? 'Límite de uso alcanzado, intenta en un momento.'
+            : response.status === 404 || response.status === 400
+              ? 'Modelo no disponible o petición inválida.'
+              : 'Error del servicio.';
+        addAgentMessage(`⚠️ Groq (${response.status}): ${hint}\n${detail}`);
         return;
       }
 
