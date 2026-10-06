@@ -7,6 +7,7 @@ load_dotenv()
 
 from fastapi import Depends, FastAPI, Header, HTTPException  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
 from langchain_core.messages import AIMessage, HumanMessage  # noqa: E402
 from langgraph.types import Command  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
@@ -23,12 +24,27 @@ app.add_middleware(
 _graph = None
 
 
+
+def is_agent_configured() -> bool:
+    provider = os.getenv("LLM_PROVIDER", "groq").lower()
+    if provider == "groq":
+        return bool(os.getenv("GROQ_API_KEY"))
+    elif provider == "openrouter":
+        return bool(os.getenv("OPENROUTER_API_KEY"))
+    elif provider == "gemini":
+        return bool(os.getenv("GEMINI_API_KEY"))
+    elif provider == "ollama":
+        return True
+    return bool(os.getenv("GROQ_API_KEY"))
+
+
 def graph():
     """Se construye bajo demanda para que /health y la sincronización funcionen sin API key."""
     global _graph
     if _graph is None:
-        if not os.getenv("GROQ_API_KEY"):
-            raise HTTPException(503, "Falta GROQ_API_KEY en el servidor.")
+        if not is_agent_configured():
+            prov = os.getenv("LLM_PROVIDER", "groq")
+            raise HTTPException(503, f"Falta API Key configurada para el proveedor '{prov}' en el backend.")
         from agent import build_graph
         _graph = build_graph()
     return _graph
@@ -60,7 +76,12 @@ def _result(res: dict) -> dict:
 
 @app.get("/health")
 def health():
-    return {"ok": True, "agent_ready": bool(os.getenv("GROQ_API_KEY"))}
+    return {
+        "ok": True,
+        "agent_ready": is_agent_configured(),
+        "provider": os.getenv("LLM_PROVIDER", "groq"),
+    }
+
 
 
 @app.get("/activities")
@@ -95,3 +116,10 @@ def confirm(body: Confirm, user: str = Depends(auth)):
     except Exception as e:
         raise HTTPException(502, f"Error del modelo: {e}")
     return _result(res)
+
+
+# Monta el frontend web para servir todo en una sola URL
+WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
+if os.path.isdir(WEB_DIR):
+    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+

@@ -1368,15 +1368,69 @@
   }
 
   // ── AI Agent Chat Helper UI Methods ──
+  function formatMarkdown(text) {
+    if (!text) return '';
+    let html = escHTML(text);
+    // Tablas básicas en Markdown
+    const lines = html.split('\n');
+    let inTable = false;
+    let tableHtml = '';
+    const outputLines = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith('|') && line.endsWith('|')) {
+        const cells = line.split('|').slice(1, -1).map(c => c.trim());
+        if (cells.every(c => /^:?-+:?$/.test(c))) {
+          // Separador de tabla, saltar
+          continue;
+        }
+        if (!inTable) {
+          inTable = true;
+          tableHtml = '<div style="overflow-x:auto; margin:6px 0;"><table style="width:100%; border-collapse:collapse; font-size:0.8rem; border:1px solid var(--border-medium);">';
+          tableHtml += '<tr style="background:rgba(0,0,0,0.04); font-weight:600;">' + cells.map(c => `<th style="padding:4px 8px; border:1px solid var(--border-subtle); text-align:left;">${c}</th>`).join('') + '</tr>';
+        } else {
+          tableHtml += '<tr>' + cells.map(c => `<td style="padding:4px 8px; border:1px solid var(--border-subtle);">${c}</td>`).join('') + '</tr>';
+        }
+      } else {
+        if (inTable) {
+          tableHtml += '</table></div>';
+          outputLines.push(tableHtml);
+          inTable = false;
+          tableHtml = '';
+        }
+        outputLines.push(lines[i]);
+      }
+    }
+    if (inTable) {
+      tableHtml += '</table></div>';
+      outputLines.push(tableHtml);
+    }
+
+    html = outputLines.join('\n');
+    // Negrita **texto**
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    // Cursiva *texto*
+    html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+    // Código en línea `codigo`
+    html = html.replace(/`(.*?)`/g, '<code style="background:rgba(0,0,0,0.06); padding:2px 4px; border-radius:4px; font-family:monospace; font-size:0.82rem;">$1</code>');
+    // Listas viñetas
+    html = html.replace(/^[ \t]*[-*][ \t]+(.*)$/gm, '<li style="margin-left:16px;">$1</li>');
+    // Saltos de línea
+    html = html.replace(/\n/g, '<br>');
+    return html;
+  }
+
   function addAgentMessage(text) {
     const msgs = $('#chat-messages');
     if (!msgs) return;
     const div = document.createElement('div');
     div.className = 'chat-message agent';
-    div.innerHTML = escHTML(text).replace(/\n/g, '<br>');
+    div.innerHTML = formatMarkdown(text);
     msgs.appendChild(div);
     msgs.scrollTop = msgs.scrollHeight;
   }
+
 
   function addUserMessage(text) {
     const msgs = $('#chat-messages');
@@ -1552,6 +1606,14 @@ SIEMPRE devuelve un JSON válido.
   }
 
   // ── Backend LangGraph agent ──
+  function getBackendBaseUrl() {
+    if (settings.backendUrl) return settings.backendUrl.replace(/\/+$/, '');
+    if (window.location.protocol.startsWith('http') && (window.location.port === '8000' || window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost')) {
+      return window.location.origin;
+    }
+    return 'http://127.0.0.1:8000';
+  }
+
   function backendHeaders() {
     const h = { 'Content-Type': 'application/json' };
     if (settings.backendToken) h['X-App-Token'] = settings.backendToken;
@@ -1559,7 +1621,7 @@ SIEMPRE devuelve un JSON válido.
   }
 
   async function backendPost(path, body) {
-    const base = settings.backendUrl.replace(/\/+$/, '');
+    const base = getBackendBaseUrl();
     const res = await fetch(base + path, { method: 'POST', headers: backendHeaders(), body: JSON.stringify(body) });
     if (!res.ok) {
       let detail = '';
@@ -1570,7 +1632,7 @@ SIEMPRE devuelve un JSON válido.
   }
 
   async function pullActivitiesFromBackend() {
-    const base = settings.backendUrl.replace(/\/+$/, '');
+    const base = getBackendBaseUrl();
     const res = await fetch(base + '/activities', { headers: backendHeaders() });
     if (!res.ok) return;
     activities = await res.json();
@@ -1581,34 +1643,101 @@ SIEMPRE devuelve un JSON válido.
     scheduleWebAlarms();
   }
 
+  function addConfirmPrompt(pending, onDecision) {
+    const msgs = $('#chat-messages');
+    if (!msgs) return;
+    const div = document.createElement('div');
+    div.className = 'chat-message agent';
+    div.style.background = 'rgba(255, 171, 0, 0.08)';
+    div.style.border = '1px solid rgba(255, 171, 0, 0.3)';
+
+    const actionsList = (pending.actions || []).map(a => {
+      if (a.tool === 'delete_activity') {
+        const actId = a.args?.activity_id;
+        const act = activities.find(x => x.id === actId);
+        const title = act ? `<strong>${escHTML(act.title)}</strong> (${act.date})` : `ID <code>${actId}</code>`;
+        return `🗑️ Eliminar: ${title}`;
+      }
+      return `⚙️ <strong>${escHTML(a.tool)}</strong>: <code>${escHTML(JSON.stringify(a.args))}</code>`;
+    }).join('<br>');
+
+    div.innerHTML = `
+      <div style="font-weight:600; color:var(--accent-amber); margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+        <span class="material-icons-round" style="font-size:18px;">warning_amber</span>
+        Confirmación requerida
+      </div>
+      <div style="font-size:0.84rem; margin-bottom:10px; line-height:1.4;">
+        El asistente solicita ejecutar la siguiente acción:
+        <div style="margin-top:6px; padding:8px; background:rgba(0,0,0,0.04); border-radius:6px; font-size:0.8rem;">
+          ${actionsList}
+        </div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-confirm-yes" style="flex:1; padding:7px 12px; background:var(--accent-teal); color:#0D0D0F; border:none; border-radius:6px; font-weight:600; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; justify-content:center; gap:4px;">
+          <span class="material-icons-round" style="font-size:16px;">check</span> Confirmar
+        </button>
+        <button class="btn-confirm-no" style="flex:1; padding:7px 12px; background:rgba(255,82,82,0.12); color:var(--accent-red); border:1px solid rgba(255,82,82,0.3); border-radius:6px; font-weight:600; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; justify-content:center; gap:4px;">
+          <span class="material-icons-round" style="font-size:16px;">close</span> Cancelar
+        </button>
+      </div>
+    `;
+
+    const btnYes = div.querySelector('.btn-confirm-yes');
+    const btnNo = div.querySelector('.btn-confirm-no');
+
+    const handleDecision = (approved) => {
+      btnYes.disabled = true;
+      btnNo.disabled = true;
+      btnYes.style.opacity = '0.5';
+      btnNo.style.opacity = '0.5';
+      div.insertAdjacentHTML('beforeend', `<div style="margin-top:8px; font-size:0.75rem; color:${approved ? 'var(--accent-teal)' : 'var(--accent-red)'}; font-weight:600;">${approved ? '✓ Acción confirmada' : '✕ Acción cancelada'}</div>`);
+      onDecision(approved);
+    };
+
+    btnYes.addEventListener('click', () => handleDecision(true));
+    btnNo.addEventListener('click', () => handleDecision(false));
+
+    msgs.appendChild(div);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
   async function handleBackendResult(data) {
     if (data.reply) addAgentMessage(data.reply);
     if (data.pending) {
-      const list = (data.pending.actions || []).map(a => `${a.tool}(${JSON.stringify(a.args)})`).join('\n');
-      const ok = window.confirm(`El asistente quiere ejecutar:\n${list}\n\n¿Confirmas?`);
-      addTypingIndicator();
-      const next = await backendPost('/agent/confirm', { thread_id: 'web', approved: ok });
-      removeTypingIndicator();
-      return handleBackendResult(next);
+      addConfirmPrompt(data.pending, async (approved) => {
+        addTypingIndicator();
+        try {
+          const next = await backendPost('/agent/confirm', { thread_id: 'web', approved });
+          removeTypingIndicator();
+          await handleBackendResult(next);
+          await pullActivitiesFromBackend();
+        } catch (e) {
+          removeTypingIndicator();
+          addAgentMessage(`⚠️ Error en confirmación: ${e.message}`);
+        }
+      });
     }
   }
 
   async function callBackendAgent(userText) {
     try {
-      const base = settings.backendUrl.replace(/\/+$/, '');
-      // Sube el estado local para que el agente vea lo mismo que el usuario
+      const base = getBackendBaseUrl();
+      // Sube el estado local para que el backend tenga las actividades más recientes
       const sync = await fetch(base + '/activities', { method: 'PUT', headers: backendHeaders(), body: JSON.stringify(activities) });
       if (!sync.ok) throw new Error(`No se pudo sincronizar (${sync.status})`);
       const data = await backendPost('/agent/chat', { message: userText, thread_id: 'web' });
       removeTypingIndicator();
       await handleBackendResult(data);
-      await pullActivitiesFromBackend();
+      if (!data.pending) {
+        await pullActivitiesFromBackend();
+      }
     } catch (err) {
       console.error(err);
       removeTypingIndicator();
       addAgentMessage(`⚠️ Backend: ${err.message}`);
     }
   }
+
 
   async function callN8n(userText, relevantActs) {
     const url = settings.n8nUrl;

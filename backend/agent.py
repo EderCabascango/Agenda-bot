@@ -23,10 +23,46 @@ Reglas:
 - Si no estás seguro de qué actividad se refiere, pregunta."""
 
 
+def get_llm(api_key: str | None = None):
+    provider = os.getenv("LLM_PROVIDER", "groq").lower()
+    temp = float(os.getenv("LLM_TEMPERATURE", "0.1"))
+
+    if provider == "groq":
+        model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+        return ChatGroq(model=model, temperature=temp, api_key=api_key or os.getenv("GROQ_API_KEY"))
+    elif provider == "openrouter":
+        from langchain_openai import ChatOpenAI
+        model = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+        return ChatOpenAI(
+            model=model,
+            temperature=temp,
+            api_key=api_key or os.getenv("OPENROUTER_API_KEY"),
+            base_url="https://openrouter.ai/api/v1",
+        )
+    elif provider == "gemini":
+        from langchain_openai import ChatOpenAI
+        model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        return ChatOpenAI(
+            model=model,
+            temperature=temp,
+            api_key=api_key or os.getenv("GEMINI_API_KEY"),
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        )
+    elif provider == "ollama":
+        from langchain_openai import ChatOpenAI
+        model = os.getenv("OLLAMA_MODEL", "llama3.1")
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        return ChatOpenAI(model=model, temperature=temp, api_key="ollama", base_url=base_url)
+    else:
+        model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+        return ChatGroq(model=model, temperature=temp, api_key=api_key or os.getenv("GROQ_API_KEY"))
+
+
 def build_graph(api_key: str | None = None, checkpointer=None):
-    llm = ChatGroq(model=MODEL, temperature=0.1, api_key=api_key or os.getenv("GROQ_API_KEY"))
+    llm = get_llm(api_key=api_key)
     llm_tools = llm.bind_tools(ALL_TOOLS)
     tool_node = ToolNode(ALL_TOOLS)
+
 
     def agent(state: MessagesState):
         now = datetime.now(TZ).strftime("%A %Y-%m-%d %H:%M")
