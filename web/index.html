@@ -252,55 +252,77 @@
           </div>
         </section>
 
-        <!-- ========== STUDY VIEW (MATERIAS Y TEMAS) ========== -->
+        <!-- ========== STUDY VIEW (MATERIAS Y TEMAS + ESTADÍSTICAS) ========== -->
         <section class="view" id="view-study">
-          <div class="view-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+          <div class="view-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
             <div>
-              <h2>Materias y Estudio</h2>
-              <p class="section-desc" style="color:var(--text-secondary); font-size:0.9rem; margin-top:4px;">Organiza tus materias, temas y objetivos de aprendizaje</p>
-            </div>
-            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-              <button class="btn-outline btn-touch-target" id="btn-seed-subjects" style="gap:6px; padding:0 14px;">
-                <span class="material-icons-round">auto_awesome</span>
-                <span>Materias sugeridas</span>
-              </button>
-              <button class="btn-primary btn-touch-target" id="btn-add-subject" style="gap:6px; padding:0 16px;">
-                <span class="material-icons-round">add</span>
-                <span>Nueva Materia</span>
-              </button>
+              <h2>Estudio y Rendimiento</h2>
+              <p class="section-desc" style="color:var(--text-secondary); font-size:0.9rem; margin-top:4px;">Gestiona tus materias, hábitos de enfoque y métricas de estudio</p>
             </div>
           </div>
 
-          <!-- Study Stats / Overview Bar -->
-          <div class="db-chips" style="margin-bottom:20px;">
-            <div class="db-chip db-chip--purple">
-              <span class="material-icons-round">school</span>
-              <span id="study-stat-active-count">0</span>
-              <span>materias activas</span>
+          <!-- Study Sub-Tabs Nav -->
+          <div class="study-subtabs" style="display:flex; gap:8px; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+            <button class="study-subtab-btn active btn-touch-target" id="subtab-btn-subjects" data-subtab="subjects">
+              <span class="material-icons-round">folder_open</span>
+              <span>Materias y Temas</span>
+            </button>
+            <button class="study-subtab-btn btn-touch-target" id="subtab-btn-stats" data-subtab="stats">
+              <span class="material-icons-round">analytics</span>
+              <span>Estadísticas de Enfoque</span>
+            </button>
+          </div>
+
+          <!-- SUB-PANEL 1: MATERIAS Y TEMAS -->
+          <div id="study-subjects-panel">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+              <div class="db-chips" style="margin-bottom:0;">
+                <div class="db-chip db-chip--purple">
+                  <span class="material-icons-round">school</span>
+                  <span id="study-stat-active-count">0</span>
+                  <span>materias activas</span>
+                </div>
+                <div class="db-chip db-chip--teal">
+                  <span class="material-icons-round">timer</span>
+                  <span id="study-stat-total-hours">0h</span>
+                  <span>horas estudiadas</span>
+                </div>
+                <div class="db-chip db-chip--amber">
+                  <span class="material-icons-round">flag</span>
+                  <span id="study-stat-weekly-goal">0h</span>
+                  <span>meta semanal</span>
+                </div>
+              </div>
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <button class="btn-outline btn-touch-target" id="btn-seed-subjects" style="gap:6px; padding:0 14px;">
+                  <span class="material-icons-round">auto_awesome</span>
+                  <span>Materias sugeridas</span>
+                </button>
+                <button class="btn-primary btn-touch-target" id="btn-add-subject" style="gap:6px; padding:0 16px;">
+                  <span class="material-icons-round">add</span>
+                  <span>Nueva Materia</span>
+                </button>
+              </div>
             </div>
-            <div class="db-chip db-chip--teal">
-              <span class="material-icons-round">timer</span>
-              <span id="study-stat-total-hours">0h</span>
-              <span>horas estudiadas</span>
+
+            <!-- Filter & Controls -->
+            <div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:16px;">
+              <label class="checkbox-label" style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.85rem; color:var(--text-secondary); min-height:44px;">
+                <input type="checkbox" id="study-filter-archived" />
+                <span>Mostrar materias archivadas</span>
+              </label>
             </div>
-            <div class="db-chip db-chip--amber">
-              <span class="material-icons-round">flag</span>
-              <span id="study-stat-weekly-goal">0h</span>
-              <span>meta semanal</span>
+
+            <!-- Subjects Grid -->
+            <div class="subjects-grid" id="subjects-grid">
+              <!-- Renderizado dinámico -->
             </div>
           </div>
 
-          <!-- Filter & Controls -->
-          <div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:16px;">
-            <label class="checkbox-label" style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.85rem; color:var(--text-secondary); min-height:44px;">
-              <input type="checkbox" id="study-filter-archived" />
-              <span>Mostrar materias archivadas</span>
-            </label>
-          </div>
-
-          <!-- Subjects Grid -->
-          <div class="subjects-grid" id="subjects-grid">
-            <!-- Renderizado dinámico -->
+          <!-- SUB-PANEL 2: ESTADÍSTICAS DE ENFOQUE (FASE D2) -->
+          <div id="study-stats-panel" style="display:none;">
+            <!-- Renderizado dinámico por renderStudyStatsView() -->
+            <div id="study-stats-container"></div>
           </div>
         </section>
 
@@ -1094,6 +1116,7 @@
   <script src="sync-core.js?v=9"></script>
   <script src="focus-core.js?v=9"></script>
   <script src="timer-core.js?v=9"></script>
+  <script src="stats-core.js?v=9"></script>
   <script src="app.js?v=9"></script>
 </body>
 </html>

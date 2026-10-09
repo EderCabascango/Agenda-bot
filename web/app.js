@@ -1504,11 +1504,300 @@
       .replace(/'/g, '&#39;');
   }
 
-  // ── Study View Logic (Materias, Temas y Métricas - Fase B) ──
+  // ── Study View Logic (Materias, Temas y Métricas - Fase B & D) ──
   let showArchivedSubjects = false;
   let selectedSubjectIdForDetail = null;
+  let activeStudySubtab = 'subjects'; // 'subjects' | 'stats'
+
+  function switchStudySubtab(tab) {
+    activeStudySubtab = tab;
+    const btnSubjects = $('#subtab-btn-subjects');
+    const btnStats = $('#subtab-btn-stats');
+    const panelSubjects = $('#study-subjects-panel');
+    const panelStats = $('#study-stats-panel');
+
+    if (tab === 'stats') {
+      btnSubjects?.classList.remove('active');
+      btnStats?.classList.add('active');
+      if (panelSubjects) panelSubjects.style.display = 'none';
+      if (panelStats) panelStats.style.display = 'block';
+      renderStudyStatsView();
+    } else {
+      btnStats?.classList.remove('active');
+      btnSubjects?.classList.add('active');
+      if (panelStats) panelStats.style.display = 'none';
+      if (panelSubjects) panelSubjects.style.display = 'block';
+      renderStudySubjectsView();
+    }
+  }
+
+  function renderStudyStatsView() {
+    const container = $('#study-stats-container');
+    if (!container) return;
+
+    focusSessions = loadFocusSessions();
+    subjects = loadSubjects();
+    topics = loadTopics();
+
+    if (typeof StatsCore === 'undefined' || !StatsCore.generateFullStatsReport) {
+      container.innerHTML = `<p class="empty-state">StatsCore no disponible.</p>`;
+      return;
+    }
+
+    const settings = loadSettings();
+    const dailyGoalMins = Number(settings.dailyStudyGoalMinutes) || 60;
+    const streakThresholdMins = Number(settings.streakThresholdMinutes) || 15;
+
+    const report = StatsCore.generateFullStatsReport(focusSessions, subjects, topics, {
+      dailyGoalMinutes: dailyGoalMins,
+      minStreakMinutes: streakThresholdMins
+    });
+
+    const deltaClass = report.comparison.delta_percent > 0 ? 'positive' : (report.comparison.delta_percent < 0 ? 'negative' : 'neutral');
+    const deltaSign = report.comparison.delta_percent > 0 ? '+' : '';
+    const deltaText = `${deltaSign}${report.comparison.delta_percent}% vs 7d previos`;
+
+    // SVG Heatmap generator
+    const daysLabels = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+    const heatmap = report.heatmap;
+    let maxCellSec = 1;
+    for (let d = 0; d < 7; d++) {
+      for (let h = 0; h < 24; h++) {
+        if (heatmap[d][h] > maxCellSec) maxCellSec = heatmap[d][h];
+      }
+    }
+
+    let heatmapCellsSvg = '';
+    const cellSize = 16;
+    const cellGap = 3;
+    const labelWidth = 34;
+    const topHeaderHeight = 20;
+
+    // Header hours (0..23)
+    let hoursHeaderSvg = '';
+    for (let h = 0; h < 24; h += 3) {
+      const x = labelWidth + h * (cellSize + cellGap);
+      hoursHeaderSvg += `<text x="${x}" y="14" font-size="10" fill="var(--text-muted)" font-family="sans-serif">${String(h).padStart(2, '0')}h</text>`;
+    }
+
+    for (let d = 0; d < 7; d++) {
+      const y = topHeaderHeight + d * (cellSize + cellGap);
+      heatmapCellsSvg += `<text x="0" y="${y + 12}" font-size="11" fill="var(--text-secondary)" font-family="sans-serif">${daysLabels[d]}</text>`;
+      for (let h = 0; h < 24; h++) {
+        const x = labelWidth + h * (cellSize + cellGap);
+        const sec = heatmap[d][h];
+        const mins = Math.round(sec / 60);
+        const ratio = sec > 0 ? Math.min(1, Math.max(0.2, sec / maxCellSec)) : 0;
+        const fill = sec === 0 ? 'var(--bg-primary)' : `rgba(20, 184, 166, ${ratio.toFixed(2)})`;
+        const border = sec === 0 ? 'var(--border-color)' : 'transparent';
+        heatmapCellsSvg += `
+          <rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" rx="3" fill="${fill}" stroke="${border}" stroke-width="1">
+            <title>${daysLabels[d]} ${h}:00 - ${mins} min de enfoque</title>
+          </rect>
+        `;
+      }
+    }
+
+    const svgWidth = labelWidth + 24 * (cellSize + cellGap);
+    const svgHeight = topHeaderHeight + 7 * (cellSize + cellGap);
+
+    container.innerHTML = `
+      <!-- KPI CARDS -->
+      <div class="stats-kpi-grid">
+        <div class="stats-kpi-card">
+          <div class="stats-kpi-header">
+            <span>Hoy</span>
+            <span class="material-icons-round" style="color:var(--accent-teal);">today</span>
+          </div>
+          <div class="stats-kpi-val" id="stats-val-today">${report.periods.today_hours}h</div>
+          <div class="stats-kpi-sub">
+            <span>${report.periods.today_minutes} minutos</span>
+            <span class="stats-kpi-delta ${deltaClass}">${deltaText}</span>
+          </div>
+        </div>
+
+        <div class="stats-kpi-card">
+          <div class="stats-kpi-header">
+            <span>Esta Semana (L-D)</span>
+            <span class="material-icons-round" style="color:var(--accent-primary);">calendar_view_week</span>
+          </div>
+          <div class="stats-kpi-val" id="stats-val-week">${report.periods.week_hours}h</div>
+          <div class="stats-kpi-sub">${report.periods.week_minutes} minutos acumulados</div>
+        </div>
+
+        <div class="stats-kpi-card">
+          <div class="stats-kpi-header">
+            <span>Ciclo 15 al 14</span>
+            <span class="material-icons-round" style="color:var(--accent-purple);">event_repeat</span>
+          </div>
+          <div class="stats-kpi-val" id="stats-val-cycle">${report.periods.cycle_hours}h</div>
+          <div class="stats-kpi-sub">${report.periods.cycle_start} al ${report.periods.cycle_end}</div>
+        </div>
+
+        <div class="stats-kpi-card">
+          <div class="stats-kpi-header">
+            <span>Racha de Estudio</span>
+            <span class="material-icons-round" style="color:var(--accent-amber);">local_fire_department</span>
+          </div>
+          <div class="stats-kpi-val" id="stats-val-streak">${report.streak.current_streak} días</div>
+          <div class="stats-kpi-sub">
+            Récord: ${report.streak.best_streak}d | ${report.streak.today_qualifies ? '✓ Hoy calificado' : '⏳ Pendiente hoy'}
+          </div>
+        </div>
+      </div>
+
+      <!-- ROW 1: Meta Diaria y Medias Diarias -->
+      <div class="stats-section-row">
+        <div class="stats-panel-card">
+          <h3>
+            <span class="material-icons-round" style="color:var(--accent-teal);">flag</span>
+            <span>Meta Diaria de Enfoque</span>
+          </h3>
+          <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
+            <div style="width:100px; height:100px; position:relative; display:flex; align-items:center; justify-content:center;">
+              <svg width="100" height="100" viewBox="0 0 36 36" style="transform: rotate(-90deg);">
+                <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--bg-primary)" stroke-width="3.5" />
+                <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--accent-teal)" stroke-width="3.5" stroke-dasharray="${report.daily_goal.progress_percent}, 100" stroke-linecap="round" />
+              </svg>
+              <div style="position:absolute; font-weight:800; font-size:1.1rem; color:var(--text-primary);">
+                ${report.daily_goal.progress_percent}%
+              </div>
+            </div>
+            <div>
+              <div style="font-size:1.2rem; font-weight:700; color:var(--text-primary); margin-bottom:4px;">
+                ${report.daily_goal.current_minutes} / ${report.daily_goal.goal_minutes} min
+              </div>
+              <p style="font-size:0.82rem; color:var(--text-secondary); margin:0;">
+                ${report.daily_goal.is_completed ? '🎉 ¡Meta diaria alcanzada!' : `Faltan ${Math.max(0, report.daily_goal.goal_minutes - report.daily_goal.current_minutes)} min para completar tu objetivo.`}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="stats-panel-card">
+          <h3>
+            <span class="material-icons-round" style="color:var(--accent-primary);">trending_up</span>
+            <span>Medias Diarias de Estudio</span>
+          </h3>
+          <table class="stats-table">
+            <thead>
+              <tr>
+                <th>Periodo</th>
+                <th class="num">Todos los días</th>
+                <th class="num">Días con estudio</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Últimos 7 días</strong></td>
+                <td class="num">${report.averages.last_7_days.avg_all_days_minutes} min/d</td>
+                <td class="num" style="color:var(--accent-teal);">${report.averages.last_7_days.avg_active_days_minutes} min/d</td>
+              </tr>
+              <tr>
+                <td><strong>Últimos 30 días</strong></td>
+                <td class="num">${report.averages.last_30_days.avg_all_days_minutes} min/d</td>
+                <td class="num" style="color:var(--accent-teal);">${report.averages.last_30_days.avg_active_days_minutes} min/d</td>
+              </tr>
+              <tr>
+                <td><strong>Histórico Global</strong></td>
+                <td class="num">${report.averages.global.avg_all_days_minutes} min/d</td>
+                <td class="num" style="color:var(--accent-teal);">${report.averages.global.avg_active_days_minutes} min/d</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ROW 2: Heatmap 7x24 y Franja Pico -->
+      <div class="stats-section-row">
+        <div class="stats-panel-card" style="grid-column: 1 / -1;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+            <h3 style="margin-bottom:0;">
+              <span class="material-icons-round" style="color:var(--accent-teal);">grid_view</span>
+              <span>Matriz Semanal de Enfoque (7 días × 24 horas)</span>
+            </h3>
+            <div style="font-size:0.82rem; color:var(--text-secondary); background:var(--bg-primary); padding:6px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+              <span style="color:var(--accent-teal); font-weight:700;">★ Franja más productiva:</span>
+              <span>${report.best_time_slots.best_2h_slot} (${Math.round(report.best_time_slots.best_2h_seconds / 60)} min)</span>
+            </div>
+          </div>
+          <div class="heatmap-scroll-wrap" tabindex="0" role="region" aria-label="Matriz de concentración horaria por día">
+            <svg class="heatmap-svg" viewBox="0 0 ${svgWidth} ${svgHeight}">
+              ${hoursHeaderSvg}
+              ${heatmapCellsSvg}
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- ROW 3: Distribución por Materias y Estado de Sesiones -->
+      <div class="stats-section-row">
+        <div class="stats-panel-card">
+          <h3>
+            <span class="material-icons-round" style="color:var(--accent-purple);">pie_chart</span>
+            <span>Distribución por Materia</span>
+          </h3>
+          ${report.subjects_distribution.subjects.length === 0 ? '<p class="empty-state">No hay sesiones de estudio registradas.</p>' : `
+            <div>
+              ${report.subjects_distribution.subjects.map(sub => `
+                <div class="subject-dist-item">
+                  <div class="subject-dist-header">
+                    <span class="subject-dist-name">
+                      <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${escHTML(sub.color)};"></span>
+                      <span>${escHTML(sub.name)}</span>
+                    </span>
+                    <span class="subject-dist-pct">${sub.hours}h (${sub.percentage}%)</span>
+                  </div>
+                  <div class="subject-dist-bar-track">
+                    <div class="subject-dist-bar-fill" style="width:${sub.percentage}%; background:${escHTML(sub.color)};"></div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          `}
+        </div>
+
+        <div class="stats-panel-card">
+          <h3>
+            <span class="material-icons-round" style="color:var(--accent-teal);">done_all</span>
+            <span>Tasa de Finalización</span>
+          </h3>
+          <div style="display:flex; flex-direction:column; gap:16px;">
+            <div>
+              <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:6px;">
+                <span style="color:#10B981; font-weight:700;">✓ Completadas: ${report.session_status.completed_percent}%</span>
+                <span style="color:#EF4444; font-weight:700;">✕ Abandonadas: ${report.session_status.abandoned_percent}%</span>
+              </div>
+              <div style="height:12px; display:flex; border-radius:6px; overflow:hidden; background:var(--bg-primary);">
+                <div style="width:${report.session_status.completed_percent}%; background:#10B981; transition:width 0.3s ease;"></div>
+                <div style="width:${report.session_status.abandoned_percent}%; background:#EF4444; transition:width 0.3s ease;"></div>
+              </div>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; text-align:center;">
+              <div style="background:var(--bg-primary); padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+                <div style="font-size:1.3rem; font-weight:800; color:#10B981;">${report.session_status.completed_count}</div>
+                <div style="font-size:0.75rem; color:var(--text-muted);">Completadas</div>
+              </div>
+              <div style="background:var(--bg-primary); padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+                <div style="font-size:1.3rem; font-weight:800; color:#EF4444;">${report.session_status.abandoned_count}</div>
+                <div style="font-size:0.75rem; color:var(--text-muted);">Abandonadas</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
 
   function renderStudyView() {
+    if (activeStudySubtab === 'stats') {
+      renderStudyStatsView();
+      return;
+    }
+    renderStudySubjectsView();
+  }
+
+  function renderStudySubjectsView() {
     subjects = loadSubjects();
     topics = loadTopics();
     focusSessions = loadFocusSessions();
@@ -1542,6 +1831,7 @@
 
     const grid = $('#subjects-grid');
     if (!grid) return;
+
 
     if (visibleSubjects.length === 0) {
       grid.innerHTML = `
@@ -3810,7 +4100,9 @@ SIEMPRE devuelve un JSON válido.
     $('#conflicts-done-btn')?.addEventListener('click', closeConflictsModal);
     $('#conflicts-overlay')?.addEventListener('click', (e) => { if (e.target === e.currentTarget) closeConflictsModal(); });
 
-    // Study view event listeners (Phase B)
+    // Study view event listeners (Phase B & D)
+    $('#subtab-btn-subjects')?.addEventListener('click', () => switchStudySubtab('subjects'));
+    $('#subtab-btn-stats')?.addEventListener('click', () => switchStudySubtab('stats'));
     $('#btn-seed-subjects')?.addEventListener('click', handleSeedSubjects);
     $('#btn-add-subject')?.addEventListener('click', () => openSubjectModal());
     $('#study-filter-archived')?.addEventListener('change', (e) => {
@@ -4450,13 +4742,17 @@ SIEMPRE devuelve un JSON válido.
       loadActiveFocusSession,
       saveActiveFocusSession,
       clearActiveFocusSession,
-      startFocusSessionFromSetup
+      startFocusSessionFromSetup,
+      switchStudySubtab,
+      renderStudyStatsView
     };
     window.syncWithBackend = syncWithBackend;
     window.renderDashboard = renderDashboard;
     window.renderCalendar = renderCalendar;
     window.renderActivityList = renderActivityList;
     window.renderStudyView = renderStudyView;
+    window.renderStudyStatsView = renderStudyStatsView;
+    window.switchStudySubtab = switchStudySubtab;
     window.openConflictsModal = openConflictsModal;
     window.closeConflictsModal = closeConflictsModal;
     window.updateConflictsBadge = updateConflictsBadge;
