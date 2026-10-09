@@ -137,11 +137,33 @@ function rebaseConflictChange(conflictsStore, queue, activityId, newBaseVersion)
 
 /**
  * Descarta la edición local en conflicto y adopta la versión del servidor.
+ * Para learning_notes: NO destruye el texto del usuario; lo preserva como una nota nueva
+ * con conflict_of apuntando al ID de la nota original en conflicto.
  */
-function discardConflictChange(conflictsStore, activityId) {
+function discardConflictChange(conflictsStore, itemId, options = {}) {
   const store = { ...(conflictsStore || {}) };
-  delete store[activityId];
-  return { conflictsStore: store };
+  const conflict = store[itemId];
+  let preservedNote = null;
+
+  if (conflict && conflict.localChange) {
+    const isLearningNote = conflict.localChange.collection === 'learning_notes' ||
+      conflict.localChange.learned_text !== undefined;
+    if (isLearningNote) {
+      const genId = options.generateUUIDFn || (() => `${Date.now()}_conflict_${Math.random().toString(36).substring(2, 7)}`);
+      preservedNote = {
+        ...conflict.localChange,
+        id: genId(),
+        conflict_of: itemId,
+        base_version: 1,
+        version: 1,
+        deleted_at: null,
+        updated_at: new Date().toISOString()
+      };
+    }
+  }
+
+  delete store[itemId];
+  return { conflictsStore: store, preservedNote };
 }
 
 /**
@@ -467,6 +489,114 @@ function migrateLegacyQueue(legacyQueue, defaultCollection = 'activities') {
   return Array.from(map.values());
 }
 
+/**
+ * Genera un backup JSON completo estructurado con las 5 colecciones bajo schema_version: 2.
+ */
+function exportAllCollections(data = {}) {
+  return {
+    schema_version: 2,
+    exported_at: new Date().toISOString(),
+    collections: {
+      activities: Array.isArray(data.activities) ? data.activities : [],
+      subjects: Array.isArray(data.subjects) ? data.subjects : [],
+      topics: Array.isArray(data.topics) ? data.topics : [],
+      focus_sessions: Array.isArray(data.focus_sessions) ? data.focus_sessions : [],
+      learning_notes: Array.isArray(data.learning_notes) ? data.learning_notes : []
+    }
+  };
+}
+
+/**
+ * Valida minuciosamente un payload de importación multi-colección,
+ * manteniendo compatibilidad transparente con backups legacy (array plano de actividades).
+ */
+function validateMultiCollectionImportPayload(raw) {
+  let parsed = raw;
+  if (typeof raw === 'string') {
+    if (raw.length > MAX_IMPORT_SIZE_BYTES) {
+      return { valid: false, error: 'El archivo excede el tamaño máximo permitido (5 MB).' };
+    }
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      return { valid: false, error: 'El archivo no contiene un JSON válido.' };
+    }
+  }
+
+  // Compatibilidad hacia atrás: si es un array plano de actividades legacy
+  if (Array.isArray(parsed)) {
+    const actRes = validateImportPayload(parsed);
+    if (!actRes.valid) return actRes;
+    return {
+      valid: true,
+      schema_version: 1,
+      sanitized: {
+        activities: actRes.sanitized,
+        subjects: [],
+        topics: [],
+        focus_sessions: [],
+        learning_notes: []
+      }
+    };
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return { valid: false, error: 'El payload de importación debe ser un objeto JSON o array.' };
+  }
+
+  const collections = parsed.collections || {};
+  const actList = Array.isArray(collections.activities) ? collections.activities : (Array.isArray(parsed.activities) ? parsed.activities : []);
+  const actRes = validateImportPayload(actList);
+  if (!actRes.valid) return actRes;
+
+  const sanitized = {
+    activities: actRes.sanitized,
+    subjects: Array.isArray(collections.subjects) ? collections.subjects : [],
+    topics: Array.isArray(collections.topics) ? collections.topics : [],
+    focus_sessions: Array.isArray(collections.focus_sessions) ? collections.focus_sessions : [],
+    learning_notes: Array.isArray(collections.learning_notes) ? collections.learning_notes : []
+  };
+
+  return { valid: true, schema_version: parsed.schema_version || 2, sanitized };
+}
+
+/**
+ * Prepara cambios de importación para las 5 colecciones sin degradar versiones ni resucitar tombstones.
+ */
+function prepareMultiCollectionImportChanges(importedCollections = {}, currentCollections = {}, generateUUIDFn, options = {}) {
+  const allMerged = {};
+  const allChanges = [];
+  const allStats = { imported: 0, skipped: 0, conflicted: 0 };
+
+  const colNames = ['activities', 'subjects', 'topics', 'focus_sessions', 'learning_notes'];
+  colNames.forEach(col => {
+    const impList = importedCollections[col] || [];
+    const curList = currentCollections[col] || [];
+    const res = prepareImportChanges(impList, curList, generateUUIDFn, options);
+    allMerged[col] = res.mergedActivities;
+    res.changesToEnqueue.forEach(c => allChanges.push({ ...c, collection: col }));
+    allStats.imported += res.stats.imported;
+    allStats.skipped += res.stats.skipped;
+    allStats.conflicted += res.stats.conflicted;
+  });
+
+  return { mergedCollections: allMerged, changesToEnqueue: allChanges, stats: allStats };
+}
+
+/**
+ * Helpers tolerantes a huérfanos: no se rompen ante referencias no existentes.
+ */
+function getSubjectForSession(subjects, subjectId) {
+  if (!Array.isArray(subjects) || !subjectId) return null;
+  return subjects.find(s => s && s.id === subjectId && !s.deleted_at) || null;
+}
+
+function getTopicsForSession(topics, topicIds) {
+  if (!Array.isArray(topics) || !Array.isArray(topicIds)) return [];
+  const set = new Set(topicIds);
+  return topics.filter(t => t && set.has(t.id) && !t.deleted_at);
+}
+
 const mergeCollectionChanges = mergeRemoteChanges;
 
 // Exportación compatible con Node.js y Navegadores
@@ -491,7 +621,12 @@ if (typeof module !== 'undefined' && module.exports) {
     getPriorityStats,
     getAlarmEligibleActivities,
     validateImportPayload,
-    prepareImportChanges
+    prepareImportChanges,
+    exportAllCollections,
+    validateMultiCollectionImportPayload,
+    prepareMultiCollectionImportChanges,
+    getSubjectForSession,
+    getTopicsForSession
   };
 }
 if (typeof window !== 'undefined') {
@@ -515,7 +650,12 @@ if (typeof window !== 'undefined') {
     getPriorityStats,
     getAlarmEligibleActivities,
     validateImportPayload,
-    prepareImportChanges
+    prepareImportChanges,
+    exportAllCollections,
+    validateMultiCollectionImportPayload,
+    prepareMultiCollectionImportChanges,
+    getSubjectForSession,
+    getTopicsForSession
   };
 }
 

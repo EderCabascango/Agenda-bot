@@ -48,6 +48,11 @@
   const CONFLICTS_KEY = 'diary_conflicts';
   const REJECTED_KEY = 'diary_rejected_items';
 
+  const SUBJECTS_KEY = 'diary_subjects';
+  const TOPICS_KEY = 'diary_topics';
+  const FOCUS_SESSIONS_KEY = 'diary_focus_sessions';
+  const LEARNING_NOTES_KEY = 'diary_learning_notes';
+
   function safeStorageGet(key, defaultVal = null) {
     try {
       const adapter = (typeof SyncCore !== 'undefined' && SyncCore.StorageAdapter) ? SyncCore.StorageAdapter : {
@@ -84,6 +89,35 @@
     activities = list;
     safeStorageSet(STORAGE_KEY, list);
   }
+  function loadSubjects() {
+    return safeStorageGet(SUBJECTS_KEY, []);
+  }
+  function saveSubjects(list) {
+    subjects = list;
+    safeStorageSet(SUBJECTS_KEY, list);
+  }
+  function loadTopics() {
+    return safeStorageGet(TOPICS_KEY, []);
+  }
+  function saveTopics(list) {
+    topics = list;
+    safeStorageSet(TOPICS_KEY, list);
+  }
+  function loadFocusSessions() {
+    return safeStorageGet(FOCUS_SESSIONS_KEY, []);
+  }
+  function saveFocusSessions(list) {
+    focusSessions = list;
+    safeStorageSet(FOCUS_SESSIONS_KEY, list);
+  }
+  function loadLearningNotes() {
+    return safeStorageGet(LEARNING_NOTES_KEY, []);
+  }
+  function saveLearningNotes(list) {
+    learningNotes = list;
+    safeStorageSet(LEARNING_NOTES_KEY, list);
+  }
+
   function loadSettings() {
     return safeStorageGet(SETTINGS_KEY, {});
   }
@@ -151,6 +185,10 @@
   }
 
   let activities = loadActivities();
+  let subjects = loadSubjects();
+  let topics = loadTopics();
+  let focusSessions = loadFocusSessions();
+  let learningNotes = loadLearningNotes();
   let settings = loadSettings();
   let currentFilter = 'all';
   let calMonth = new Date().getMonth();
@@ -1217,7 +1255,19 @@
     const btnExport = $('#btn-export');
     if (btnExport) {
       btnExport.addEventListener('click', () => {
-        const data = JSON.stringify(activities, null, 2);
+        let exportObj;
+        if (typeof SyncCore !== 'undefined' && SyncCore.exportAllCollections) {
+          exportObj = SyncCore.exportAllCollections({
+            activities,
+            subjects,
+            topics,
+            focus_sessions: focusSessions,
+            learning_notes: learningNotes
+          });
+        } else {
+          exportObj = activities;
+        }
+        const data = JSON.stringify(exportObj, null, 2);
         const blob = new Blob([data], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -1231,14 +1281,14 @@
     if (btnImport) {
       btnImport.addEventListener('click', () => $('#import-file').click());
     }
-    function savePreImportSnapshot(currentActs) {
+    function savePreImportSnapshot(currentStores) {
       try {
         const keys = Object.keys(localStorage).filter(k => k.startsWith('diary_backup_pre_import_')).sort();
         while (keys.length >= 2) {
           const oldest = keys.shift();
           localStorage.removeItem(oldest);
         }
-        localStorage.setItem('diary_backup_pre_import_' + Date.now(), JSON.stringify(currentActs, null, 2));
+        localStorage.setItem('diary_backup_pre_import_' + Date.now(), JSON.stringify(currentStores, null, 2));
       } catch (err) {
         if (err.name === 'QuotaExceededError' || err.code === 22) {
           showToast('Almacenamiento lleno para snapshots automáticos', 'warning', 'var(--accent-amber)');
@@ -1257,17 +1307,29 @@
         reader.onload = async (ev) => {
           try {
             // 1. Validar minuciosamente estructura, tipos y campos
-            const val = (typeof SyncCore !== 'undefined' && SyncCore.validateImportPayload)
-              ? SyncCore.validateImportPayload(ev.target.result)
-              : { valid: Array.isArray(JSON.parse(ev.target.result)), sanitized: JSON.parse(ev.target.result) };
+            let val;
+            if (typeof SyncCore !== 'undefined' && SyncCore.validateMultiCollectionImportPayload) {
+              val = SyncCore.validateMultiCollectionImportPayload(ev.target.result);
+            } else if (typeof SyncCore !== 'undefined' && SyncCore.validateImportPayload) {
+              const actRes = SyncCore.validateImportPayload(ev.target.result);
+              val = actRes.valid ? {
+                valid: true,
+                schema_version: 1,
+                sanitized: { activities: actRes.sanitized, subjects: [], topics: [], focus_sessions: [], learning_notes: [] }
+              } : actRes;
+            } else {
+              const parsed = JSON.parse(ev.target.result);
+              val = { valid: true, sanitized: Array.isArray(parsed) ? { activities: parsed, subjects: [], topics: [], focus_sessions: [], learning_notes: [] } : parsed };
+            }
 
             if (!val.valid) {
               showToast(val.error || 'Archivo inválido', 'error', 'var(--accent-red)');
               return;
             }
 
+            const totalItems = Object.values(val.sanitized).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0);
             const proceed = confirm(
-              `¿Deseas restaurar ${val.sanitized.length} actividades?\nSe creará un respaldo automático de tu agenda actual antes de importar.`
+              `¿Deseas restaurar ${totalItems} elementos de datos?\nSe creará un respaldo automático de tu agenda actual antes de importar.`
             );
             if (!proceed) {
               importFile.value = '';
@@ -1275,37 +1337,51 @@
             }
 
             // 2. Respaldo automático conservando máx 2 snapshots
-            savePreImportSnapshot(activities);
+            savePreImportSnapshot({ activities, subjects, topics, focusSessions, learningNotes });
 
             // 3. Preparar cambios no destructivos con SyncCore
-            if (typeof SyncCore !== 'undefined' && SyncCore.prepareImportChanges) {
-              const { mergedActivities, changesToEnqueue, stats } = SyncCore.prepareImportChanges(
-                val.sanitized,
+            if (typeof SyncCore !== 'undefined' && SyncCore.prepareMultiCollectionImportChanges) {
+              const currentStores = {
                 activities,
+                subjects,
+                topics,
+                focus_sessions: focusSessions,
+                learning_notes: learningNotes
+              };
+              const { mergedCollections, changesToEnqueue, stats } = SyncCore.prepareMultiCollectionImportChanges(
+                val.sanitized,
+                currentStores,
                 generateUUID
               );
-              activities = mergedActivities;
+
+              if (mergedCollections.activities) saveActivities(mergedCollections.activities);
+              if (mergedCollections.subjects) saveSubjects(mergedCollections.subjects);
+              if (mergedCollections.topics) saveTopics(mergedCollections.topics);
+              if (mergedCollections.focus_sessions) saveFocusSessions(mergedCollections.focus_sessions);
+              if (mergedCollections.learning_notes) saveLearningNotes(mergedCollections.learning_notes);
+
               changesToEnqueue.forEach(ch => enqueueChange(ch));
 
-              saveActivities(activities);
               renderDashboard();
               renderActivityList();
               renderCalendar();
               renderDiarioGrid();
               scheduleWebAlarms();
 
-              const msg = `Importación: ${stats.imported} importadas${stats.skipped ? `, ${stats.skipped} omitidas (borradas)` : ''}${stats.conflicted ? `, ${stats.conflicted} no degradadas` : ''} ✓`;
+              const msg = `Importación: ${stats.imported} importados${stats.skipped ? `, ${stats.skipped} omitidos` : ''}${stats.conflicted ? `, ${stats.conflicted} no degradados` : ''} ✓`;
               showToast(msg);
             } else {
-              activities = val.sanitized;
-              val.sanitized.forEach(ch => enqueueChange(ch));
-              saveActivities(activities);
+              if (val.sanitized.activities) {
+                activities = val.sanitized.activities;
+                saveActivities(activities);
+                activities.forEach(ch => enqueueChange(ch));
+              }
               renderDashboard();
               renderActivityList();
               renderCalendar();
               renderDiarioGrid();
               scheduleWebAlarms();
-              showToast(`${val.sanitized.length} actividades importadas ✓`);
+              showToast(`${totalItems} elementos importados ✓`);
             }
 
             // 4. Sincronizar en segundo plano
@@ -1855,8 +1931,21 @@ SIEMPRE devuelve un JSON válido.
     return res.json();
   }
 
+  const COLLECTION_LABELS = {
+    activities: 'Actividad',
+    subjects: 'Materia',
+    topics: 'Tema',
+    focus_sessions: 'Sesión de Enfoque',
+    learning_notes: 'Nota de Aprendizaje'
+  };
+
   async function syncWithBackend() {
     activities = loadActivities();
+    subjects = loadSubjects();
+    topics = loadTopics();
+    focusSessions = loadFocusSessions();
+    learningNotes = loadLearningNotes();
+
     const base = getBackendBaseUrl();
     let queue = getSyncQueue();
     if (typeof SyncCore !== 'undefined' && SyncCore.migrateLegacyQueue) {
@@ -1865,101 +1954,105 @@ SIEMPRE devuelve un JSON válido.
     }
     const lastSync = getLastSync();
 
+    const collectionsPayload = {
+      activities: queue.filter(q => !q.collection || q.collection === 'activities'),
+      subjects: queue.filter(q => q.collection === 'subjects'),
+      topics: queue.filter(q => q.collection === 'topics'),
+      focus_sessions: queue.filter(q => q.collection === 'focus_sessions'),
+      learning_notes: queue.filter(q => q.collection === 'learning_notes')
+    };
+
     try {
-      const res = await fetch(base + '/activities/sync', {
+      const res = await fetch(base + '/sync', {
         method: 'POST',
         headers: backendHeaders(),
-        body: JSON.stringify({ changes: queue, since: lastSync })
+        body: JSON.stringify({ collections: collectionsPayload, since: lastSync })
       });
       if (!res.ok) return false;
       const data = await res.json();
 
-      // Limpia de la cola los cambios procesados exitosamente
       let remainingQueue = (typeof SyncCore !== 'undefined' && SyncCore.purgeCommittedAndConflicted)
         ? SyncCore.purgeCommittedAndConflicted(queue, queue)
         : [];
       saveSyncQueue(remainingQueue);
 
+      const results = data.results || {};
+      let allConflicts = [];
+      let allRejected = [];
+      let allUnknown = [];
+
+      Object.entries(results).forEach(([colName, colRes]) => {
+        if (Array.isArray(colRes.conflicts)) {
+          colRes.conflicts.forEach(c => allConflicts.push({ ...c, collection: colName }));
+        }
+        if (Array.isArray(colRes.rejected)) {
+          allRejected.push(...colRes.rejected);
+        }
+        if (Array.isArray(colRes.unknown_fields)) {
+          allUnknown.push(...colRes.unknown_fields);
+        }
+      });
+
       // Manejo de ítems rechazados por validación del servidor
-      if (Array.isArray(data.rejected) && data.rejected.length > 0) {
+      if (allRejected.length > 0) {
         let rejectedStore = getRejectedStore();
         if (typeof SyncCore !== 'undefined' && SyncCore.handleRejectedItems) {
-          const resRej = SyncCore.handleRejectedItems(rejectedStore, queue, data.rejected);
+          const resRej = SyncCore.handleRejectedItems(rejectedStore, queue, allRejected);
           saveRejectedStore(resRej.rejectedStore);
           remainingQueue = resRej.queue;
           saveSyncQueue(remainingQueue);
         }
-        showToast(`⚠️ ${data.rejected.length} elemento(s) rechazado(s) por validación del servidor.`, 'warning', 'var(--accent-amber)');
+        showToast(`⚠️ ${allRejected.length} elemento(s) rechazado(s) por validación.`, 'warning', 'var(--accent-amber)');
       }
 
       // Manejo de campos desconocidos reportados
-      if (Array.isArray(data.unknown_fields) && data.unknown_fields.length > 0) {
-        console.warn('[SyncCore] Campos desconocidos reportados por el servidor:', data.unknown_fields);
+      if (allUnknown.length > 0) {
+        console.warn('[SyncCore] Campos desconocidos reportados por el servidor:', allUnknown);
       }
 
       // Manejo de conflictos sin pérdida silenciosa
-      if (Array.isArray(data.conflicts) && data.conflicts.length > 0) {
+      if (allConflicts.length > 0) {
         let conflictsStore = getConflictsStore();
         if (typeof SyncCore !== 'undefined' && SyncCore.handleSyncConflicts) {
-          const resConf = SyncCore.handleSyncConflicts(conflictsStore, queue, data.conflicts);
+          const resConf = SyncCore.handleSyncConflicts(conflictsStore, queue, allConflicts);
           saveConflictsStore(resConf.conflictsStore);
         }
-        const first = data.conflicts[0];
-        const act = activities.find(a => a.id === first.id);
-        const name = act ? act.title : first.id;
-        showToast(`⚠️ Conflicto en "${name}": el servidor tiene una versión más nueva (v${first.server_version}).`, 'warning', 'var(--accent-amber)');
+        const first = allConflicts[0];
+        const label = COLLECTION_LABELS[first.collection] || 'elemento';
+        showToast(`⚠️ Conflicto en ${label}: el servidor tiene una versión más nueva (v${first.server_version}).`, 'warning', 'var(--accent-amber)');
       }
 
       if (data.server_time) {
         setLastSync(data.server_time);
       }
 
-      // Mezclar cambios remotos usando SyncCore
-      if (typeof SyncCore !== 'undefined' && SyncCore.mergeRemoteChanges) {
-        const { activities: merged, modified } = SyncCore.mergeRemoteChanges(activities, data.changes, {
-          resyncRequired: Boolean(data.resync_required),
-          pendingQueue: remainingQueue
-        });
-        if (modified) {
-          activities = merged;
-          saveActivities(activities);
-          renderDashboard();
-          renderActivityList();
-          renderCalendar();
-          renderDiarioGrid();
-          scheduleWebAlarms();
+      // Mezclar cambios remotos usando SyncCore para cada colección
+      const mergeCol = (localList, colName, saveFn) => {
+        const colRes = results[colName];
+        if (!colRes || !Array.isArray(colRes.changes)) return;
+        if (typeof SyncCore !== 'undefined' && SyncCore.mergeCollectionChanges) {
+          const { activities: merged, modified } = SyncCore.mergeCollectionChanges(localList, colRes.changes, {
+            resyncRequired: Boolean(data.resync_required || colRes.resync_required),
+            pendingQueue: remainingQueue.filter(q => q.collection === colName)
+          });
+          if (modified) saveFn(merged);
         }
-      } else if (Array.isArray(data.changes) && data.changes.length > 0) {
-        let modified = false;
-        data.changes.forEach(remote => {
-          const idx = activities.findIndex(a => a.id === remote.id);
-          if (remote.deleted_at) {
-            if (idx !== -1) {
-              activities.splice(idx, 1);
-              modified = true;
-            }
-          } else {
-            if (idx !== -1) {
-              const localVer = activities[idx].version || 1;
-              if ((remote.version || 1) >= localVer) {
-                activities[idx] = { ...activities[idx], ...remote };
-                modified = true;
-              }
-            } else {
-              activities.push(remote);
-              modified = true;
-            }
-          }
-        });
-        if (modified) {
-          saveActivities(activities);
-          renderDashboard();
-          renderActivityList();
-          renderCalendar();
-          renderDiarioGrid();
-          scheduleWebAlarms();
-        }
-      }
+      };
+
+      mergeCol(activities, 'activities', (m) => {
+        activities = m;
+        saveActivities(activities);
+        renderDashboard();
+        renderActivityList();
+        renderCalendar();
+        renderDiarioGrid();
+        scheduleWebAlarms();
+      });
+      mergeCol(subjects, 'subjects', (m) => { subjects = m; saveSubjects(subjects); });
+      mergeCol(topics, 'topics', (m) => { topics = m; saveTopics(topics); });
+      mergeCol(focusSessions, 'focus_sessions', (m) => { focusSessions = m; saveFocusSessions(focusSessions); });
+      mergeCol(learningNotes, 'learning_notes', (m) => { learningNotes = m; saveLearningNotes(learningNotes); });
+
       return true;
     } catch (err) {
       console.warn('Sync backend en espera:', err);
@@ -2013,22 +2106,27 @@ SIEMPRE devuelve un JSON válido.
       const conf = store[id];
       const local = conf.localChange || {};
       const server = conf.serverItem || {};
-      const title = local.title || server.title || id;
-      const date = local.date || server.date || '';
+      const collection = conf.collection || local.collection || 'activities';
+      const colLabel = COLLECTION_LABELS[collection] || 'Elemento';
+      const title = local.title || local.name || local.goal || (local.learned_text ? local.learned_text.substring(0, 30) + '...' : '') || server.title || server.name || id;
+      const subtitle = local.date || local.started_at || '';
 
       return `
         <div class="conflict-card" style="border:1px solid var(--border-medium); border-radius:var(--radius-md); padding:12px; background:var(--bg-card); margin-bottom:10px;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
             <div>
+              <span style="font-size:0.75rem; background:rgba(91,111,160,0.15); color:var(--accent-teal); padding:1px 6px; border-radius:4px; font-weight:600; margin-bottom:4px; display:inline-block;">
+                ${colLabel}
+              </span>
               <div style="font-weight:600; font-size:0.95rem; color:var(--text-primary);">${escHTML(title)}</div>
-              <div style="font-size:0.8rem; color:var(--text-muted);">${date}</div>
+              ${subtitle ? `<div style="font-size:0.8rem; color:var(--text-muted);">${subtitle}</div>` : ''}
             </div>
             <span style="font-size:0.75rem; background:rgba(255,171,0,0.15); color:var(--accent-amber); padding:2px 8px; border-radius:12px; font-weight:600;">
               Servidor v${conf.serverVersion || 2}
             </span>
           </div>
           <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:12px;">
-            Tu cambio local: <em>"${escHTML(local.title || title)}"</em> (${local.startTime || '--'}-${local.endTime || '--'})
+            Tu cambio local: <em>"${escHTML(title)}"</em>
           </p>
           <div style="display:flex; gap:8px;">
             <button class="btn-secondary" style="flex:1; padding:6px 10px; font-size:0.8rem;" data-resolve="discard" data-id="${id}">
@@ -2050,14 +2148,24 @@ SIEMPRE devuelve un JSON válido.
 
         if (action === 'discard') {
           if (typeof SyncCore !== 'undefined' && SyncCore.discardConflictChange) {
-            const res = SyncCore.discardConflictChange(currentStore, id);
+            const res = SyncCore.discardConflictChange(currentStore, id, { generateUUIDFn: generateUUID });
             saveConflictsStore(res.conflictsStore);
+            if (res.preservedNote) {
+              learningNotes = loadLearningNotes();
+              learningNotes.push(res.preservedNote);
+              saveLearningNotes(learningNotes);
+              enqueueChange({ ...res.preservedNote, collection: 'learning_notes' });
+              showToast('Nota preservada como copia local y versión del servidor adoptada ✓');
+            } else {
+              showToast('Versión del servidor adoptada ✓');
+            }
           } else {
             delete currentStore[id];
             saveConflictsStore(currentStore);
+            showToast('Versión del servidor adoptada ✓');
           }
-          showToast('Versión del servidor adoptada ✓');
           renderConflictsList();
+          await syncWithBackend();
         } else if (action === 'rebase') {
           const version = parseInt(btn.dataset.version || '2', 10);
           const queue = getSyncQueue();

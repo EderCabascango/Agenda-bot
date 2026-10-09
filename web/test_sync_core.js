@@ -1,5 +1,6 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
+const SyncCore = require('./sync-core.js');
 const {
   StorageAdapter,
   escHTML,
@@ -17,8 +18,15 @@ const {
   getPriorityStats,
   getAlarmEligibleActivities,
   validateImportPayload,
-  prepareImportChanges
-} = require('./sync-core.js');
+  prepareImportChanges,
+  handleRejectedItems,
+  migrateLegacyQueue,
+  exportAllCollections,
+  validateMultiCollectionImportPayload,
+  prepareMultiCollectionImportChanges,
+  getSubjectForSession,
+  getTopicsForSession
+} = SyncCore;
 
 describe('SyncCore - Complete Client Sync Logic Test Suite (Fase 1, 1.5, 1.6)', () => {
 
@@ -453,5 +461,134 @@ describe('SyncCore - Complete Client Sync Logic Test Suite (Fase 1, 1.5, 1.6)', 
     });
   });
 
+  describe('Fase A2: Multi-colección, preservación de notas y huérfanos tolerables', () => {
+    test('exportAllCollections genera payload con schema_version 2 y las 5 colecciones', () => {
+      const data = {
+        activities: [{ id: 'act-1', title: 'A1' }],
+        subjects: [{ id: 'sub-1', name: 'S1' }],
+        topics: [{ id: 'top-1', name: 'T1' }],
+        focus_sessions: [{ id: 'foc-1', effective_seconds: 1500 }],
+        learning_notes: [{ id: 'not-1', learned_text: 'L1' }]
+      };
+      const exp = SyncCore.exportAllCollections(data);
+      assert.equal(exp.schema_version, 2);
+      assert.ok(exp.exported_at);
+      assert.equal(exp.collections.activities.length, 1);
+      assert.equal(exp.collections.subjects.length, 1);
+      assert.equal(exp.collections.topics.length, 1);
+      assert.equal(exp.collections.focus_sessions.length, 1);
+      assert.equal(exp.collections.learning_notes.length, 1);
+    });
+
+    test('validateMultiCollectionImportPayload valida formato v2 y mantiene compatibilidad v1 legacy', () => {
+      // V2 payload
+      const v2Payload = {
+        schema_version: 2,
+        collections: {
+          activities: [{ id: 'act-1', title: 'Actividad V2', date: '2026-10-10' }],
+          subjects: [{ id: 'sub-1', name: 'Materia V2' }]
+        }
+      };
+      const resV2 = SyncCore.validateMultiCollectionImportPayload(v2Payload);
+      assert.equal(resV2.valid, true);
+      assert.equal(resV2.sanitized.activities.length, 1);
+      assert.equal(resV2.sanitized.subjects.length, 1);
+
+      // V1 legacy payload (array plano de actividades)
+      const v1Payload = [{ id: 'act-old', title: 'Legacy Act', date: '2026-10-10' }];
+      const resV1 = SyncCore.validateMultiCollectionImportPayload(v1Payload);
+      assert.equal(resV1.valid, true);
+      assert.equal(resV1.schema_version, 1);
+      assert.equal(resV1.sanitized.activities.length, 1);
+      assert.equal(resV1.sanitized.activities[0].title, 'Legacy Act');
+      assert.deepEqual(resV1.sanitized.subjects, []);
+    });
+
+    test('prepareMultiCollectionImportChanges fusiona 5 colecciones respetando versiones y tombstones', () => {
+      const imported = {
+        activities: [{ id: 'act-1', title: 'Act Importada', date: '2026-10-10', version: 1 }],
+        subjects: [{ id: 'sub-1', name: 'Materia Importada', version: 1 }],
+        topics: [],
+        focus_sessions: [{ id: 'foc-1', effective_seconds: 1800, version: 1 }],
+        learning_notes: []
+      };
+      const current = {
+        activities: [{ id: 'act-1', title: 'Act Local Más Nueva', date: '2026-10-10', version: 2 }],
+        subjects: [],
+        topics: [],
+        focus_sessions: [],
+        learning_notes: []
+      };
+
+      const res = SyncCore.prepareMultiCollectionImportChanges(imported, current, () => 'new-uuid');
+      assert.equal(res.stats.imported, 2); // sub-1 y foc-1 importadas
+      assert.equal(res.stats.conflicted, 1); // act-1 omitida por version inferior
+      assert.equal(res.mergedCollections.activities[0].title, 'Act Local Más Nueva');
+      assert.equal(res.mergedCollections.subjects.length, 1);
+      assert.equal(res.mergedCollections.focus_sessions.length, 1);
+      assert.ok(res.changesToEnqueue.some(c => c.collection === 'subjects'));
+      assert.ok(res.changesToEnqueue.some(c => c.collection === 'focus_sessions'));
+    });
+
+    test('discardConflictChange preserva texto de learning_notes con conflict_of', () => {
+      const conflictsStore = {
+        'note-orig-1': {
+          localChange: {
+            id: 'note-orig-1',
+            collection: 'learning_notes',
+            learned_text: 'Apunte muy importante del alumno que no debe perderse',
+            topic_ids: ['top-1']
+          }
+        },
+        'act-orig-1': {
+          localChange: {
+            id: 'act-orig-1',
+            collection: 'activities',
+            title: 'Actividad que se descarta normalmente'
+          }
+        }
+      };
+
+      // 1. Descartar conflicto de learning_notes -> preserva texto
+      const resNote = SyncCore.discardConflictChange(conflictsStore, 'note-orig-1', {
+        generateUUIDFn: () => 'note-preserved-123'
+      });
+      assert.equal(resNote.conflictsStore['note-orig-1'], undefined);
+      assert.ok(resNote.preservedNote);
+      assert.equal(resNote.preservedNote.id, 'note-preserved-123');
+      assert.equal(resNote.preservedNote.conflict_of, 'note-orig-1');
+      assert.equal(resNote.preservedNote.learned_text, 'Apunte muy importante del alumno que no debe perderse');
+
+      // 2. Descartar conflicto de activities -> no genera preservedNote
+      const resAct = SyncCore.discardConflictChange(conflictsStore, 'act-orig-1');
+      assert.equal(resAct.conflictsStore['act-orig-1'], undefined);
+      assert.equal(resAct.preservedNote, null);
+    });
+
+    test('helpers tolerantes a huérfanos manejan referencias ausentes y tombstones', () => {
+      const subjects = [
+        { id: 'sub-active', name: 'Materia Activa', deleted_at: null },
+        { id: 'sub-deleted', name: 'Materia Borrada', deleted_at: '2026-10-10T12:00:00Z' }
+      ];
+      const topics = [
+        { id: 'top-1', name: 'Tema 1', deleted_at: null },
+        { id: 'top-2', name: 'Tema 2', deleted_at: '2026-10-10T12:00:00Z' }
+      ];
+
+      // Sesión con materia activa
+      assert.equal(SyncCore.getSubjectForSession(subjects, 'sub-active').name, 'Materia Activa');
+      // Sesión con materia borrada o inexistente
+      assert.equal(SyncCore.getSubjectForSession(subjects, 'sub-deleted'), null);
+      assert.equal(SyncCore.getSubjectForSession(subjects, 'sub-nonexistent'), null);
+      assert.equal(SyncCore.getSubjectForSession(null, 'sub-active'), null);
+
+      // Temas para sesión
+      const resTopics = SyncCore.getTopicsForSession(topics, ['top-1', 'top-2', 'top-unknown']);
+      assert.equal(resTopics.length, 1);
+      assert.equal(resTopics[0].id, 'top-1');
+    });
+  });
+
 });
+
 

@@ -634,3 +634,256 @@ def test_multi_collection_atomic_rollback_on_failure():
     assert orig is not None
     assert orig["title"] == "Original Inalterable"
 
+
+# ==========================================
+# FASE A2: TESTS DE 5 COLECCIONES E INVARIANTES
+# ==========================================
+
+SAMPLE_ITEMS_FOR_COLLECTIONS = {
+    "activities": {"id": "act_a2_1", "title": "Estudio Cálculo", "date": "2026-10-10", "startTime": "08:00", "endTime": "09:00"},
+    "subjects": {"id": "sub_a2_1", "name": "Matemáticas Discretas", "color": "#1ABC9C", "icon": "functions", "weekly_goal_minutes": 300},
+    "topics": {"id": "top_a2_1", "subject_id": "sub_a2_1", "name": "Grafos y Árboles", "status": "in_progress"},
+    "focus_sessions": {
+        "id": "foc_a2_1", "subject_id": "sub_a2_1", "topic_ids": ["top_a2_1"],
+        "method": "pomodoro", "goal": "Resolver problemas de grafos",
+        "started_at": "2026-10-10T10:00:00.000000Z", "ended_at": "2026-10-10T10:55:00.000000Z",
+        "focus_intervals": [["2026-10-10T10:00:00.000000Z", "2026-10-10T10:25:00.000000Z"], ["2026-10-10T10:30:00.000000Z", "2026-10-10T10:55:00.000000Z"]],
+        "effective_seconds": 3000, "break_seconds": 300, "source": "timer"
+    },
+    "learning_notes": {
+        "id": "not_a2_1", "subject_id": "sub_a2_1", "topic_ids": ["top_a2_1"],
+        "learned_text": "Algoritmo de Dijkstra para caminos mínimos",
+        "questions_text": "¿Cómo manejar aristas de peso negativo?",
+        "comprehension_level": 4, "focus_level": 5
+    }
+}
+
+
+@pytest.mark.parametrize("coll_name", ["activities", "subjects", "topics", "focus_sessions", "learning_notes"])
+def test_parameterized_collection_crud_and_sync(coll_name):
+    """(Fase A2) Verifica ciclo de vida completo (CRUD, sync pull/push, versiones) para las 5 colecciones."""
+    user = f"user_crud_{coll_name}"
+    item = dict(SAMPLE_ITEMS_FOR_COLLECTIONS[coll_name])
+
+    # 1. Upsert / Sync push
+    res_push = db.sync_collection(user, coll_name, changes=[item], since=None)
+    assert res_push["applied"] == 1
+    assert len(res_push["rejected"]) == 0
+    server_time_1 = res_push["server_time"]
+
+    # 2. Get individual
+    saved = db.get_collection_item(user, coll_name, item["id"])
+    assert saved is not None
+    assert saved["id"] == item["id"]
+    assert saved["version"] == 1
+
+    # 3. Update con incremento de versión
+    updated_item = dict(item)
+    updated_item["base_version"] = 1
+    if "name" in updated_item:
+        updated_item["name"] = updated_item["name"] + " (Modificado)"
+    elif "title" in updated_item:
+        updated_item["title"] = updated_item["title"] + " (Modificado)"
+    elif "learned_text" in updated_item:
+        updated_item["learned_text"] = "Texto actualizado"
+    elif "goal" in updated_item:
+        updated_item["goal"] = "Objetivo actualizado"
+
+    res_push_2 = db.sync_collection(user, coll_name, changes=[updated_item], since=server_time_1)
+    assert res_push_2["applied"] == 1
+    assert len(res_push_2["rejected"]) == 0
+    server_time_2 = res_push_2["server_time"]
+
+    saved_2 = db.get_collection_item(user, coll_name, item["id"])
+    assert saved_2["version"] == 2
+
+    # 4. Pull incremental
+    pull = db.sync_collection(user, coll_name, changes=[], since=server_time_1)
+    assert len(pull["changes"]) == 1
+    assert pull["changes"][0]["id"] == item["id"]
+    assert pull["changes"][0]["version"] == 2
+
+
+@pytest.mark.parametrize("coll_name", ["activities", "subjects", "topics", "focus_sessions", "learning_notes"])
+def test_parameterized_collection_tombstone_propagation(coll_name):
+    """(Fase A2) Verifica propagación de tombstones (deleted_at) para las 5 colecciones."""
+    user = f"user_tomb_{coll_name}"
+    item = dict(SAMPLE_ITEMS_FOR_COLLECTIONS[coll_name])
+
+    # Crear item
+    res_1 = db.sync_collection(user, coll_name, changes=[item], since=None)
+    assert res_1["applied"] == 1
+    t1 = res_1["server_time"]
+
+    # Eliminar item (soft delete)
+    del_item = {"id": item["id"], "base_version": 1, "deleted_at": "2026-10-10T12:00:00.000000Z"}
+    res_del = db.sync_collection(user, coll_name, changes=[del_item], since=t1)
+    assert res_del["applied"] == 1
+    assert len(res_del["rejected"]) == 0
+    t2 = res_del["server_time"]
+
+    # Pull desde t1 debe recibir el tombstone
+    pull = db.sync_collection(user, coll_name, changes=[], since=t1)
+    assert len(pull["changes"]) == 1
+    assert pull["changes"][0]["deleted_at"] is not None
+    assert pull["changes"][0]["version"] == 2
+
+    # List active items no debe incluir el elemento borrado
+    active = db.list_collection(user, coll_name, include_deleted=False)
+    assert len(active) == 0
+
+
+def test_focus_session_interval_invariants():
+    """(Fase A2) Valida invariantes de focus_sessions: orden temporal, solapamientos, límites y duración efectiva."""
+    user = "user_foc_invariants"
+
+    # 1. ended_at < started_at -> Rechazado
+    bad_dates = {
+        "id": "foc_bad_dates",
+        "started_at": "2026-10-10T10:00:00.000000Z",
+        "ended_at": "2026-10-10T09:00:00.000000Z",
+        "source": "timer"
+    }
+    res = db.sync_collection(user, "focus_sessions", changes=[bad_dates])
+    assert len(res["rejected"]) == 1
+    assert "ended_at debe ser posterior o igual a started_at" in res["rejected"][0]["reason"]
+
+    # 2. Intervalos solapados -> Rechazado
+    overlap_session = {
+        "id": "foc_overlap",
+        "started_at": "2026-10-10T10:00:00.000000Z",
+        "ended_at": "2026-10-10T11:00:00.000000Z",
+        "focus_intervals": [
+            ["2026-10-10T10:00:00.000000Z", "2026-10-10T10:30:00.000000Z"],
+            ["2026-10-10T10:20:00.000000Z", "2026-10-10T10:50:00.000000Z"] # Se solapa con el anterior
+        ],
+        "effective_seconds": 3600,
+        "source": "timer"
+    }
+    res = db.sync_collection(user, "focus_sessions", changes=[overlap_session])
+    assert len(res["rejected"]) == 1
+    assert "solapa" in res["rejected"][0]["reason"]
+
+    # 3. Intervalo fuera de [started_at, ended_at] -> Rechazado
+    out_of_bounds = {
+        "id": "foc_out_bounds",
+        "started_at": "2026-10-10T10:00:00.000000Z",
+        "ended_at": "2026-10-10T10:30:00.000000Z",
+        "focus_intervals": [
+            ["2026-10-10T10:00:00.000000Z", "2026-10-10T10:45:00.000000Z"] # Termina después de ended_at
+        ],
+        "effective_seconds": 2700,
+        "source": "timer"
+    }
+    res = db.sync_collection(user, "focus_sessions", changes=[out_of_bounds])
+    assert len(res["rejected"]) == 1
+    assert "después de ended_at" in res["rejected"][0]["reason"]
+
+    # 4. effective_seconds no coincide con la suma de intervalos (> 1s de tolerancia) en source='timer' -> Rechazado
+    mismatched_duration = {
+        "id": "foc_mismatch",
+        "started_at": "2026-10-10T10:00:00.000000Z",
+        "ended_at": "2026-10-10T11:00:00.000000Z",
+        "focus_intervals": [
+            ["2026-10-10T10:00:00.000000Z", "2026-10-10T10:25:00.000000Z"] # 1500 segundos
+        ],
+        "effective_seconds": 3000, # Declara 3000s pero los intervalos suman 1500s
+        "source": "timer"
+    }
+    res = db.sync_collection(user, "focus_sessions", changes=[mismatched_duration])
+    assert len(res["rejected"]) == 1
+    assert "no coincide con la suma" in res["rejected"][0]["reason"]
+
+    # 5. source='manual' sin intervalos -> Aceptado
+    manual_session = {
+        "id": "foc_manual_ok",
+        "started_at": "2026-10-10T14:00:00.000000Z",
+        "ended_at": "2026-10-10T15:00:00.000000Z",
+        "effective_seconds": 3600,
+        "source": "manual"
+    }
+    res = db.sync_collection(user, "focus_sessions", changes=[manual_session])
+    assert res["applied"] == 1
+    assert len(res["rejected"]) == 0
+
+
+def test_learning_notes_invariants_and_conflict_of():
+    """(Fase A2) Valida límites de texto (50k caracteres), array de topic_ids y preservación de conflicto con conflict_of."""
+    user = "user_notes_invariants"
+
+    # 1. Nota con texto excesivo (>50,000 chars) -> Rechazado
+    huge_note = {
+        "id": "note_huge",
+        "learned_text": "A" * 50001
+    }
+    res = db.sync_collection(user, "learning_notes", changes=[huge_note])
+    assert len(res["rejected"]) == 1
+    assert "excede el límite máximo" in res["rejected"][0]["reason"]
+
+    # 2. Nota válida con topic_ids y conflict_of -> Aceptada
+    valid_note = {
+        "id": "note_conflict_backup_1",
+        "learned_text": "Texto que estaba en conflicto y se preservó",
+        "topic_ids": ["top_1", "top_2"],
+        "conflict_of": "note_original_1",
+        "comprehension_level": 5
+    }
+    res = db.sync_collection(user, "learning_notes", changes=[valid_note])
+    assert res["applied"] == 1
+    assert len(res["rejected"]) == 0
+
+    saved = db.get_collection_item(user, "learning_notes", "note_conflict_backup_1")
+    assert saved is not None
+    assert saved["conflict_of"] == "note_original_1"
+
+
+def test_orphan_tolerance_cross_collection():
+    """(Fase A2) Verifica que referencias a entidades aún no sincronizadas (huérfanos tolerables) no rompen la base de datos."""
+    user = "user_orphan_tolerance"
+
+    # Sesión creada referenciando subject y topic que aún no existen en la base de datos
+    orphan_session = {
+        "id": "foc_orphan_1",
+        "subject_id": "non_existent_subject_id",
+        "topic_ids": ["non_existent_topic_1", "non_existent_topic_2"],
+        "source": "manual",
+        "effective_seconds": 1800
+    }
+    res = db.sync_collection(user, "focus_sessions", changes=[orphan_session])
+    assert res["applied"] == 1
+    assert len(res["rejected"]) == 0
+
+    saved = db.get_collection_item(user, "focus_sessions", "foc_orphan_1")
+    assert saved is not None
+    assert saved["subject_id"] == "non_existent_subject_id"
+    assert saved["topic_ids"] == ["non_existent_topic_1", "non_existent_topic_2"]
+
+
+def test_multi_collection_sync_endpoint_full():
+    """(Fase A2) Verifica endpoint unificado POST /sync operando atómicamente con las 5 colecciones."""
+    user_headers = {"Authorization": "Bearer test-token-123", "X-User-Id": "user_endpoint_multicoll"}
+
+    payload = {
+        "since": None,
+        "collections": {
+            "activities": [{"id": "act_multi_ep", "title": "Estudiar API", "date": "2026-10-10"}],
+            "subjects": [{"id": "sub_multi_ep", "name": "Ingeniería de Software"}],
+            "topics": [{"id": "top_multi_ep", "subject_id": "sub_multi_ep", "name": "Arquitectura Hexagonal"}],
+            "focus_sessions": [{"id": "foc_multi_ep", "subject_id": "sub_multi_ep", "source": "manual", "effective_seconds": 1200}],
+            "learning_notes": [{"id": "not_multi_ep", "learned_text": "Desacoplar infraestructura de dominio"}]
+        }
+    }
+
+    res = client.post("/sync", json=payload, headers=user_headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert "server_time" in data
+    assert "results" in data
+
+    for col in ["activities", "subjects", "topics", "focus_sessions", "learning_notes"]:
+        assert col in data["results"]
+        col_res = data["results"][col]
+        assert col_res["applied"] == 1
+        assert len(col_res["rejected"]) == 0
+
+

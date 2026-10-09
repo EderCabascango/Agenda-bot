@@ -95,11 +95,36 @@ def create_automatic_backup(db_path: str, max_backups: int = 5) -> str | None:
 
 def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
     """Verifica si se requiere migración real. Si es así, crea respaldo pre-migración y aplica cambios."""
-    # Verificar si la tabla existe
-    t_exists = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='activities'").fetchone()
+    existing_tables = {
+        row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
 
-    if not t_exists:
-        # Primera inicialización de tabla vacía
+    needs_new_tables = not {"subjects", "topics", "focus_sessions", "learning_notes"}.issubset(existing_tables)
+    missing_cols = set()
+    missing_data = False
+    if "activities" in existing_tables:
+        cursor = conn.execute("PRAGMA table_info(activities)")
+        cols = {row["name"] for row in cursor.fetchall()}
+        missing_cols = {"updated_at", "deleted_at", "version"} - cols
+        if "updated_at" in cols:
+            empty_count = conn.execute("SELECT COUNT(*) FROM activities WHERE updated_at IS NULL OR updated_at = ''").fetchone()[0]
+            if empty_count > 0:
+                missing_data = True
+
+    if (needs_new_tables and "activities" in existing_tables) or missing_cols or missing_data:
+        has_existing_data = False
+        try:
+            if "activities" in existing_tables:
+                c_rows = conn.execute("SELECT COUNT(*) FROM activities").fetchone()[0]
+                if c_rows > 0:
+                    has_existing_data = True
+        except Exception:
+            pass
+        if has_existing_data:
+            create_pre_migration_backup(db_path)
+
+    # 1. Activities
+    if "activities" not in existing_tables:
         conn.execute(
             """CREATE TABLE activities (
                 user_id TEXT NOT NULL, id TEXT NOT NULL, title TEXT NOT NULL, date TEXT NOT NULL,
@@ -110,35 +135,81 @@ def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_activities_user_sync ON activities (user_id, updated_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_activities_user_date ON activities (user_id, date)")
-        return
-
-    cursor = conn.execute("PRAGMA table_info(activities)")
-    cols = {row["name"] for row in cursor.fetchall()}
-
-    missing_cols = {"updated_at", "deleted_at", "version"} - cols
-    missing_data = False
-    if "updated_at" in cols:
-        empty_count = conn.execute("SELECT COUNT(*) FROM activities WHERE updated_at IS NULL OR updated_at = ''").fetchone()[0]
-        if empty_count > 0:
-            missing_data = True
-
-    if missing_cols or missing_data:
-        # Hay migración real pendiente -> crear respaldo permanente pre-migración
-        create_pre_migration_backup(db_path)
-        now = monotonic_utc_now_iso()
-
+    else:
+        cursor = conn.execute("PRAGMA table_info(activities)")
+        cols = {row["name"] for row in cursor.fetchall()}
         if "updated_at" not in cols:
             conn.execute("ALTER TABLE activities ADD COLUMN updated_at TEXT DEFAULT ''")
         if "deleted_at" not in cols:
             conn.execute("ALTER TABLE activities ADD COLUMN deleted_at TEXT DEFAULT NULL")
         if "version" not in cols:
             conn.execute("ALTER TABLE activities ADD COLUMN version INTEGER DEFAULT 1")
-
+        now = monotonic_utc_now_iso()
         conn.execute("UPDATE activities SET updated_at = ? WHERE updated_at IS NULL OR updated_at = ''", (now,))
         conn.execute("UPDATE activities SET version = 1 WHERE version IS NULL OR version < 1")
-
         conn.execute("CREATE INDEX IF NOT EXISTS idx_activities_user_sync ON activities (user_id, updated_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_activities_user_date ON activities (user_id, date)")
+
+    # 2. Subjects
+    if "subjects" not in existing_tables:
+        conn.execute(
+            """CREATE TABLE subjects (
+                user_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL,
+                color TEXT DEFAULT '#5B6FA0', icon TEXT DEFAULT 'book',
+                weekly_goal_minutes INTEGER DEFAULT 0, archived INTEGER DEFAULT 0,
+                updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
+                PRIMARY KEY (user_id, id))"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_subjects_user_sync ON subjects (user_id, updated_at)")
+
+    # 3. Topics
+    if "topics" not in existing_tables:
+        conn.execute(
+            """CREATE TABLE topics (
+                user_id TEXT NOT NULL, id TEXT NOT NULL, subject_id TEXT DEFAULT '',
+                name TEXT NOT NULL, status TEXT DEFAULT 'pending',
+                updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
+                PRIMARY KEY (user_id, id))"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_topics_user_sync ON topics (user_id, updated_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_topics_user_subject ON topics (user_id, subject_id)")
+
+    # 4. Focus Sessions
+    if "focus_sessions" not in existing_tables:
+        conn.execute(
+            """CREATE TABLE focus_sessions (
+                user_id TEXT NOT NULL, id TEXT NOT NULL, subject_id TEXT DEFAULT NULL,
+                topic_ids TEXT DEFAULT '[]', activity_id TEXT DEFAULT NULL,
+                method TEXT DEFAULT 'pomodoro', goal TEXT DEFAULT '',
+                started_at TEXT DEFAULT '', ended_at TEXT DEFAULT '',
+                focus_intervals TEXT DEFAULT '[]', effective_seconds INTEGER DEFAULT 0,
+                break_seconds INTEGER DEFAULT 0, cycles_completed INTEGER DEFAULT 0,
+                distractions_count INTEGER DEFAULT 0, status TEXT DEFAULT 'completed',
+                source TEXT DEFAULT 'timer', iana_timezone TEXT DEFAULT 'UTC',
+                updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
+                PRIMARY KEY (user_id, id))"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_focus_sessions_user_sync ON focus_sessions (user_id, updated_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_focus_sessions_user_started ON focus_sessions (user_id, started_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_focus_sessions_user_subject ON focus_sessions (user_id, subject_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_focus_sessions_user_activity ON focus_sessions (user_id, activity_id)")
+
+    # 5. Learning Notes
+    if "learning_notes" not in existing_tables:
+        conn.execute(
+            """CREATE TABLE learning_notes (
+                user_id TEXT NOT NULL, id TEXT NOT NULL, session_id TEXT DEFAULT NULL,
+                activity_id TEXT DEFAULT NULL, subject_id TEXT DEFAULT NULL, topic_ids TEXT DEFAULT '[]',
+                learned_text TEXT DEFAULT '', questions_text TEXT DEFAULT '', resources_text TEXT DEFAULT '',
+                next_step_text TEXT DEFAULT '', comprehension_level INTEGER DEFAULT NULL,
+                focus_level INTEGER DEFAULT NULL, conflict_of TEXT DEFAULT NULL,
+                updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
+                PRIMARY KEY (user_id, id))"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_learning_notes_user_sync ON learning_notes (user_id, updated_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_learning_notes_user_subject ON learning_notes (user_id, subject_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_learning_notes_user_session ON learning_notes (user_id, session_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_learning_notes_user_activity ON learning_notes (user_id, activity_id)")
 
 
 COLLECTION_SCHEMAS = {
@@ -156,6 +227,68 @@ COLLECTION_SCHEMAS = {
             "completed": {"type": bool, "default": False, "sql_col": "completed", "serialize": lambda v: int(bool(v)), "deserialize": lambda v: bool(v)},
         },
         "order_by": "date, start_time"
+    },
+    "subjects": {
+        "table": "subjects",
+        "primary_key": ["user_id", "id"],
+        "columns": {
+            "name": {"type": str, "max_length": 200, "default": "", "sql_col": "name"},
+            "color": {"type": str, "max_length": 50, "default": "#5B6FA0", "sql_col": "color"},
+            "icon": {"type": str, "max_length": 50, "default": "book", "sql_col": "icon"},
+            "weekly_goal_minutes": {"type": int, "min_val": 0, "default": 0, "sql_col": "weekly_goal_minutes"},
+            "archived": {"type": bool, "default": False, "sql_col": "archived", "serialize": lambda v: int(bool(v)), "deserialize": lambda v: bool(v)},
+        },
+        "order_by": "name ASC"
+    },
+    "topics": {
+        "table": "topics",
+        "primary_key": ["user_id", "id"],
+        "columns": {
+            "subject_id": {"type": str, "max_length": 100, "default": "", "sql_col": "subject_id"},
+            "name": {"type": str, "max_length": 200, "default": "", "sql_col": "name"},
+            "status": {"type": str, "enum": ["pending", "in_progress", "mastered"], "default": "pending", "sql_col": "status"},
+        },
+        "order_by": "name ASC"
+    },
+    "focus_sessions": {
+        "table": "focus_sessions",
+        "primary_key": ["user_id", "id"],
+        "columns": {
+            "subject_id": {"type": str, "max_length": 100, "default": None, "sql_col": "subject_id", "nullable": True},
+            "topic_ids": {"type": list, "default": [], "sql_col": "topic_ids", "serialize": json.dumps, "deserialize": lambda v: json.loads(v or "[]")},
+            "activity_id": {"type": str, "max_length": 100, "default": None, "sql_col": "activity_id", "nullable": True},
+            "method": {"type": str, "max_length": 50, "default": "pomodoro", "sql_col": "method"},
+            "goal": {"type": str, "max_length": 500, "default": "", "sql_col": "goal"},
+            "started_at": {"type": str, "max_length": 50, "default": "", "sql_col": "started_at"},
+            "ended_at": {"type": str, "max_length": 50, "default": "", "sql_col": "ended_at"},
+            "focus_intervals": {"type": list, "default": [], "sql_col": "focus_intervals", "serialize": json.dumps, "deserialize": lambda v: json.loads(v or "[]")},
+            "effective_seconds": {"type": int, "min_val": 0, "default": 0, "sql_col": "effective_seconds"},
+            "break_seconds": {"type": int, "min_val": 0, "default": 0, "sql_col": "break_seconds"},
+            "cycles_completed": {"type": int, "min_val": 0, "default": 0, "sql_col": "cycles_completed"},
+            "distractions_count": {"type": int, "min_val": 0, "default": 0, "sql_col": "distractions_count"},
+            "status": {"type": str, "enum": ["completed", "abandoned"], "default": "completed", "sql_col": "status"},
+            "source": {"type": str, "enum": ["timer", "manual"], "default": "timer", "sql_col": "source"},
+            "iana_timezone": {"type": str, "max_length": 100, "default": "UTC", "sql_col": "iana_timezone"},
+        },
+        "order_by": "started_at DESC"
+    },
+    "learning_notes": {
+        "table": "learning_notes",
+        "primary_key": ["user_id", "id"],
+        "columns": {
+            "session_id": {"type": str, "max_length": 100, "default": None, "sql_col": "session_id", "nullable": True},
+            "activity_id": {"type": str, "max_length": 100, "default": None, "sql_col": "activity_id", "nullable": True},
+            "subject_id": {"type": str, "max_length": 100, "default": None, "sql_col": "subject_id", "nullable": True},
+            "topic_ids": {"type": list, "default": [], "sql_col": "topic_ids", "serialize": json.dumps, "deserialize": lambda v: json.loads(v or "[]")},
+            "learned_text": {"type": str, "max_length": 50000, "default": "", "sql_col": "learned_text"},
+            "questions_text": {"type": str, "max_length": 50000, "default": "", "sql_col": "questions_text"},
+            "resources_text": {"type": str, "max_length": 50000, "default": "", "sql_col": "resources_text"},
+            "next_step_text": {"type": str, "max_length": 50000, "default": "", "sql_col": "next_step_text"},
+            "comprehension_level": {"type": int, "min_val": 1, "max_val": 5, "default": None, "sql_col": "comprehension_level", "nullable": True},
+            "focus_level": {"type": int, "min_val": 1, "max_val": 5, "default": None, "sql_col": "focus_level", "nullable": True},
+            "conflict_of": {"type": str, "max_length": 100, "default": None, "sql_col": "conflict_of", "nullable": True},
+        },
+        "order_by": "updated_at DESC"
     }
 }
 WHITELISTED_COLLECTIONS = set(COLLECTION_SCHEMAS.keys())
@@ -232,6 +365,10 @@ def validate_and_sanitize_item(collection_name: str, item: dict) -> tuple[dict |
 
     for field_name, field_spec in schema["columns"].items():
         val = item.get(field_name, field_spec.get("default"))
+        if val is None and field_spec.get("nullable", False):
+            sanitized[field_name] = None
+            continue
+
         expected_type = field_spec["type"]
         if val is not None and not isinstance(val, expected_type):
             if expected_type is str:
@@ -263,7 +400,55 @@ def validate_and_sanitize_item(collection_name: str, item: dict) -> tuple[dict |
             if val < field_spec["min_val"]:
                 return None, f"El campo '{field_name}' debe ser >= {field_spec['min_val']}", []
 
+        if "max_val" in field_spec and val is not None:
+            if val > field_spec["max_val"]:
+                return None, f"El campo '{field_name}' debe ser <= {field_spec['max_val']}", []
+
         sanitized[field_name] = val
+
+    # Invariantes específicas para focus_sessions
+    if collection_name == "focus_sessions" and not sanitized.get("deleted_at"):
+        s_at = sanitized.get("started_at")
+        e_at = sanitized.get("ended_at")
+        if s_at and e_at and e_at < s_at:
+            return None, "ended_at debe ser posterior o igual a started_at", []
+
+        intervals = sanitized.get("focus_intervals") or []
+        if not isinstance(intervals, list):
+            return None, "focus_intervals debe ser una lista", []
+        if len(intervals) > 100:
+            return None, "focus_intervals excede el número máximo permitido (100 tramos)", []
+
+        total_interval_seconds = 0
+        prev_end = None
+        for idx, interval in enumerate(intervals):
+            if not isinstance(interval, list) or len(interval) != 2:
+                return None, f"El tramo {idx} debe tener formato [inicio_utc, fin_utc]", []
+            istart, iend = interval[0], interval[1]
+            if not isinstance(istart, str) or not isinstance(iend, str):
+                return None, f"Las fechas del tramo {idx} deben ser strings ISO", []
+            if iend < istart:
+                return None, f"En el tramo {idx}, el fin {iend} no puede ser anterior al inicio {istart}", []
+            if s_at and istart < s_at:
+                return None, f"El tramo {idx} inicia antes de started_at ({istart} < {s_at})", []
+            if e_at and iend > e_at:
+                return None, f"El tramo {idx} finaliza después de ended_at ({iend} > {e_at})", []
+            if prev_end and istart < prev_end:
+                return None, f"El tramo {idx} se solapa con el tramo anterior ({istart} < {prev_end})", []
+            prev_end = iend
+
+            try:
+                dt1 = datetime.fromisoformat(istart.replace("Z", "+00:00"))
+                dt2 = datetime.fromisoformat(iend.replace("Z", "+00:00"))
+                total_interval_seconds += int((dt2 - dt1).total_seconds())
+            except Exception:
+                pass
+
+        src = sanitized.get("source", "timer")
+        eff_sec = sanitized.get("effective_seconds", 0)
+        if src != "manual" and len(intervals) > 0:
+            if abs(total_interval_seconds - eff_sec) > 1:
+                return None, f"effective_seconds ({eff_sec}s) no coincide con la suma de los tramos ({total_interval_seconds}s) para source='{src}'", []
 
     return sanitized, None, unknown_fields
 

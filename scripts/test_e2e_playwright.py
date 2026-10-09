@@ -261,7 +261,7 @@ def test_playwright_e2e_full_sync():
             print("\n[E2E 4] Probando modo offline con cola de cambios y reconexión...")
             # Route intercept on Page A to simulate offline network error
             offline_handler = lambda route: route.abort("failed")
-            page_a.route("**/activities/sync*", offline_handler)
+            page_a.route("**/sync*", offline_handler)
 
             page_a.evaluate("""async () => {
                 const task1 = {
@@ -297,7 +297,7 @@ def test_playwright_e2e_full_sync():
             print(f" -> Cola offline intacta con {queue_len} cambios tras fallo de red.")
 
             # Unroute / Restore network
-            page_a.unroute("**/activities/sync*", offline_handler)
+            page_a.unroute("**/sync*", offline_handler)
 
             # Reconnect & sync Page A
             sync_ok = page_a.evaluate("async () => { return await window.syncWithBackend(); }")
@@ -467,6 +467,76 @@ def test_playwright_e2e_full_sync():
             assert xss_result["hasRawImgOnError"] is False, "No debe existir ningún tag <img> con onerror sin escapar en el DOM"
             assert xss_result["hasEscapedImg"] is True, "El payload del <img> debe estar escapado como entidad HTML"
             print(" -> Verificación XSS exitosa: 0 alertas disparadas, payloads 100% neutralizados.")
+
+            # ----------------------------------------------------
+            # 8. Multi-colección: Sincronización de Materias, Sesiones, Notas, Archivo y Conflictos
+            # ----------------------------------------------------
+            print("\n[E2E 8] Probando sincronización multi-colección (materias, sesiones, notas, archivo)...")
+
+            # 8.1 Crear materia, tema, sesión y nota en Contexto A y sincronizar
+            page_a.evaluate("""async () => {
+                const sub = { id: 'sub-e2e-1', name: 'Arquitectura de Software', color: '#3498db', icon: 'code', weekly_goal_minutes: 180 };
+                const top = { id: 'top-e2e-1', subject_id: 'sub-e2e-1', name: 'Patrones Arquitectónicos', status: 'in_progress' };
+                const foc = { id: 'foc-e2e-1', subject_id: 'sub-e2e-1', topic_ids: ['top-e2e-1'], source: 'manual', effective_seconds: 3600 };
+                const not = { id: 'not-e2e-1', subject_id: 'sub-e2e-1', learned_text: 'Patrón Repository y Unit of Work', topic_ids: ['top-e2e-1'] };
+
+                localStorage.setItem('diary_subjects', JSON.stringify([sub]));
+                localStorage.setItem('diary_topics', JSON.stringify([top]));
+                localStorage.setItem('diary_focus_sessions', JSON.stringify([foc]));
+                localStorage.setItem('diary_learning_notes', JSON.stringify([not]));
+
+                let queue = [
+                    { ...sub, collection: 'subjects' },
+                    { ...top, collection: 'topics' },
+                    { ...foc, collection: 'focus_sessions' },
+                    { ...not, collection: 'learning_notes' }
+                ];
+                localStorage.setItem('diary_sync_queue', JSON.stringify(queue));
+                await window.syncWithBackend();
+            }""")
+
+            # 8.2 Contexto B sincroniza y verifica recepción de las 4 entidades
+            page_b.evaluate("async () => { await window.syncWithBackend(); }")
+            multi_b = page_b.evaluate("""() => {
+                const subs = JSON.parse(localStorage.getItem('diary_subjects') || '[]');
+                const tops = JSON.parse(localStorage.getItem('diary_topics') || '[]');
+                const focs = JSON.parse(localStorage.getItem('diary_focus_sessions') || '[]');
+                const nots = JSON.parse(localStorage.getItem('diary_learning_notes') || '[]');
+                return {
+                    hasSub: subs.some(s => s.id === 'sub-e2e-1' && s.name === 'Arquitectura de Software'),
+                    hasTop: tops.some(t => t.id === 'top-e2e-1'),
+                    hasFoc: focs.some(f => f.id === 'foc-e2e-1'),
+                    hasNot: nots.some(n => n.id === 'not-e2e-1')
+                };
+            }""")
+
+            assert multi_b["hasSub"] is True, "Contexto B debió recibir la materia sub-e2e-1"
+            assert multi_b["hasTop"] is True, "Contexto B debió recibir el tema top-e2e-1"
+            assert multi_b["hasFoc"] is True, "Contexto B debió recibir la sesión foc-e2e-1"
+            assert multi_b["hasNot"] is True, "Contexto B debió recibir la nota not-e2e-1"
+            print(" -> Multi-colección inicial sincronizada exitosamente entre A y B.")
+
+            # 8.3 Archivar materia en Contexto A y propagar a Contexto B
+            page_a.evaluate("""async () => {
+                let subs = JSON.parse(localStorage.getItem('diary_subjects') || '[]');
+                let sub = subs.find(s => s.id === 'sub-e2e-1');
+                sub.archived = true;
+                sub.base_version = sub.version || 1;
+                let queue = JSON.parse(localStorage.getItem('diary_sync_queue') || '[]');
+                queue.push({ ...sub, collection: 'subjects' });
+                localStorage.setItem('diary_sync_queue', JSON.stringify(queue));
+                localStorage.setItem('diary_subjects', JSON.stringify(subs));
+                await window.syncWithBackend();
+            }""")
+
+            page_b.evaluate("async () => { await window.syncWithBackend(); }")
+            archived_in_b = page_b.evaluate("""() => {
+                const subs = JSON.parse(localStorage.getItem('diary_subjects') || '[]');
+                const sub = subs.find(s => s.id === 'sub-e2e-1');
+                return sub ? Boolean(sub.archived) : false;
+            }""")
+            assert archived_in_b is True, "El estado archivado (archived=1) debió propagarse a Contexto B"
+            print(" -> Materia archivada (archived=1) propagada exitosamente a Contexto B.")
 
             browser.close()
             print("\n============================================================")
