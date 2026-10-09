@@ -527,10 +527,10 @@ input:focus, select:focus, textarea:focus {
   border: 1px solid var(--border-subtle);
   transition: all var(--transition);
 }
-.filter-btn:hover { border-color: var(--accent-teal); color: var(--text-primary); }
+.filter-btn:hover { border-color: var(--accent-amber); color: var(--text-primary); }
 .filter-btn.active {
-  background: var(--accent-teal-dim); color: var(--accent-teal);
-  border-color: var(--accent-teal);
+  background: var(--accent-amber); color: #111111;
+  border-color: var(--accent-amber); font-weight: 700;
 }
 
 /* ---------- Activity List ---------- */
@@ -561,18 +561,18 @@ input:focus, select:focus, textarea:focus {
 .cal-day {
   aspect-ratio: 1; display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  border-radius: var(--radius-sm); font-size: 0.9rem; font-weight: 500;
+  border-radius: var(--radius-md); font-size: 0.9rem; font-weight: 600;
   cursor: pointer; transition: all var(--transition);
   position: relative;
 }
 .cal-day:hover { background: var(--bg-elevated); }
-.cal-day.today { background: var(--accent-teal-dim); color: var(--accent-teal); font-weight: 700; }
-.cal-day.selected { background: var(--accent-teal); color: #000; font-weight: 700; }
+.cal-day.today { background: var(--accent-amber-soft); color: #9A6A00; font-weight: 800; border: 1px solid var(--accent-amber); }
+.cal-day.selected { background: var(--accent-amber); color: #111111; font-weight: 800; box-shadow: 0 4px 12px rgba(245,184,46,0.3); }
 .cal-day.other-month { color: var(--text-muted); opacity: 0.4; }
 .cal-day .cal-dot {
   position: absolute; bottom: 4px;
   width: 5px; height: 5px; border-radius: 50%;
-  background: var(--accent-teal);
+  background: var(--accent-amber);
 }
 .cal-day-detail {
   background: var(--bg-card); border-radius: var(--radius-lg);
