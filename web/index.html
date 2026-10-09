@@ -162,6 +162,27 @@
                 <div id="db-habits-list" class="db-habits-list"></div>
               </div>
 
+              <!-- Tarjeta Resumen: Mis Materias -->
+              <div class="db-panel" id="db-subjects-summary-card">
+                <div class="db-panel-header" style="display:flex; justify-content:space-between; align-items:center;">
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <span class="material-icons-round" style="color:var(--accent-purple);">menu_book</span>
+                    <h3 style="margin:0;">Mis Materias</h3>
+                  </div>
+                  <button type="button" class="btn-text" onclick="switchTab('study')" style="font-size:0.78rem; font-weight:700; color:var(--accent-primary); cursor:pointer; background:none; border:none;">Ver todas →</button>
+                </div>
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 4px 4px 4px; flex-wrap:wrap;">
+                  <div>
+                    <span style="font-size:1.4rem; font-weight:800; color:var(--text-primary);" id="db-summary-active-subjects">0</span>
+                    <span style="font-size:0.8rem; color:var(--text-secondary); margin-left:6px;">materias activas</span>
+                  </div>
+                  <div>
+                    <span style="font-size:1.4rem; font-weight:800; color:var(--accent-teal);" id="db-summary-weekly-hours">0.0h</span>
+                    <span style="font-size:0.8rem; color:var(--text-secondary); margin-left:6px;">estudio esta semana</span>
+                  </div>
+                </div>
+              </div>
+
             </div>
 
             <!-- RIGHT COLUMN: AGENDA DE HOY -->

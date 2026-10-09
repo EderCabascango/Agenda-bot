@@ -328,6 +328,9 @@
     const subtextEl = $('#greeting-subtext');
     if (subtextEl) subtextEl.textContent = `Tienes ${activeSubjects.length || 4} materias y ${weeklyStudyMin || 171} min de estudio registrados esta semana`;
 
+    if (el('db-summary-active-subjects')) el('db-summary-active-subjects').textContent = activeSubjects.length;
+    if (el('db-summary-weekly-hours')) el('db-summary-weekly-hours').textContent = (weeklyStudyMin / 60).toFixed(1) + 'h';
+
     const topbarUser = $('#topbar-username');
     if (topbarUser) topbarUser.textContent = userName + ' C.';
 
