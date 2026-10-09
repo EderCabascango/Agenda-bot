@@ -407,13 +407,31 @@
                 <div class="card-progress-fill" style="width: ${pct}%;"></div>
               </div>
             </div>
+            <div class="card-action-bar" style="margin-top: 14px; display: flex; gap: 8px;">
+              <button class="btn-card-study" data-study-subject="${escHTML(sub.name)}" style="flex:1; padding:8px 14px; border-radius:var(--radius-pill); font-size:0.8rem; font-weight:700; display:inline-flex; align-items:center; justify-content:center; gap:4px; border:none; cursor:pointer; background:var(--bg-primary); color:var(--text-primary);">
+                <span class="material-icons-round" style="font-size:16px;">timer</span> Estudiar
+              </button>
+              <button class="btn-card-detail" data-detail-subject="${sub.id}" style="padding:8px 14px; border-radius:var(--radius-pill); font-size:0.8rem; font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:4px; border:1px solid currentColor; background:transparent; cursor:pointer;">
+                <span class="material-icons-round" style="font-size:16px;">format_list_bulleted</span> Temas
+              </button>
+            </div>
           </div>
         `;
       }).join('');
 
-      container.querySelectorAll('[data-subject-id]').forEach(card => {
-        card.addEventListener('click', () => {
-          const sId = card.dataset.subjectId;
+      container.querySelectorAll('[data-study-subject]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const subName = btn.dataset.studySubject;
+          const match = subjects.find(s => s.name === subName);
+          openFocusModal(match ? { subject_id: match.id, title: `Estudio: ${subName}` } : null);
+        });
+      });
+
+      container.querySelectorAll('[data-detail-subject]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const sId = btn.dataset.detailSubject;
           if (sId && !sId.startsWith('demo-')) openSubjectDetailModal(sId);
           else switchView('study');
         });
@@ -454,55 +472,85 @@
     if (timeline) {
       if (todayActs.length === 0) {
         timeline.innerHTML = `
-          <div class="agenda-time-block">
-            <p class="agenda-time-slot">08:00 AM - 08:45 AM</p>
-            <div class="agenda-item">
-              <div>
-                <p class="agenda-item-title">Repaso de Matrices</p>
-                <p class="agenda-item-sub">Matemáticas • 45 min</p>
-              </div>
-              <span class="material-icons-round" style="color:var(--accent-teal);">check_circle</span>
-            </div>
-          </div>
-          <div class="agenda-time-block">
-            <p class="agenda-time-slot">10:30 AM - 11:20 AM</p>
-            <div class="agenda-item agenda-item--active">
-              <div>
-                <p class="agenda-item-title">Práctica PyTorch & Tensors</p>
-                <p class="agenda-item-sub">Machine Learning • En curso</p>
-              </div>
-              <span class="agenda-item-tag">50 min</span>
-            </div>
-          </div>
-          <div class="agenda-time-block">
-            <p class="agenda-time-slot">03:00 PM - 04:00 PM</p>
-            <div class="agenda-item">
-              <div>
-                <p class="agenda-item-title">Lectura SQLite WAL & Locks</p>
-                <p class="agenda-item-sub">Bases de Datos • Programado</p>
-              </div>
-            </div>
-          </div>
+          <p style="font-size:0.85rem; color:var(--text-muted); text-align:center; padding:16px 0;">No hay actividades programadas para hoy.</p>
         `;
       } else {
+        const now = new Date();
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
         const sorted = [...todayActs].sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
         timeline.innerHTML = sorted.map(a => {
           const timeSlot = a.startTime ? (a.endTime ? `${a.startTime} - ${a.endTime}` : a.startTime) : 'Horario no definido';
           const tag = (a.tags && a.tags[0]) ? a.tags[0] : 'General';
           const isDone = a.completed;
+
+          let isOverdue = false;
+          let inProgress = false;
+
+          if (a.endTime) {
+            const [eh, em] = a.endTime.split(':').map(Number);
+            const endMin = eh * 60 + em;
+            if (nowMinutes > endMin && !isDone) isOverdue = true;
+          }
+          if (a.startTime && a.endTime) {
+            const [sh, sm] = a.startTime.split(':').map(Number);
+            const [eh, em] = a.endTime.split(':').map(Number);
+            const startMin = sh * 60 + sm;
+            const endMin = eh * 60 + em;
+            if (nowMinutes >= startMin && nowMinutes <= endMin && !isDone) inProgress = true;
+          }
+
+          let statusLabel = 'Programado';
+          let statusClass = '';
+
+          if (isDone) {
+            statusLabel = 'Completado';
+            statusClass = 'agenda-item--completed';
+          } else if (inProgress) {
+            statusLabel = 'En curso';
+            statusClass = 'agenda-item--active';
+          } else if (isOverdue) {
+            statusLabel = 'No registrada / Vencida';
+            statusClass = 'agenda-item--overdue';
+          }
+
           return `
             <div class="agenda-time-block">
               <p class="agenda-time-slot">${escHTML(timeSlot)}</p>
-              <div class="agenda-item ${isDone ? '' : (a.startTime ? 'agenda-item--active' : '')}">
-                <div>
-                  <p class="agenda-item-title">${escHTML(a.title)}</p>
-                  <p class="agenda-item-sub">${escHTML(tag)} • ${isDone ? 'Completado' : 'Programado'}</p>
+              <div class="agenda-item ${statusClass}">
+                <button class="agenda-check-btn" data-agenda-toggle="${a.id}" title="Marcar/Desmarcar">
+                  <span class="material-icons-round">${isDone ? 'check_circle' : 'radio_button_unchecked'}</span>
+                </button>
+                <div style="flex:1; min-width:0; margin:0 8px;">
+                  <p class="agenda-item-title ${isDone ? 'done-text' : ''}">${escHTML(a.title)}</p>
+                  <p class="agenda-item-sub">${escHTML(tag)} • <span class="status-text">${statusLabel}</span></p>
                 </div>
-                ${isDone ? '<span class="material-icons-round" style="color:var(--accent-teal);">check_circle</span>' : ''}
+                ${!isDone ? `
+                  <button class="btn-agenda-focus" data-agenda-focus="${a.id}" title="Iniciar Enfoque">
+                    <span class="material-icons-round">play_arrow</span>
+                  </button>
+                ` : ''}
               </div>
             </div>
           `;
         }).join('');
+
+        // Attach interactive event listeners
+        timeline.querySelectorAll('[data-agenda-toggle]').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleActivity(btn.dataset.agendaToggle);
+          });
+        });
+
+        timeline.querySelectorAll('[data-agenda-focus]').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const actId = btn.dataset.agendaFocus;
+            const act = activities.find(a => a.id === actId);
+            if (act) openFocusModal(act);
+          });
+        });
       }
     }
   }

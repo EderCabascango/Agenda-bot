@@ -712,6 +712,57 @@ input:focus, select:focus, textarea:focus {
   padding: 2px 8px;
   border-radius: var(--radius-pill);
 }
+
+/* Interactive Agenda Checkboxes & Overdue Styles */
+.agenda-check-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--transition);
+}
+.agenda-check-btn:hover {
+  color: var(--accent-amber);
+}
+.agenda-item--completed .agenda-check-btn {
+  color: #10B981;
+}
+.agenda-item--completed {
+  opacity: 0.75;
+  background: var(--bg-card-hover);
+}
+.agenda-item-title.done-text {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+.agenda-item--overdue {
+  border-left: 3px solid var(--accent-red) !important;
+  background: rgba(239, 68, 68, 0.05);
+}
+.agenda-item--overdue .status-text {
+  color: var(--accent-red);
+  font-weight: 700;
+}
+.btn-agenda-focus {
+  background: var(--accent-amber);
+  color: #111111;
+  border: none;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform var(--transition);
+}
+.btn-agenda-focus:hover {
+  transform: scale(1.1);
+}
 .db-panel--wide { min-width: 0; }
 .db-panel-header {
   display: flex; align-items: center; gap: 10px; margin-bottom: 18px;
