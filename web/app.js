@@ -52,6 +52,8 @@
   const TOPICS_KEY = 'diary_topics';
   const FOCUS_SESSIONS_KEY = 'diary_focus_sessions';
   const LEARNING_NOTES_KEY = 'diary_learning_notes';
+  const ACTIVE_FOCUS_SESSION_KEY = 'diary_focus_active';
+  const TAB_ID = 'tab_' + Math.random().toString(36).substring(2, 9);
 
   function safeStorageGet(key, defaultVal = null) {
     try {
@@ -661,6 +663,9 @@
           </div>
         </div>
         <div class="tl-actions">
+          <button class="tl-action-btn" data-focus="${a.id}" title="Estudiar / Iniciar Enfoque">
+            <span class="material-icons-round" style="color:var(--accent-teal);">timer</span>
+          </button>
           <button class="tl-action-btn" data-edit="${a.id}" title="Editar">
             <span class="material-icons-round">edit</span>
           </button>
@@ -676,6 +681,24 @@
       el.addEventListener('click', () => {
         const id = el.dataset.toggle;
         toggleActivity(id);
+      });
+    });
+    container.querySelectorAll('[data-focus]').forEach(el => {
+      el.addEventListener('click', () => {
+        const act = activities.find(a => a.id === el.dataset.focus);
+        if (act) {
+          let matchedSubId = null;
+          if (subjects && subjects.length > 0) {
+            const titleLower = (act.title || '').toLowerCase();
+            const matchedSub = subjects.find(s => !s.deleted_at && !s.archived && titleLower.includes((s.name || '').toLowerCase()));
+            if (matchedSub) matchedSubId = matchedSub.id;
+          }
+          openFocusModal({
+            activity_id: act.id,
+            subject_id: matchedSubId,
+            goal: act.title
+          });
+        }
       });
     });
     container.querySelectorAll('[data-edit]').forEach(el => {
@@ -2095,6 +2118,560 @@
     syncWithBackend();
   }
 
+  // ============================================================================
+  // ── TEMPORIZADOR DE ENFOQUE Y SESIONES DE ESTUDIO (Fase C2) ──
+  // ============================================================================
+
+  let activeFocusTimer = null;
+  let focusIntervalHandle = null;
+
+  function playTimerChime() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.8);
+    } catch (e) {}
+  }
+
+  function sendFocusNotification(title, body) {
+    playTimerChime();
+    if (typeof Notification !== 'undefined') {
+      if (Notification.permission === 'granted') {
+        try { new Notification(title, { body }); } catch (e) {}
+      } else if (Notification.permission !== 'denied') {
+        try { Notification.requestPermission(); } catch (e) {}
+      }
+    }
+    showToast(`${title}: ${body}`, 'timer', 'var(--accent-teal)');
+  }
+
+  function loadActiveFocusSession() {
+    return safeStorageGet(ACTIVE_FOCUS_SESSION_KEY, null);
+  }
+
+  function saveActiveFocusSession(timer) {
+    if (!timer) {
+      clearActiveFocusSession();
+      return;
+    }
+    timer.tabId = TAB_ID;
+    timer.last_heartbeat = Date.now();
+    safeStorageSet(ACTIVE_FOCUS_SESSION_KEY, timer);
+    updateFocusUIBadges();
+  }
+
+  function clearActiveFocusSession() {
+    try {
+      const adapter = (typeof SyncCore !== 'undefined' && SyncCore.StorageAdapter) ? SyncCore.StorageAdapter : {
+        removeItem: (k) => localStorage.removeItem(k)
+      };
+      adapter.removeItem(ACTIVE_FOCUS_SESSION_KEY);
+    } catch (e) {}
+    activeFocusTimer = null;
+    updateFocusUIBadges();
+  }
+
+  function checkMultiTabLock() {
+    const stored = safeStorageGet(ACTIVE_FOCUS_SESSION_KEY, null);
+    const warningEl = $('#focus-multitab-warning');
+    if (!warningEl) return false;
+
+    if (stored && stored.tabId && stored.tabId !== TAB_ID && (stored.status === 'running' || stored.status === 'break')) {
+      const isRecent = (Date.now() - (stored.last_heartbeat || 0)) < 15000;
+      if (isRecent) {
+        warningEl.style.display = 'flex';
+        return true;
+      }
+    }
+    warningEl.style.display = 'none';
+    return false;
+  }
+
+  function formatTimeDisplay(totalSeconds) {
+    const s = Math.max(0, Math.floor(totalSeconds));
+    const mins = Math.floor(s / 60);
+    const secs = s % 60;
+    if (mins >= 60) {
+      const hrs = Math.floor(mins / 60);
+      const remMins = mins % 60;
+      return `${String(hrs).padStart(2, '0')}:${String(remMins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+
+  function updateFocusUIBadges() {
+    const topBadge = $('#topbar-focus-badge');
+    const fab = $('#btn-focus-fab');
+    const fabLabel = $('#focus-fab-label');
+
+    if (!activeFocusTimer || activeFocusTimer.status === 'idle' || activeFocusTimer.status === 'completed' || activeFocusTimer.status === 'abandoned') {
+      if (topBadge) topBadge.style.display = 'none';
+      if (fab) {
+        fab.classList.remove('active-session');
+        if (fabLabel) fabLabel.textContent = 'Enfoque';
+      }
+      return;
+    }
+
+    const metrics = (typeof TimerCore !== 'undefined' && TimerCore.getElapsedAndRemaining)
+      ? TimerCore.getElapsedAndRemaining(activeFocusTimer)
+      : { remainingSeconds: 0, currentPhaseElapsedSeconds: 0 };
+
+    const dispSec = activeFocusTimer.config.isCountdown ? metrics.remainingSeconds : metrics.currentPhaseElapsedSeconds;
+    const timeText = formatTimeDisplay(dispSec);
+
+    if (topBadge) {
+      topBadge.textContent = timeText;
+      topBadge.style.display = 'inline-block';
+    }
+    if (fab) {
+      fab.classList.add('active-session');
+      if (fabLabel) fabLabel.textContent = timeText;
+    }
+  }
+
+  function renderFocusTimerUI() {
+    const overlay = $('#focus-timer-overlay');
+    if (!overlay || !overlay.classList.contains('open')) return;
+
+    checkMultiTabLock();
+
+    const setupView = $('#focus-setup-view');
+    const activeView = $('#focus-active-view');
+    const summaryView = $('#focus-summary-view');
+
+    if (!activeFocusTimer || activeFocusTimer.status === 'idle') {
+      if (setupView) setupView.style.display = 'block';
+      if (activeView) activeView.style.display = 'none';
+      if (summaryView) summaryView.style.display = 'none';
+      return;
+    }
+
+    if (activeFocusTimer.status === 'completed') {
+      if (setupView) setupView.style.display = 'none';
+      if (activeView) activeView.style.display = 'none';
+      if (summaryView) summaryView.style.display = 'block';
+
+      const sumEff = $('#summary-effective-time');
+      const sumBrk = $('#summary-break-time');
+      const sumDis = $('#summary-distractions');
+      if (sumEff) sumEff.textContent = `${Math.round(activeFocusTimer.effective_seconds / 60)}m (${activeFocusTimer.effective_seconds}s)`;
+      if (sumBrk) sumBrk.textContent = `${Math.round(activeFocusTimer.break_seconds / 60)}m`;
+      if (sumDis) sumDis.textContent = activeFocusTimer.distractions ? activeFocusTimer.distractions.length : 0;
+      return;
+    }
+
+    if (setupView) setupView.style.display = 'none';
+    if (activeView) activeView.style.display = 'block';
+    if (summaryView) summaryView.style.display = 'none';
+
+    const metrics = (typeof TimerCore !== 'undefined' && TimerCore.getElapsedAndRemaining)
+      ? TimerCore.getElapsedAndRemaining(activeFocusTimer)
+      : { remainingSeconds: 0, currentPhaseElapsedSeconds: 0, progressPercent: 0 };
+
+    const dispSec = activeFocusTimer.config.isCountdown ? metrics.remainingSeconds : metrics.currentPhaseElapsedSeconds;
+    const dispEl = $('#focus-timer-display');
+    if (dispEl) dispEl.textContent = formatTimeDisplay(dispSec);
+
+    const progFill = $('#focus-timer-progress-fill');
+    if (progFill) progFill.style.width = `${metrics.progressPercent}%`;
+
+    const phaseBadge = $('#focus-phase-badge');
+    if (phaseBadge) {
+      if (activeFocusTimer.phase === 'focus') {
+        phaseBadge.textContent = activeFocusTimer.status === 'paused' ? 'PAUSADO (ENFOQUE)' : 'ENFOQUE';
+        phaseBadge.className = activeFocusTimer.status === 'paused' ? 'topic-status-badge pending' : 'topic-status-badge in_progress';
+      } else {
+        phaseBadge.textContent = activeFocusTimer.phase === 'long_break' ? 'DESCANSO LARGO' : 'DESCANSO';
+        phaseBadge.className = 'topic-status-badge mastered';
+      }
+    }
+
+    const subTag = $('#focus-active-subject-tag');
+    if (subTag) {
+      subjects = loadSubjects();
+      const sub = subjects.find(s => s.id === activeFocusTimer.subject_id);
+      if (sub) {
+        subTag.textContent = sub.name;
+        subTag.style.display = 'inline-block';
+        subTag.style.backgroundColor = `${sub.color || '#3B82F6'}22`;
+        subTag.style.color = sub.color || '#3B82F6';
+      } else {
+        subTag.style.display = 'none';
+      }
+    }
+
+    const goalText = $('#focus-active-goal-text');
+    if (goalText) goalText.textContent = activeFocusTimer.goal || '';
+
+    const distCount = $('#focus-distractions-count');
+    if (distCount) distCount.textContent = `${activeFocusTimer.distractions ? activeFocusTimer.distractions.length : 0} registradas`;
+
+    const playPauseIcon = $('#focus-play-pause-icon');
+    const playPauseLabel = $('#focus-play-pause-label');
+    if (playPauseIcon && playPauseLabel) {
+      if (activeFocusTimer.status === 'running') {
+        playPauseIcon.textContent = 'pause';
+        playPauseLabel.textContent = 'Pausar';
+      } else {
+        playPauseIcon.textContent = 'play_arrow';
+        playPauseLabel.textContent = 'Reanudar';
+      }
+    }
+
+    const breakLabel = $('#focus-break-btn-label');
+    if (breakLabel) {
+      breakLabel.textContent = activeFocusTimer.phase === 'focus' ? 'Descanso' : 'Volver a Enfoque';
+    }
+  }
+
+  function openFocusModal(presetData = {}) {
+    const overlay = $('#focus-timer-overlay');
+    if (!overlay) return;
+
+    subjects = loadSubjects();
+    topics = loadTopics();
+
+    // Restaurar si ya existe sesión activa
+    const stored = loadActiveFocusSession();
+    if (stored && (stored.status === 'running' || stored.status === 'paused' || stored.status === 'break')) {
+      activeFocusTimer = stored;
+    }
+
+    // Poblar selector de materias
+    const subSelect = $('#focus-subject-select');
+    if (subSelect) {
+      const activeSubs = subjects.filter(s => s && !s.deleted_at && !s.archived);
+      subSelect.innerHTML = '<option value="">-- Sin materia asignada --</option>' +
+        activeSubs.map(s => `<option value="${escHTML(s.id)}">${escHTML(s.name)}</option>`).join('');
+
+      if (presetData.subject_id) {
+        subSelect.value = presetData.subject_id;
+      }
+      renderFocusTopicsChecklist(subSelect.value);
+    }
+
+    if (presetData.goal) {
+      const goalInput = $('#focus-goal-input');
+      if (goalInput) goalInput.value = presetData.goal;
+    }
+
+    renderFocusTimerUI();
+    overlay.classList.add('open');
+  }
+
+  function closeFocusModal() {
+    const overlay = $('#focus-timer-overlay');
+    if (overlay) overlay.classList.remove('open');
+  }
+
+  function renderFocusTopicsChecklist(subjectId) {
+    const group = $('#focus-topics-group');
+    const list = $('#focus-topics-checklist');
+    if (!group || !list) return;
+
+    if (!subjectId) {
+      group.style.display = 'none';
+      list.innerHTML = '';
+      return;
+    }
+
+    topics = loadTopics();
+    const childTopics = topics.filter(t => t && t.subject_id === subjectId && !t.deleted_at);
+    if (childTopics.length === 0) {
+      group.style.display = 'none';
+      list.innerHTML = '';
+      return;
+    }
+
+    group.style.display = 'block';
+    list.innerHTML = childTopics.map(t => `
+      <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; color:var(--text-primary); cursor:pointer;">
+        <input type="checkbox" name="focus-topic-checkbox" value="${escHTML(t.id)}" />
+        <span>${escHTML(t.name)}</span>
+      </label>
+    `).join('');
+  }
+
+  function startFocusSessionFromSetup() {
+    if (checkMultiTabLock()) {
+      showToast('Hay una sesión activa en otra pestaña. Toma el control o ciérrala.', 'warning', 'var(--accent-red)');
+      return;
+    }
+
+    const methodSelect = $('#focus-method-select');
+    const customMinsInput = $('#focus-custom-mins-input');
+    const subSelect = $('#focus-subject-select');
+    const goalInput = $('#focus-goal-input');
+
+    const method = methodSelect ? methodSelect.value : 'pomodoro';
+    const customMinutes = customMinsInput ? Number(customMinsInput.value) : 30;
+    const subjectId = subSelect ? subSelect.value : null;
+    const goal = goalInput ? goalInput.value.trim() : '';
+
+    const topicCheckboxes = document.querySelectorAll('input[name="focus-topic-checkbox"]:checked');
+    const topicIds = Array.from(topicCheckboxes).map(cb => cb.value);
+
+    if (typeof TimerCore !== 'undefined' && TimerCore.createTimer) {
+      let timer = TimerCore.createTimer({
+        method,
+        customFocusMinutes: customMinutes,
+        subject_id: subjectId,
+        topic_ids: topicIds,
+        goal
+      });
+      timer = TimerCore.start(timer);
+      activeFocusTimer = timer;
+      saveActiveFocusSession(timer);
+      renderFocusTimerUI();
+      showToast('Sesión de enfoque iniciada ✓', 'play_arrow', 'var(--accent-teal)');
+    }
+  }
+
+  function handleSaveSessionWithNotes(saveNotes = true) {
+    if (!activeFocusTimer) return;
+
+    const record = (typeof TimerCore !== 'undefined' && TimerCore.buildSessionRecord)
+      ? TimerCore.buildSessionRecord(activeFocusTimer, { status: 'completed' })
+      : null;
+
+    if (!record) return;
+
+    focusSessions = loadFocusSessions();
+    focusSessions.push(record);
+    saveFocusSessions(focusSessions);
+    enqueueChange({ ...record, collection: 'focus_sessions' });
+
+    if (saveNotes) {
+      const learnedText = $('#summary-learned-text')?.value?.trim() || '';
+      const questionsText = $('#summary-questions-text')?.value?.trim() || '';
+      const nextStep = $('#summary-next-step')?.value?.trim() || '';
+
+      if (learnedText || questionsText || nextStep) {
+        learningNotes = loadLearningNotes();
+        const noteRecord = {
+          id: uid(),
+          session_id: record.id,
+          activity_id: record.activity_id,
+          subject_id: record.subject_id,
+          topic_ids: record.topic_ids || [],
+          learned_text: learnedText,
+          questions_text: questionsText,
+          resources_text: '',
+          next_step_text: nextStep,
+          version: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          deleted_at: null
+        };
+        learningNotes.push(noteRecord);
+        saveLearningNotes(learningNotes);
+        enqueueChange({ ...noteRecord, collection: 'learning_notes' });
+      }
+    }
+
+    clearActiveFocusSession();
+    closeFocusModal();
+    renderStudyView();
+    showToast('Sesión guardada exitosamente ✓');
+    syncWithBackend();
+  }
+
+  // ── Manual Time Modal ──
+  function openManualTimeModal(presetSubjectId = null) {
+    const overlay = $('#manual-time-overlay');
+    if (!overlay) return;
+
+    subjects = loadSubjects();
+    const select = $('#manual-subject-select');
+    if (select) {
+      const activeSubs = subjects.filter(s => s && !s.deleted_at && !s.archived);
+      select.innerHTML = '<option value="">-- Seleccionar Materia --</option>' +
+        activeSubs.map(s => `<option value="${escHTML(s.id)}">${escHTML(s.name)}</option>`).join('');
+
+      if (presetSubjectId) {
+        select.value = presetSubjectId;
+      }
+      renderManualTopicsChecklist(select.value);
+    }
+
+    const dateInput = $('#manual-date-input');
+    if (dateInput) dateInput.value = todayStr();
+
+    const errorsDiv = $('#manual-time-errors');
+    if (errorsDiv) errorsDiv.style.display = 'none';
+
+    overlay.classList.add('open');
+  }
+
+  function closeManualTimeModal() {
+    const overlay = $('#manual-time-overlay');
+    if (overlay) overlay.classList.remove('open');
+  }
+
+  function renderManualTopicsChecklist(subjectId) {
+    const group = $('#manual-topics-group');
+    const list = $('#manual-topics-checklist');
+    if (!group || !list) return;
+
+    if (!subjectId) {
+      group.style.display = 'none';
+      list.innerHTML = '';
+      return;
+    }
+
+    topics = loadTopics();
+    const childTopics = topics.filter(t => t && t.subject_id === subjectId && !t.deleted_at);
+    if (childTopics.length === 0) {
+      group.style.display = 'none';
+      list.innerHTML = '';
+      return;
+    }
+
+    group.style.display = 'block';
+    list.innerHTML = childTopics.map(t => `
+      <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; color:var(--text-primary); cursor:pointer;">
+        <input type="checkbox" name="manual-topic-checkbox" value="${escHTML(t.id)}" />
+        <span>${escHTML(t.name)}</span>
+      </label>
+    `).join('');
+  }
+
+  function handleSaveManualTime() {
+    const select = $('#manual-subject-select');
+    const dateInput = $('#manual-date-input');
+    const durInput = $('#manual-duration-minutes');
+    const goalInput = $('#manual-goal-input');
+    const errorsDiv = $('#manual-time-errors');
+
+    const subjectId = select ? select.value : '';
+    const dateVal = dateInput ? dateInput.value : todayStr();
+    const durationMinutes = durInput ? Number(durInput.value) : 0;
+    const goal = goalInput ? goalInput.value.trim() : '';
+
+    if (!subjectId) {
+      if (errorsDiv) {
+        errorsDiv.textContent = 'Debes seleccionar una materia';
+        errorsDiv.style.display = 'block';
+      }
+      return;
+    }
+
+    if (isNaN(durationMinutes) || durationMinutes <= 0) {
+      if (errorsDiv) {
+        errorsDiv.textContent = 'La duración en minutos debe ser mayor a 0';
+        errorsDiv.style.display = 'block';
+      }
+      return;
+    }
+
+    const topicCheckboxes = document.querySelectorAll('input[name="manual-topic-checkbox"]:checked');
+    const topicIds = Array.from(topicCheckboxes).map(cb => cb.value);
+
+    const nowIso = new Date().toISOString();
+    const startIso = `${dateVal}T10:00:00.000000Z`;
+    const endIso = `${dateVal}T11:00:00.000000Z`;
+
+    const sessionRecord = {
+      id: uid(),
+      subject_id: subjectId,
+      activity_id: null,
+      topic_ids: topicIds,
+      method: 'custom',
+      goal: goal,
+      started_at: startIso,
+      ended_at: endIso,
+      focus_intervals: [[startIso, endIso]],
+      effective_seconds: Math.round(durationMinutes * 60),
+      break_seconds: 0,
+      cycles_completed: 1,
+      distractions_count: 0,
+      status: 'completed',
+      source: 'manual',
+      iana_timezone: 'UTC',
+      version: 1,
+      op: 'create_if_absent',
+      created_at: nowIso,
+      updated_at: nowIso,
+      deleted_at: null
+    };
+
+    focusSessions = loadFocusSessions();
+    focusSessions.push(sessionRecord);
+    saveFocusSessions(focusSessions);
+    enqueueChange({ ...sessionRecord, collection: 'focus_sessions' });
+
+    closeManualTimeModal();
+    if (selectedSubjectIdForDetail) {
+      renderSubjectDetailContent(selectedSubjectIdForDetail);
+    }
+    renderStudyView();
+    showToast('Tiempo manual registrado ✓');
+    syncWithBackend();
+  }
+
+  // ── Tick Loop del Temporizador ──
+  function startFocusTimerTickLoop() {
+    if (focusIntervalHandle) clearInterval(focusIntervalHandle);
+
+    focusIntervalHandle = setInterval(() => {
+      if (!activeFocusTimer) {
+        const stored = loadActiveFocusSession();
+        if (stored && (stored.status === 'running' || stored.status === 'paused' || stored.status === 'break')) {
+          activeFocusTimer = stored;
+        }
+      }
+
+      if (!activeFocusTimer || activeFocusTimer.status === 'idle' || activeFocusTimer.status === 'completed' || activeFocusTimer.status === 'abandoned') {
+        updateFocusUIBadges();
+        return;
+      }
+
+      if (activeFocusTimer.status === 'running' || activeFocusTimer.status === 'break') {
+        if (typeof TimerCore !== 'undefined') {
+          activeFocusTimer = TimerCore.tick(activeFocusTimer);
+
+          if (activeFocusTimer.status === 'waiting') {
+            const gapMsg = $('#focus-gap-message');
+            if (gapMsg) {
+              const gapMins = Math.round((activeFocusTimer.gap_detected_ms || 0) / 60000);
+              gapMsg.textContent = `Se detectó una ausencia de aproximadamente ${gapMins} minutos. ¿Continuaste estudiando durante este tiempo?`;
+            }
+            $('#focus-gap-overlay')?.classList.add('open');
+          }
+
+          // Comprobar fin de ciclo de cuenta regresiva
+          const metrics = TimerCore.getElapsedAndRemaining(activeFocusTimer);
+          if (activeFocusTimer.config.isCountdown && metrics.remainingSeconds <= 0) {
+            if (activeFocusTimer.phase === 'focus') {
+              sendFocusNotification('¡Tiempo de Enfoque Completado! 🎯', 'Toma un merecido descanso.');
+              activeFocusTimer = TimerCore.startBreak(activeFocusTimer);
+            } else {
+              sendFocusNotification('¡Descanso Finalizado! ⚡', 'Listo para el siguiente ciclo de enfoque.');
+              activeFocusTimer = TimerCore.endBreak(activeFocusTimer);
+            }
+          }
+        }
+
+        saveActiveFocusSession(activeFocusTimer);
+      }
+
+      renderFocusTimerUI();
+      updateFocusUIBadges();
+    }, 1000);
+  }
+
   // ── Excel Routine Template Downloader ──
   function downloadRoutineTemplate() {
     const headers = ['Hora', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado', 'Domingo'];
@@ -3140,6 +3717,143 @@ SIEMPRE devuelve un JSON válido.
       if (selectedSubjectIdForDetail) handleDeleteOrArchiveSubject(selectedSubjectIdForDetail);
     });
 
+    // Focus Timer & Manual Time event listeners (Phase C2)
+    $('#btn-focus-timer')?.addEventListener('click', () => openFocusModal());
+    $('#btn-focus-fab')?.addEventListener('click', () => openFocusModal());
+    $('#focus-timer-close')?.addEventListener('click', closeFocusModal);
+    $('#btn-cancel-focus-setup')?.addEventListener('click', closeFocusModal);
+    $('#focus-timer-overlay')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) closeFocusModal();
+    });
+
+    $('#focus-method-select')?.addEventListener('change', (e) => {
+      const customGroup = $('#focus-custom-mins-group');
+      if (customGroup) customGroup.style.display = e.target.value === 'custom' ? 'block' : 'none';
+    });
+
+    $('#focus-subject-select')?.addEventListener('change', (e) => {
+      renderFocusTopicsChecklist(e.target.value);
+    });
+
+    $('#btn-start-focus-session')?.addEventListener('click', startFocusSessionFromSetup);
+
+    $('#btn-pause-resume-focus')?.addEventListener('click', () => {
+      if (!activeFocusTimer || typeof TimerCore === 'undefined') return;
+      if (activeFocusTimer.status === 'running') {
+        activeFocusTimer = TimerCore.pause(activeFocusTimer);
+      } else {
+        activeFocusTimer = TimerCore.resume(activeFocusTimer);
+      }
+      saveActiveFocusSession(activeFocusTimer);
+      renderFocusTimerUI();
+    });
+
+    $('#btn-take-break-focus')?.addEventListener('click', () => {
+      if (!activeFocusTimer || typeof TimerCore === 'undefined') return;
+      if (activeFocusTimer.phase === 'focus') {
+        activeFocusTimer = TimerCore.startBreak(activeFocusTimer);
+      } else {
+        activeFocusTimer = TimerCore.endBreak(activeFocusTimer);
+      }
+      saveActiveFocusSession(activeFocusTimer);
+      renderFocusTimerUI();
+    });
+
+    $('#btn-finish-focus')?.addEventListener('click', () => {
+      if (!activeFocusTimer || typeof TimerCore === 'undefined') return;
+      activeFocusTimer.status = 'completed';
+      saveActiveFocusSession(activeFocusTimer);
+      renderFocusTimerUI();
+    });
+
+    $('#btn-abandon-focus')?.addEventListener('click', () => {
+      if (confirm('¿Deseas descartar esta sesión de enfoque?')) {
+        clearActiveFocusSession();
+        closeFocusModal();
+        showToast('Sesión descartada');
+      }
+    });
+
+    const addDistraction = () => {
+      const input = $('#focus-distraction-input');
+      const val = input ? input.value.trim() : '';
+      if (!val || !activeFocusTimer || typeof TimerCore === 'undefined') return;
+      activeFocusTimer = TimerCore.logDistraction(activeFocusTimer, val);
+      saveActiveFocusSession(activeFocusTimer);
+      input.value = '';
+      renderFocusTimerUI();
+    };
+
+    $('#btn-add-distraction')?.addEventListener('click', addDistraction);
+    $('#focus-distraction-input')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addDistraction();
+      }
+    });
+
+    $('#btn-save-session-with-notes')?.addEventListener('click', () => handleSaveSessionWithNotes(true));
+    $('#btn-skip-notes-save')?.addEventListener('click', () => handleSaveSessionWithNotes(false));
+
+    $('#btn-force-take-timer')?.addEventListener('click', () => {
+      if (activeFocusTimer) {
+        activeFocusTimer.tabId = TAB_ID;
+        saveActiveFocusSession(activeFocusTimer);
+        renderFocusTimerUI();
+      }
+    });
+
+    // Gap dialog
+    $('#btn-gap-keep')?.addEventListener('click', () => {
+      if (activeFocusTimer && typeof TimerCore !== 'undefined') {
+        activeFocusTimer = TimerCore.resolveGap(activeFocusTimer, true);
+        saveActiveFocusSession(activeFocusTimer);
+        $('#focus-gap-overlay')?.classList.remove('open');
+        renderFocusTimerUI();
+      }
+    });
+
+    $('#btn-gap-cutoff')?.addEventListener('click', () => {
+      if (activeFocusTimer && typeof TimerCore !== 'undefined') {
+        activeFocusTimer = TimerCore.resolveGap(activeFocusTimer, false);
+        saveActiveFocusSession(activeFocusTimer);
+        $('#focus-gap-overlay')?.classList.remove('open');
+        renderFocusTimerUI();
+      }
+    });
+
+    // Detail modal study actions
+    $('#btn-start-focus-from-detail')?.addEventListener('click', () => {
+      const subId = selectedSubjectIdForDetail;
+      closeSubjectDetailModal();
+      openFocusModal({ subject_id: subId });
+    });
+
+    $('#btn-add-manual-time-from-detail')?.addEventListener('click', () => {
+      openManualTimeModal(selectedSubjectIdForDetail);
+    });
+
+    // Manual time modal
+    $('#manual-time-close')?.addEventListener('click', closeManualTimeModal);
+    $('#btn-cancel-manual-time')?.addEventListener('click', closeManualTimeModal);
+    $('#btn-save-manual-time')?.addEventListener('click', handleSaveManualTime);
+    $('#manual-time-overlay')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) closeManualTimeModal();
+    });
+    $('#manual-subject-select')?.addEventListener('change', (e) => {
+      renderManualTopicsChecklist(e.target.value);
+    });
+
+    // Storage event for multi-tab synchronization & locking
+    window.addEventListener('storage', (e) => {
+      if (e.key === ACTIVE_FOCUS_SESSION_KEY) {
+        checkMultiTabLock();
+        updateFocusUIBadges();
+      }
+    });
+
+    startFocusTimerTickLoop();
+
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         closeSearch();
@@ -3149,6 +3863,9 @@ SIEMPRE devuelve un JSON válido.
         closeSubjectModal();
         closeTopicModal();
         closeSubjectDetailModal();
+        closeFocusModal();
+        closeManualTimeModal();
+        $('#focus-gap-overlay')?.classList.remove('open');
         $('#routine-overlay')?.classList.remove('open');
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); openSearch(); }
@@ -3570,7 +4287,15 @@ SIEMPRE devuelve un JSON válido.
       openSubjectDetailModal,
       closeSubjectDetailModal,
       handleDeleteTopic,
-      handleDeleteOrArchiveSubject
+      handleDeleteOrArchiveSubject,
+      openFocusModal,
+      closeFocusModal,
+      openManualTimeModal,
+      closeManualTimeModal,
+      handleSaveManualTime,
+      loadActiveFocusSession,
+      saveActiveFocusSession,
+      clearActiveFocusSession
     };
     window.syncWithBackend = syncWithBackend;
     window.renderDashboard = renderDashboard;
@@ -3591,6 +4316,14 @@ SIEMPRE devuelve un JSON válido.
     window.closeSubjectDetailModal = closeSubjectDetailModal;
     window.handleDeleteTopic = handleDeleteTopic;
     window.handleDeleteOrArchiveSubject = handleDeleteOrArchiveSubject;
+    window.openFocusModal = openFocusModal;
+    window.closeFocusModal = closeFocusModal;
+    window.openManualTimeModal = openManualTimeModal;
+    window.closeManualTimeModal = closeManualTimeModal;
+    window.handleSaveManualTime = handleSaveManualTime;
+    window.loadActiveFocusSession = loadActiveFocusSession;
+    window.saveActiveFocusSession = saveActiveFocusSession;
+    window.clearActiveFocusSession = clearActiveFocusSession;
   }
 
   // ── Boot ──

@@ -59,6 +59,10 @@
         <button class="menu-toggle material-icons-round" id="menu-toggle">menu</button>
         <div class="topbar-date" id="topbar-date"></div>
         <div class="topbar-actions">
+          <button class="topbar-btn" id="btn-focus-timer" title="Temporizador de Enfoque" style="color:var(--accent-teal); display:inline-flex; align-items:center; gap:6px;">
+            <span class="material-icons-round">timer</span>
+            <span id="topbar-focus-badge" style="font-size:0.75rem; font-weight:600; display:none;"></span>
+          </button>
           <button class="topbar-btn" id="btn-conflicts" title="Conflictos de sincronización" style="display:none; color:var(--accent-amber); position:relative;">
             <span class="material-icons-round">sync_problem</span>
             <span class="notif-dot" id="conflicts-dot" style="display:block; background:var(--accent-amber);"></span>
@@ -722,6 +726,14 @@
       </div>
       <div class="modal-actions" style="margin-top:16px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
         <div style="display:flex; gap:8px;">
+          <button class="btn-primary btn-touch-target" id="btn-start-focus-from-detail" style="gap:4px;">
+            <span class="material-icons-round" style="font-size:18px;">timer</span>
+            <span>Estudiar Ahora</span>
+          </button>
+          <button class="btn-outline btn-touch-target" id="btn-add-manual-time-from-detail" title="Registrar tiempo manual">
+            <span class="material-icons-round" style="font-size:18px;">history</span>
+            <span>+ Tiempo</span>
+          </button>
           <button class="btn-outline btn-touch-target" id="btn-edit-subject-from-detail">Editar</button>
           <button class="btn-outline btn-touch-target" id="btn-delete-subject-from-detail" style="color:var(--accent-red); border-color:var(--accent-red);">Eliminar</button>
         </div>
@@ -799,6 +811,239 @@
     </div>
   </div>
 
+  <!-- Modal: Temporizador y Registro de Sesión de Enfoque -->
+  <div class="modal-overlay" id="focus-timer-overlay">
+    <div class="modal" id="modal-focus-timer" style="max-width: 540px;">
+      
+      <!-- Multi-tab warning banner -->
+      <div id="focus-multitab-warning" style="display:none; background:rgba(239, 68, 68, 0.15); border:1px solid var(--accent-red); color:var(--accent-red); padding:10px 14px; border-radius:var(--radius-sm); margin-bottom:12px; font-size:0.85rem; align-items:center; gap:8px;">
+        <span class="material-icons-round" style="font-size:20px;">tab</span>
+        <span style="flex:1;">Hay una sesión de enfoque activa en otra pestaña.</span>
+        <button class="btn-outline btn-touch-target" id="btn-force-take-timer" style="padding:0 8px; height:32px; font-size:0.75rem; border-color:var(--accent-red); color:var(--accent-red);">Tomar control</button>
+      </div>
+
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="material-icons-round" style="color:var(--accent-teal);">timer</span>
+          <h3 class="modal-title" id="focus-timer-modal-title">Sesión de Enfoque</h3>
+        </div>
+        <button class="modal-close material-icons-round" id="focus-timer-close">close</button>
+      </div>
+
+      <!-- VISTA 1: CONFIGURACIÓN / INICIO (IDLE) -->
+      <div id="focus-setup-view">
+        <form id="form-focus-setup" onsubmit="return false;">
+          <div class="form-group" style="margin-bottom:14px;">
+            <label for="focus-method-select">Método de Enfoque</label>
+            <select id="focus-method-select" style="height:44px;">
+              <option value="pomodoro">Pomodoro Clásico (25 min enfoque / 5 min descanso)</option>
+              <option value="pomodoro_50">Pomodoro Extendido (50 min enfoque / 10 min descanso)</option>
+              <option value="52_17">Regla 52/17 DeskTime (52 min enfoque / 17 min descanso)</option>
+              <option value="ultradian">Ritmo Ultradiano (90 min enfoque / 20 min descanso)</option>
+              <option value="flowtime">Flowtime (Flujo Libre con descansos proporcionales)</option>
+              <option value="deep_work">Deep Work (Bloque Profundo sin pausas fijas)</option>
+              <option value="custom">Cuenta Regresiva Personalizada</option>
+              <option value="stopwatch">Cronómetro Libre (Hacia adelante)</option>
+            </select>
+          </div>
+
+          <div class="form-group" id="focus-custom-mins-group" style="margin-bottom:14px; display:none;">
+            <label for="focus-custom-mins-input">Minutos de Enfoque</label>
+            <input type="number" id="focus-custom-mins-input" min="1" max="360" value="30" />
+          </div>
+
+          <div class="form-group" style="margin-bottom:14px;">
+            <label for="focus-subject-select">Materia / Proyecto</label>
+            <select id="focus-subject-select" style="height:44px;">
+              <option value="">-- Sin materia asignada --</option>
+            </select>
+          </div>
+
+          <div class="form-group" id="focus-topics-group" style="margin-bottom:14px; display:none;">
+            <label>Temas / Subtemas Asociados</label>
+            <div id="focus-topics-checklist" style="display:flex; flex-direction:column; gap:6px; max-height:140px; overflow-y:auto; padding:8px; background:var(--bg-primary); border-radius:var(--radius-sm);">
+              <!-- Checkboxes dinámicos -->
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:20px;">
+            <label for="focus-goal-input">Objetivo / Intención de la Sesión</label>
+            <input type="text" id="focus-goal-input" maxlength="200" placeholder="Ej: Resolver ejercicios de cinemática" />
+          </div>
+
+          <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:8px;">
+            <button class="btn-secondary btn-touch-target" id="btn-cancel-focus-setup" type="button">Cancelar</button>
+            <button class="btn-primary btn-touch-target" id="btn-start-focus-session" type="button" style="gap:6px;">
+              <span class="material-icons-round">play_arrow</span>
+              <span>Comenzar Enfoque</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- VISTA 2: SESIÓN ACTIVA / CORRIENDO (RUNNING / PAUSED / BREAK) -->
+      <div id="focus-active-view" style="display:none; text-align:center;">
+        <div style="display:flex; justify-content:center; margin-bottom:12px;">
+          <span class="topic-status-badge in_progress" id="focus-phase-badge" style="font-size:0.85rem; padding:6px 14px; font-weight:700; letter-spacing:0.5px;">ENFOQUE</span>
+        </div>
+
+        <div id="focus-timer-display" style="font-size:3.5rem; font-weight:800; font-variant-numeric:tabular-nums; color:var(--text-primary); margin:8px 0; letter-spacing:1px;">
+          25:00
+        </div>
+
+        <div class="subject-progress-bar" style="height:8px; margin-bottom:14px;">
+          <div class="subject-progress-fill" id="focus-timer-progress-fill" style="width:0%; background:var(--accent-teal);"></div>
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <span id="focus-active-subject-tag" class="topic-status-badge pending" style="margin-right:6px;">Materia</span>
+          <span id="focus-active-goal-text" style="font-size:0.85rem; color:var(--text-secondary);"></span>
+        </div>
+
+        <!-- Registro rápido de distracciones -->
+        <div style="margin:16px 0; text-align:left; background:var(--bg-primary); padding:12px; border-radius:var(--radius-md);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <span style="font-size:0.75rem; color:var(--text-secondary); font-weight:600;">Distracciones / Pensamientos</span>
+            <span id="focus-distractions-count" style="font-size:0.75rem; color:var(--text-muted);">0 registradas</span>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <input type="text" id="focus-distraction-input" placeholder="Anota distracción y sigue enfocado..." style="height:38px; font-size:0.8rem; flex:1;" />
+            <button class="btn-outline btn-touch-target" id="btn-add-distraction" type="button" style="height:38px; padding:0 12px; font-size:0.8rem;">Anotar</button>
+          </div>
+        </div>
+
+        <!-- Controles de la sesión -->
+        <div class="modal-actions" style="display:flex; justify-content:center; flex-wrap:wrap; gap:10px; margin-top:16px;">
+          <button class="btn-outline btn-touch-target" id="btn-pause-resume-focus" type="button" style="min-width:120px; gap:4px;">
+            <span class="material-icons-round" id="focus-play-pause-icon">pause</span>
+            <span id="focus-play-pause-label">Pausar</span>
+          </button>
+          <button class="btn-outline btn-touch-target" id="btn-take-break-focus" type="button" style="min-width:120px; gap:4px;">
+            <span class="material-icons-round">coffee</span>
+            <span id="focus-break-btn-label">Descanso</span>
+          </button>
+          <button class="btn-primary btn-touch-target" id="btn-finish-focus" type="button" style="min-width:130px; gap:4px;">
+            <span class="material-icons-round">check_circle</span>
+            <span>Finalizar</span>
+          </button>
+          <button class="btn-outline btn-touch-target" id="btn-abandon-focus" type="button" style="color:var(--accent-red); border-color:var(--accent-red); font-size:0.8rem;">
+            Descartar
+          </button>
+        </div>
+      </div>
+
+      <!-- VISTA 3: RESUMEN DE SESIÓN Y NOTAS DE APRENDIZAJE -->
+      <div id="focus-summary-view" style="display:none;">
+        <h4 style="font-size:1rem; margin-bottom:12px; color:var(--text-primary);">¡Sesión Completada! 🎉</h4>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; padding:12px; background:var(--bg-primary); border-radius:var(--radius-md); margin-bottom:16px; text-align:center;">
+          <div>
+            <span style="font-size:0.75rem; color:var(--text-secondary);">Enfoque</span>
+            <p id="summary-effective-time" style="font-weight:700; margin:4px 0 0 0; color:var(--accent-teal);">0m</p>
+          </div>
+          <div>
+            <span style="font-size:0.75rem; color:var(--text-secondary);">Descanso</span>
+            <p id="summary-break-time" style="font-weight:700; margin:4px 0 0 0; color:var(--accent-amber);">0m</p>
+          </div>
+          <div>
+            <span style="font-size:0.75rem; color:var(--text-secondary);">Distracciones</span>
+            <p id="summary-distractions" style="font-weight:700; margin:4px 0 0 0; color:var(--text-primary);">0</p>
+          </div>
+        </div>
+
+        <!-- Formulario opcional de notas de aprendizaje asociadas -->
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          <div class="form-group">
+            <label for="summary-learned-text">¿Qué aprendiste o avanzaste?</label>
+            <textarea id="summary-learned-text" rows="2" placeholder="Resumen clave de lo aprendido..."></textarea>
+          </div>
+          <div class="form-group">
+            <label for="summary-questions-text">Dudas / Preguntas pendientes</label>
+            <textarea id="summary-questions-text" rows="1" placeholder="Puntos que requieren revisión posterior..."></textarea>
+          </div>
+          <div class="form-group">
+            <label for="summary-next-step">Próximo paso sugerido</label>
+            <input type="text" id="summary-next-step" placeholder="Ej: Continuar con ejercicios capítulo 4" />
+          </div>
+        </div>
+
+        <div class="modal-actions" style="margin-top:20px; display:flex; justify-content:flex-end; gap:8px;">
+          <button class="btn-secondary btn-touch-target" id="btn-skip-notes-save" type="button">Guardar Solo Sesión</button>
+          <button class="btn-primary btn-touch-target" id="btn-save-session-with-notes" type="button">Guardar Sesión y Notas</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Modal: Resolución de Ausencia / Gap del Temporizador -->
+  <div class="modal-overlay" id="focus-gap-overlay">
+    <div class="modal" id="modal-focus-gap" style="max-width: 460px;">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="material-icons-round" style="color:var(--accent-amber);">hourglass_disabled</span>
+          <h3 class="modal-title">Ausencia Detectada</h3>
+        </div>
+      </div>
+      <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.4; margin-bottom:16px;" id="focus-gap-message">
+        Se detectó una pausa prolongada en la aplicación. ¿Continuaste estudiando durante este tiempo?
+      </p>
+      <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn-secondary btn-touch-target" id="btn-gap-cutoff" type="button">No, me detuve antes</button>
+        <button class="btn-primary btn-touch-target" id="btn-gap-keep" type="button">Sí, seguí estudiando</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Registrar Tiempo Manual -->
+  <div class="modal-overlay" id="manual-time-overlay">
+    <div class="modal" id="modal-manual-time" style="max-width: 480px;">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="material-icons-round" style="color:var(--accent-teal);">history</span>
+          <h3 class="modal-title">Registrar Tiempo Manual</h3>
+        </div>
+        <button class="modal-close material-icons-round" id="manual-time-close">close</button>
+      </div>
+      <form id="form-manual-time" onsubmit="return false;">
+        <div class="form-group" style="margin-bottom:14px;">
+          <label for="manual-subject-select">Materia *</label>
+          <select id="manual-subject-select" style="height:44px;" required>
+            <option value="">-- Seleccionar Materia --</option>
+          </select>
+        </div>
+        <div class="form-group" id="manual-topics-group" style="margin-bottom:14px; display:none;">
+          <label>Temas / Subtemas</label>
+          <div id="manual-topics-checklist" style="display:flex; flex-direction:column; gap:6px; max-height:120px; overflow-y:auto; padding:8px; background:var(--bg-primary); border-radius:var(--radius-sm);"></div>
+        </div>
+        <div class="form-row" style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
+          <div class="form-group">
+            <label for="manual-date-input">Fecha</label>
+            <input type="date" id="manual-date-input" required />
+          </div>
+          <div class="form-group">
+            <label for="manual-duration-minutes">Minutos Dedicados *</label>
+            <input type="number" id="manual-duration-minutes" min="1" max="1440" value="60" required />
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:20px;">
+          <label for="manual-goal-input">Detalle / Objetivo (opcional)</label>
+          <input type="text" id="manual-goal-input" maxlength="200" placeholder="Ej: Lectura complementaria" />
+        </div>
+        <div id="manual-time-errors" class="form-errors" style="color:var(--accent-red); font-size:0.85rem; margin-bottom:12px; display:none;"></div>
+        <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:8px;">
+          <button class="btn-secondary btn-touch-target" id="btn-cancel-manual-time" type="button">Cancelar</button>
+          <button class="btn-primary btn-touch-target" id="btn-save-manual-time" type="button">Guardar Registro</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Botón Flotante de Enfoque (FAB) -->
+  <button class="focus-fab" id="btn-focus-fab" title="Iniciar Sesión de Enfoque">
+    <span class="material-icons-round">timer</span>
+    <span class="focus-fab-label" id="focus-fab-label">Enfoque</span>
+  </button>
+
   <!-- Chat Widget (AI Agent) -->
   <div class="chat-widget" id="chat-widget">
     <button class="chat-toggle" id="chat-toggle" title="Preguntar al Agente IA">
@@ -838,6 +1083,7 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="sync-core.js?v=9"></script>
   <script src="focus-core.js?v=9"></script>
+  <script src="timer-core.js?v=9"></script>
   <script src="app.js?v=9"></script>
 </body>
 </html>
