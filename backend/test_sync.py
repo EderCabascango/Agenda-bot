@@ -1131,5 +1131,57 @@ def test_parameterized_create_if_absent_returns_existing_in_changes(coll_name):
     assert res2["changes"][0]["id"] == item["id"]
 
 
+def test_timer_core_session_record_contract_validation():
+    """(Fase C1) Verifica que las sesiones generadas por TimerCore cumplen estrictamente el esquema del servidor."""
+    session_payload = {
+        "id": "foc-contract-test-1",
+        "subject_id": "sub-test-contract",
+        "activity_id": None,
+        "topic_ids": ["top-contract-1", "top-contract-2"],
+        "method": "pomodoro",
+        "goal": "Prueba de contrato con validación de backend",
+        "started_at": "2026-10-10T10:00:00.000000Z",
+        "ended_at": "2026-10-10T10:30:00.000000Z",
+        "focus_intervals": [
+            ["2026-10-10T10:00:00.000000Z", "2026-10-10T10:25:00.000000Z"]
+        ],
+        "effective_seconds": 1500,
+        "break_seconds": 300,
+        "cycles_completed": 1,
+        "distractions_count": 2,
+        "status": "completed",
+        "source": "timer",
+        "iana_timezone": "America/Bogota",
+        "version": 1,
+        "op": "create_if_absent",
+        "created_at": "2026-10-10T10:00:00.000000Z",
+        "updated_at": "2026-10-10T10:30:00.000000Z",
+        "deleted_at": None
+    }
+
+    # 1. Validar directamente contra el esquema del backend
+    sanitized, err, unknowns = db.validate_and_sanitize_item("focus_sessions", session_payload)
+    assert err is None, f"El payload de TimerCore falló la validación del esquema: {err}"
+    assert sanitized is not None
+
+    # 2. Sincronizar exitosamente con el servidor
+    user = "user_timer_contract"
+    res = db.sync_collection(user, "focus_sessions", changes=[session_payload])
+    assert res["applied"] == 1
+    assert len(res["conflicts"]) == 0
+    assert len(res["rejected"]) == 0
+
+    # 3. Recuperar y verificar deserialización de focus_intervals y topic_ids
+    saved = db.get_collection_item(user, "focus_sessions", "foc-contract-test-1")
+    assert saved is not None
+    assert saved["effective_seconds"] == 1500
+    assert saved["break_seconds"] == 300
+    assert saved["source"] == "timer"
+    assert len(saved["focus_intervals"]) == 1
+    assert saved["focus_intervals"][0][0] == "2026-10-10T10:00:00.000000Z"
+    assert saved["topic_ids"] == ["top-contract-1", "top-contract-2"]
+
+
+
 
 
