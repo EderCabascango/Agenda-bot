@@ -41,9 +41,9 @@ def update_activity(activity_id: str, config: RunnableConfig, title: str | None 
                     end_time: str | None = None, priority: str | None = None) -> dict:
     """Edita campos de una actividad existente (mover, renombrar, cambiar horas)."""
     uid = _uid(config)
-    cur = db.get_activity(uid, activity_id)
+    cur = db.get_activity(uid, activity_id, include_deleted=False)
     if not cur:
-        return {"error": f"No existe la actividad {activity_id}"}
+        return {"error": f"No existe o fue eliminada la actividad {activity_id}"}
     for k, v in (("title", title), ("date", date), ("startTime", start_time),
                  ("endTime", end_time), ("priority", priority)):
         if v is not None:
@@ -55,9 +55,9 @@ def update_activity(activity_id: str, config: RunnableConfig, title: str | None 
 def mark_done(activity_id: str, done: bool, config: RunnableConfig) -> dict:
     """Marca una actividad como completada (done=true) o pendiente (done=false)."""
     uid = _uid(config)
-    cur = db.get_activity(uid, activity_id)
+    cur = db.get_activity(uid, activity_id, include_deleted=False)
     if not cur:
-        return {"error": f"No existe la actividad {activity_id}"}
+        return {"error": f"No existe o fue eliminada la actividad {activity_id}"}
     cur["completed"] = done
     return db.upsert_activity(uid, cur)
 

@@ -77,13 +77,18 @@
 
   function enqueueChange(change) {
     const q = getSyncQueue();
-    const existingIdx = q.findIndex(item => item.id === change.id);
-    if (existingIdx !== -1) {
-      q[existingIdx] = { ...q[existingIdx], ...change };
-    } else {
-      q.push(change);
-    }
-    saveSyncQueue(q);
+    const updatedQ = (typeof SyncCore !== 'undefined' && SyncCore.enqueueChange)
+      ? SyncCore.enqueueChange(q, change)
+      : (() => {
+          const idx = q.findIndex(item => item.id === change.id);
+          if (idx !== -1) {
+            q[idx] = { ...q[idx], ...change };
+          } else {
+            q.push(change);
+          }
+          return q;
+        })();
+    saveSyncQueue(updatedQ);
   }
 
   let activities = loadActivities();
@@ -1148,16 +1153,59 @@
         const file = e.target.files[0];
         if (!file) return;
         const reader = new FileReader();
-        reader.onload = (ev) => {
+        reader.onload = async (ev) => {
           try {
             const imported = JSON.parse(ev.target.result);
-            if (Array.isArray(imported)) {
-              activities = imported;
-              saveActivities(activities);
-              renderDashboard();
-              showToast('Datos importados correctamente');
+            if (!Array.isArray(imported)) {
+              showToast('Formato inválido (se esperaba un array JSON)', 'error', 'var(--accent-red)');
+              return;
             }
-          } catch { showToast('Error al importar', 'error', 'var(--accent-red)'); }
+
+            const proceed = confirm(
+              `¿Deseas restaurar ${imported.length} actividades?\nSe creará un respaldo automático previo de tu agenda actual antes de importar.`
+            );
+            if (!proceed) {
+              importFile.value = '';
+              return;
+            }
+
+            // 1. Respaldo automático previo en localStorage
+            const currentSnapshot = JSON.stringify(activities, null, 2);
+            try {
+              localStorage.setItem('diary_backup_pre_import_' + Date.now(), currentSnapshot);
+            } catch (storageErr) {
+              console.warn('No se pudo guardar snapshot local:', storageErr);
+            }
+
+            // 2. Preparar cambios no destructivos con SyncCore
+            if (typeof SyncCore !== 'undefined' && SyncCore.prepareImportChanges) {
+              const { mergedActivities, changesToEnqueue } = SyncCore.prepareImportChanges(
+                imported,
+                activities,
+                generateUUID
+              );
+              activities = mergedActivities;
+              changesToEnqueue.forEach(ch => enqueueChange(ch));
+            } else {
+              activities = imported;
+              imported.forEach(ch => enqueueChange(ch));
+            }
+
+            saveActivities(activities);
+            renderDashboard();
+            renderActivityList();
+            renderCalendar();
+            renderDiarioGrid();
+            showToast(`${imported.length} actividades importadas ✓`);
+
+            // 3. Sincronizar con el backend
+            syncWithBackend();
+          } catch (err) {
+            console.error('Error al importar:', err);
+            showToast('Error al importar el archivo JSON', 'error', 'var(--accent-red)');
+          } finally {
+            importFile.value = '';
+          }
         };
         reader.readAsText(file);
       });
@@ -1702,14 +1750,31 @@ SIEMPRE devuelve un JSON válido.
       if (!res.ok) return false;
       const data = await res.json();
 
-      // Limpia los cambios locales que ya se aplicaron en el servidor
-      saveSyncQueue([]);
+      // Limpia de la cola los cambios procesados exitosamente
+      const remainingQueue = (typeof SyncCore !== 'undefined' && SyncCore.purgeCommittedAndConflicted)
+        ? SyncCore.purgeCommittedAndConflicted(queue, queue)
+        : [];
+      saveSyncQueue(remainingQueue);
+
       if (data.server_time) {
         setLastSync(data.server_time);
       }
 
-      // Mezclar cambios remotos de forma no destructiva
-      if (Array.isArray(data.changes) && data.changes.length > 0) {
+      // Mezclar cambios remotos usando SyncCore
+      if (typeof SyncCore !== 'undefined' && SyncCore.mergeRemoteChanges) {
+        const { activities: merged, modified } = SyncCore.mergeRemoteChanges(activities, data.changes, {
+          resyncRequired: Boolean(data.resync_required)
+        });
+        if (modified) {
+          activities = merged;
+          saveActivities(activities);
+          renderDashboard();
+          renderActivityList();
+          renderCalendar();
+          renderDiarioGrid();
+          scheduleWebAlarms();
+        }
+      } else if (Array.isArray(data.changes) && data.changes.length > 0) {
         let modified = false;
         data.changes.forEach(remote => {
           const idx = activities.findIndex(a => a.id === remote.id);
@@ -1736,6 +1801,7 @@ SIEMPRE devuelve un JSON válido.
           renderDashboard();
           renderActivityList();
           renderCalendar();
+          renderDiarioGrid();
           scheduleWebAlarms();
         }
       }

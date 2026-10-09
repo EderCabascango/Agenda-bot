@@ -6,7 +6,12 @@ Thumbs.db
 .agents/
 .system_generated/
 backend/.venv/
-backend/agenda.db
+backend/agenda.db*
+backend/backups/
+*.db
+*.db_*
+*.sqlite
+*.sqlite3
 backend/.env
 __pycache__/
 .pytest_cache/
