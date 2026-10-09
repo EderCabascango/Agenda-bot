@@ -1414,24 +1414,28 @@ input:focus, select:focus, textarea:focus {
 
 .topic-status-badge.pending,
 .topic-status-badge.not_started {
-  background: rgba(148, 163, 184, 0.15);
-  color: var(--text-secondary);
+  background: var(--accent-amber-soft);
+  color: #9A6A00;
+  font-weight: 700;
 }
 
 .topic-status-badge.in_progress {
-  background: rgba(59, 130, 246, 0.15);
-  color: #3B82F6;
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563EB;
+  font-weight: 700;
 }
 
 .topic-status-badge.mastered,
 .topic-status-badge.completed {
-  background: rgba(16, 185, 129, 0.15);
-  color: #10B981;
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+  font-weight: 700;
 }
 
 .topic-status-badge.review_needed {
-  background: rgba(245, 158, 11, 0.15);
-  color: #F59E0B;
+  background: rgba(245, 158, 11, 0.12);
+  color: #D97706;
+  font-weight: 700;
 }
 
 /* Touch targets enforcement */
@@ -1452,14 +1456,14 @@ input:focus, select:focus, textarea:focus {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 18px;
-  background: var(--accent-teal);
-  color: #FFFFFF;
+  padding: 12px 20px;
+  background: var(--accent-amber);
+  color: #111111;
   border: none;
   border-radius: 28px;
-  box-shadow: 0 4px 14px rgba(20, 184, 166, 0.4);
+  box-shadow: 0 4px 14px rgba(245, 184, 46, 0.35);
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 700;
   font-size: 0.9rem;
   transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
   min-height: 48px;
@@ -1467,12 +1471,13 @@ input:focus, select:focus, textarea:focus {
 
 .focus-fab:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(20, 184, 166, 0.5);
+  box-shadow: 0 6px 20px rgba(245, 184, 46, 0.45);
 }
 
 .focus-fab.active-session {
-  background: var(--accent-amber);
-  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.4);
+  background: #111111;
+  color: #FFFFFF;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
   animation: pulse-fab 2s infinite;
 }
 
