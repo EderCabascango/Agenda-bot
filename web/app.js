@@ -383,11 +383,13 @@
           const subTopics = topics.filter(t => t.subject_id === sub.id && !t.deleted_at);
           const totalT = subTopics.length;
           const masteredT = subTopics.filter(t => t.status === 'mastered').length;
-          pct = totalT > 0 ? Math.round((masteredT / totalT) * 100) : 50;
-          currHours = ((pct / 100) * (sub.weekly_goal_hours || 5)).toFixed(1);
+          pct = totalT > 0 ? Math.round((masteredT / totalT) * 100) : 0;
+          currHours = totalT > 0 ? ((pct / 100) * (sub.weekly_goal_hours || 5)).toFixed(1) : '0.0';
+          const subtopicsList = subTopics.map(t => t.title);
+          sub.subtopicsText = subtopicsList.length > 0 ? subtopicsList.join(', ') : 'Sin subtemas definidos.';
         }
 
-        const subtopicsText = sub.subtopics || (topics.filter(t => t.subject_id === sub.id).map(t => t.title).join(', ') || 'Espacios vectoriales, Repaso de conceptos.');
+        const subtopicsText = sub.subtopicsText || sub.subtopics || 'Sin subtemas definidos.';
         const tag = sub.category_tag || sub.name.split(' ')[0];
 
         return `
@@ -499,6 +501,9 @@
           const tag = (a.tags && a.tags[0]) ? a.tags[0] : 'General';
           const isDone = a.completed;
 
+          // Check if this activity is a study activity (only study activities get a Focus/Play button)
+          const isStudyAct = (a.tags && a.tags.some(t => ['estudio', 'proyectos', 'aprender', 'ia', 'desarrollo', 'programación', 'materia'].includes(t.toLowerCase()))) || a.subject_id;
+
           let inProgress = false;
           if (a.startTime && a.endTime && !isDone && !isOverdue) {
             const [sh, sm] = a.startTime.split(':').map(Number);
@@ -533,8 +538,8 @@
                   <p class="agenda-item-title ${isDone ? 'done-text' : ''}">${escHTML(a.title)}</p>
                   <p class="agenda-item-sub">${escHTML(tag)} • <span class="status-text">${statusLabel}</span></p>
                 </div>
-                ${!isDone ? `
-                  <button class="btn-agenda-focus" data-agenda-focus="${a.id}" title="Iniciar Enfoque">
+                ${!isDone && isStudyAct ? `
+                  <button class="btn-agenda-focus" data-agenda-focus="${a.id}" title="Iniciar Enfoque de Estudio">
                     <span class="material-icons-round">play_arrow</span>
                   </button>
                 ` : ''}
@@ -629,6 +634,34 @@
         });
       }
     }
+
+    // ── Habits checklist (today's activities as interactive habit items) ──
+    const habitsList = $('#db-habits-list');
+    if (habitsList) {
+      const sorted = [...todayActs].sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+      if (sorted.length === 0) {
+        habitsList.innerHTML = `<p style="font-size:0.82rem;color:var(--text-muted);padding:8px 0;">No hay actividades para hoy.</p>`;
+      } else {
+        habitsList.innerHTML = sorted.map(a => {
+          const tagColor = a.tags && a.tags[0] ? getCategoryColor(a.tags[0]) : '#9CA3AF';
+          const timeStr = a.startTime ? (a.endTime ? `${a.startTime} – ${a.endTime}` : a.startTime) : '';
+          return `<div class="db-habit-item ${a.completed ? 'done' : ''}" data-habit-toggle="${a.id}">
+            <div class="db-habit-check"></div>
+            <span class="db-habit-dot" style="background:${tagColor}"></span>
+            <span class="db-habit-label">${escHTML(a.title)}</span>
+            ${timeStr ? `<span class="db-habit-time">${timeStr}</span>` : ''}
+          </div>`;
+        }).join('');
+        habitsList.querySelectorAll('[data-habit-toggle]').forEach(item => {
+          item.addEventListener('click', () => toggleActivity(item.dataset.habitToggle));
+        });
+      }
+      const habitsSubEl = $('#db-habits-sub');
+      if (habitsSubEl) habitsSubEl.textContent = todayActs.length > 0 ? `${todayActs.filter(a => a.completed).length}/${todayActs.length}` : '';
+    }
+
+    // ── Diario Grid Render ──
+    renderDiarioGrid();
   }
 
   // Helper: return a colour for a known category tag
