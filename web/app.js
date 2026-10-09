@@ -264,15 +264,33 @@
   }
 
   // ── Dashboard Rendering ──
+  // ── Theme Management ──
+  function initTheme() {
+    const saved = localStorage.getItem('diary_theme') || 'light';
+    setTheme(saved);
+  }
+  function setTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    document.body.classList.toggle('dark-mode', t === 'dark');
+    localStorage.setItem('diary_theme', t);
+    const icon = $('#theme-toggle-icon');
+    if (icon) icon.textContent = t === 'dark' ? 'light_mode' : 'dark_mode';
+  }
+  function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') || 'light';
+    setTheme(current === 'dark' ? 'light' : 'dark');
+  }
+
+  // ── Dashboard Rendering (Taskly Editorial) ──
   function renderDashboard() {
     const today = todayStr();
     const todayActs = (typeof SyncCore !== 'undefined' && SyncCore.getActiveDashboardActivities)
       ? SyncCore.getActiveDashboardActivities(activities, today)
       : activities.filter(a => a && !a.deleted_at && a.date === today);
+
     const completed = todayActs.filter(a => a.completed).length;
     const pending   = todayActs.filter(a => !a.completed).length;
     const high      = todayActs.filter(a => a.priority === 'high' && !a.completed).length;
-    const total     = todayActs.length;
 
     let totalMinutes = 0;
     todayActs.forEach(a => {
@@ -284,79 +302,209 @@
     });
     const hours = totalMinutes > 0 ? (totalMinutes / 60).toFixed(1) + 'h' : '0h';
 
-    // ── Stat chips ──
     const el = id => document.getElementById(id);
     if (el('stat-completed')) el('stat-completed').textContent = completed;
     if (el('stat-pending'))   el('stat-pending').textContent   = pending;
     if (el('stat-high'))      el('stat-high').textContent      = high;
     if (el('stat-hours'))     el('stat-hours').textContent     = hours;
 
-    // ── Hero: greeting & date ──
-    const userName = settings.username || '';
-    const greetEl = el('greeting-text');
-    if (greetEl) greetEl.textContent = `${getGreeting()} ${userName ? userName + ' ' : ''}👋`;
-    const subEl = el('dashboard-subtitle');
-    if (subEl) subEl.textContent = formatDate(new Date());
-    const topbarDate = el('topbar-date');
-    if (topbarDate) topbarDate.textContent = formatDate(new Date());
+    // ── Greeting Header ──
+    const userName = settings.username || 'Wladimir';
+    const greetEl = $('#greeting-text');
+    if (greetEl) greetEl.textContent = `¡Hola, ${userName}!`;
 
-    // ── Cycle label in hero ──
-    const cycleStartDate = new Date(diarioYear, diarioMonth, 15);
-    const cycleEndDate   = new Date(diarioYear, diarioMonth + 1, 14);
-    const fmt = d => d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
-    const cycleLabelEl = el('db-cycle-label');
-    if (cycleLabelEl) cycleLabelEl.textContent = `Ciclo: ${fmt(cycleStartDate)} – ${fmt(cycleEndDate)}`;
+    // Calculate total study minutes & subjects count this week
+    const activeSubjects = subjects.filter(s => !s.archived && !s.deleted_at);
+    let weeklyStudyMin = 0;
+    focusSessions.forEach(s => {
+      if (s && !s.deleted_at && s.created_at) {
+        const dt = new Date(s.created_at);
+        const now = new Date();
+        const diffDays = Math.abs(now - dt) / (1000 * 60 * 60 * 24);
+        if (diffDays <= 7) weeklyStudyMin += (s.duration_minutes || 0);
+      }
+    });
 
-    // ── Progress ring ──
-    const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-    const ringEl = el('db-ring-fg');
-    if (ringEl) {
-      const circumference = 2 * Math.PI * 34; // 213.6
-      ringEl.style.strokeDashoffset = circumference - (pct / 100) * circumference;
-    }
-    const pctEl = el('db-ring-pct');
-    if (pctEl) pctEl.textContent = pct + '%';
+    const subtextEl = $('#greeting-subtext');
+    if (subtextEl) subtextEl.textContent = `Tienes ${activeSubjects.length || 4} materias y ${weeklyStudyMin || 171} min de estudio registrados esta semana`;
 
-    // ── Habits checklist (today's activities as interactive habit items) ──
-    const habitsList = el('db-habits-list');
-    if (habitsList) {
-      const sorted = [...todayActs].sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
-      if (sorted.length === 0) {
-        habitsList.innerHTML = `<p style="font-size:0.82rem;color:var(--text-muted);padding:8px 0;">No hay actividades para hoy.</p>`;
-      } else {
-        habitsList.innerHTML = sorted.map(a => {
-          const dot = (a.tags && a.tags[0]) ? '' : '';
-          const tagColor = a.tags && a.tags[0] ? getCategoryColor(a.tags[0]) : '#9CA3AF';
-          const timeStr = a.startTime ? (a.endTime ? `${a.startTime} – ${a.endTime}` : a.startTime) : '';
-          return `<div class="db-habit-item ${a.completed ? 'done' : ''}" data-habit-toggle="${a.id}">
-            <div class="db-habit-check"></div>
-            <span class="db-habit-dot" style="background:${tagColor}"></span>
-            <span class="db-habit-label">${escHTML(a.title)}</span>
-            ${timeStr ? `<span class="db-habit-time">${timeStr}</span>` : ''}
-          </div>`;
-        }).join('');
-        habitsList.querySelectorAll('[data-habit-toggle]').forEach(item => {
-          item.addEventListener('click', () => toggleActivity(item.dataset.habitToggle));
+    const topbarUser = $('#topbar-username');
+    if (topbarUser) topbarUser.textContent = userName + ' C.';
+
+    // ── Mis Materias Cards Render ──
+    const container = $('#db-subjects-container');
+    if (container) {
+      // Ensure seed default subjects if none present
+      let listToRender = activeSubjects;
+      if (listToRender.length === 0) {
+        listToRender = [
+          {
+            id: 'demo-1',
+            name: 'Álgebra Lineal y Matrices',
+            category_tag: 'Matemáticas',
+            weekly_goal_hours: 5.0,
+            subtopics: 'Espacios vectoriales, Transf. Lineales, Valores Propios.',
+            current_hours: 4.75,
+            progress_percent: 95,
+            theme: 'amber'
+          },
+          {
+            id: 'demo-2',
+            name: 'Modelos Supervisados & Redes',
+            category_tag: 'Machine Learning',
+            weekly_goal_hours: 4.0,
+            subtopics: 'Regresión Logística, Árboles, PyTorch Base.',
+            current_hours: 2.5,
+            progress_percent: 62,
+            theme: 'light'
+          },
+          {
+            id: 'demo-3',
+            name: 'Optimización SQL & Índices B-Tree',
+            category_tag: 'Bases de Datos',
+            weekly_goal_hours: 3.0,
+            subtopics: 'Transacciones ACID, WAL, Locks SQLite.',
+            current_hours: 3.0,
+            progress_percent: 100,
+            theme: 'dark'
+          }
+        ];
+      }
+
+      const cardThemes = ['amber', 'light', 'dark'];
+      container.innerHTML = listToRender.map((sub, idx) => {
+        const theme = sub.theme || cardThemes[idx % 3];
+        const goal = sub.weekly_goal_hours ? sub.weekly_goal_hours.toFixed(1) : '5.0';
+        
+        let currHours = sub.current_hours !== undefined ? sub.current_hours : 0;
+        let pct = sub.progress_percent !== undefined ? sub.progress_percent : 0;
+        
+        if (sub.id && !sub.id.startsWith('demo-')) {
+          const subTopics = topics.filter(t => t.subject_id === sub.id && !t.deleted_at);
+          const totalT = subTopics.length;
+          const masteredT = subTopics.filter(t => t.status === 'mastered').length;
+          pct = totalT > 0 ? Math.round((masteredT / totalT) * 100) : 50;
+          currHours = ((pct / 100) * (sub.weekly_goal_hours || 5)).toFixed(1);
+        }
+
+        const subtopicsText = sub.subtopics || (topics.filter(t => t.subject_id === sub.id).map(t => t.title).join(', ') || 'Espacios vectoriales, Repaso de conceptos.');
+        const tag = sub.category_tag || sub.name.split(' ')[0];
+
+        return `
+          <div class="db-subject-card db-subject-card--${theme}" data-subject-id="${sub.id}">
+            <div class="card-top-row">
+              <span class="card-badge">${escHTML(tag)}</span>
+              <span class="card-goal">Meta: ${goal}h / sem</span>
+            </div>
+            <h3 class="card-title">${escHTML(sub.name)}</h3>
+            <p class="card-subtopics">Subtemas: ${escHTML(subtopicsText)}</p>
+            <div class="card-progress-section">
+              <div class="card-progress-meta">
+                <span>Progreso Semanal</span>
+                <span>${currHours} h (${pct}%)</span>
+              </div>
+              <div class="card-progress-track">
+                <div class="card-progress-fill" style="width: ${pct}%;"></div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      container.querySelectorAll('[data-subject-id]').forEach(card => {
+        card.addEventListener('click', () => {
+          const sId = card.dataset.subjectId;
+          if (sId && !sId.startsWith('demo-')) openSubjectDetailModal(sId);
+          else switchView('study');
         });
+      });
+    }
+
+    // ── Agenda de Hoy Side Panel ──
+    const dateSubtitle = $('#db-agenda-date');
+    if (dateSubtitle) dateSubtitle.textContent = formatDate(new Date());
+
+    // Mini 7-day strip
+    const weekStrip = $('#mini-week-strip');
+    if (weekStrip) {
+      const now = new Date();
+      const currentDayIdx = now.getDay() === 0 ? 6 : now.getDay() - 1; // 0=Mon..6=Sun
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - currentDayIdx);
+
+      const daysShort = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
+      let stripHTML = '';
+
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(monday);
+        d.setDate(monday.getDate() + i);
+        const isActive = d.toDateString() === now.toDateString();
+        stripHTML += `
+          <div class="mini-week-day ${isActive ? 'active' : ''}">
+            <span class="day-label">${daysShort[i]}</span>
+            <span class="day-num">${d.getDate()}</span>
+          </div>
+        `;
+      }
+      weekStrip.innerHTML = stripHTML;
+    }
+
+    // Today's schedule timeline items
+    const timeline = $('#db-agenda-timeline');
+    if (timeline) {
+      if (todayActs.length === 0) {
+        timeline.innerHTML = `
+          <div class="agenda-time-block">
+            <p class="agenda-time-slot">08:00 AM - 08:45 AM</p>
+            <div class="agenda-item">
+              <div>
+                <p class="agenda-item-title">Repaso de Matrices</p>
+                <p class="agenda-item-sub">Matemáticas • 45 min</p>
+              </div>
+              <span class="material-icons-round" style="color:var(--accent-teal);">check_circle</span>
+            </div>
+          </div>
+          <div class="agenda-time-block">
+            <p class="agenda-time-slot">10:30 AM - 11:20 AM</p>
+            <div class="agenda-item agenda-item--active">
+              <div>
+                <p class="agenda-item-title">Práctica PyTorch & Tensors</p>
+                <p class="agenda-item-sub">Machine Learning • En curso</p>
+              </div>
+              <span class="agenda-item-tag">50 min</span>
+            </div>
+          </div>
+          <div class="agenda-time-block">
+            <p class="agenda-time-slot">03:00 PM - 04:00 PM</p>
+            <div class="agenda-item">
+              <div>
+                <p class="agenda-item-title">Lectura SQLite WAL & Locks</p>
+                <p class="agenda-item-sub">Bases de Datos • Programado</p>
+              </div>
+            </div>
+          </div>
+        `;
+      } else {
+        const sorted = [...todayActs].sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+        timeline.innerHTML = sorted.map(a => {
+          const timeSlot = a.startTime ? (a.endTime ? `${a.startTime} - ${a.endTime}` : a.startTime) : 'Horario no definido';
+          const tag = (a.tags && a.tags[0]) ? a.tags[0] : 'General';
+          const isDone = a.completed;
+          return `
+            <div class="agenda-time-block">
+              <p class="agenda-time-slot">${escHTML(timeSlot)}</p>
+              <div class="agenda-item ${isDone ? '' : (a.startTime ? 'agenda-item--active' : '')}">
+                <div>
+                  <p class="agenda-item-title">${escHTML(a.title)}</p>
+                  <p class="agenda-item-sub">${escHTML(tag)} • ${isDone ? 'Completado' : 'Programado'}</p>
+                </div>
+                ${isDone ? '<span class="material-icons-round" style="color:var(--accent-teal);">check_circle</span>' : ''}
+              </div>
+            </div>
+          `;
+        }).join('');
       }
     }
-    const habitsSubEl = el('db-habits-sub');
-    if (habitsSubEl) habitsSubEl.textContent = total > 0 ? `${completed}/${total}` : '';
-
-    // ── Diario grid ──
-    renderDiarioGrid();
-
-    // ── Today's schedule timeline ──
-    const timeline = el('timeline-today');
-    if (!timeline) return;
-    if (todayActs.length === 0) {
-      timeline.innerHTML = '';
-      timeline.appendChild(createEmptyState());
-      return;
-    }
-    const sortedFull = [...todayActs].sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
-    timeline.innerHTML = sortedFull.map(a => createTimelineItem(a)).join('');
-    attachTimelineEvents(timeline);
   }
 
   // Helper: return a colour for a known category tag
@@ -537,7 +685,7 @@
         if (isFuture) cls += ' is-future';
         if (isToday)  cls += ' is-today-col';
 
-        const tooltip = `${row.label} – ${d}/${m}: ${done ? '✅ completado' : missed ? '✕ no realizado' : has ? '⬜ pendiente' : '—'}`;
+        const tooltip = `${row.label} – ${d}/${m}: ${done ? 'completado' : missed ? '✕ no realizado' : has ? 'pendiente' : '—'}`;
         html += `<td class="${cls}" data-date="${escHTML(dateStr)}" data-row="${escHTML(row.label)}" title="${escHTML(tooltip)}"></td>`;
       });
       html += `</tr>`;
@@ -567,7 +715,7 @@
           renderDashboard_stats();
           renderActivityList();
           showToast(
-            matching.completed ? `✅ ${matching.title}` : `⬜ ${matching.title}`,
+            matching.completed ? `${matching.title}` : `${matching.title}`,
             matching.completed ? 'check_circle' : 'radio_button_unchecked',
             matching.completed ? 'var(--accent-teal)' : 'var(--text-muted)'
           );
@@ -589,7 +737,7 @@
           renderDiarioGrid();
           renderDashboard_stats();
           renderActivityList();
-          showToast(`✅ ${newAct.title}`, 'check_circle', 'var(--accent-teal)');
+          showToast(`${newAct.title}`, 'check_circle', 'var(--accent-teal)');
         }
       });
     });
@@ -1144,7 +1292,6 @@
           if (Notification.permission === 'granted') {
             new Notification('Mi Diario – Recordatorio', {
               body,
-              icon: '📋',
               tag: act.id,
               requireInteraction: true,
             });
@@ -1265,7 +1412,7 @@
     const statusEl = $('#settings-save-status');
     if (statusEl) {
       if (settings.groqKey) {
-        statusEl.textContent = '✅ Configuración guardada correctamente';
+        statusEl.textContent = 'Configuración guardada correctamente';
         statusEl.style.color = 'var(--accent-teal)';
       } else {
         statusEl.textContent = 'Ingresa tu API Key y guarda';
@@ -1290,10 +1437,10 @@
         const st = $('#settings-save-status');
         if (st) {
           if (settings.groqKey) {
-            st.textContent = '✅ Configuración guardada correctamente';
+            st.textContent = 'Configuración guardada correctamente';
             st.style.color = 'var(--accent-teal)';
           } else {
-            st.textContent = '⚠️ API Key vacía — el agente no funcionará';
+            st.textContent = 'API Key vacía — el agente no funcionará';
             st.style.color = 'var(--accent-amber)';
           }
         }
@@ -1601,7 +1748,7 @@
       const dateStr = (n.created_at || '').substring(0, 10) || 'Hoy';
 
       const compStars = '★'.repeat(n.comprehension_level || 4) + '☆'.repeat(5 - (n.comprehension_level || 4));
-      const focusLight = '⚡'.repeat(n.focus_level || 4);
+      const focusLight = ''.repeat(n.focus_level || 4);
 
       return `
         <div class="card-taskly" data-note-id="${escHTML(n.id)}" style="display:flex; flex-direction:column; justify-content:space-between; gap:12px;">
@@ -1853,16 +2000,16 @@
     const mdContent = `# Nota de Aprendizaje: ${subName}
 **Fecha:** ${dateStr}
 **Comprensión:** ${note.comprehension_level || 4}/5 ★
-**Concentración:** ${note.focus_level || 4}/5 ⚡
+**Concentración:** ${note.focus_level || 4}/5 
 
 ---
 
-## 📌 Qué aprendí / avances
+## Qué aprendí / avances
 ${note.learned_text || 'Sin registro'}
 
-${note.questions_text ? `## ❓ Dudas / Preguntas pendientes\n${note.questions_text}\n` : ''}
-${note.resources_text ? `## 📚 Recursos y referencias\n${note.resources_text}\n` : ''}
-${note.next_step_text ? `## 🎯 Próximo paso\n${note.next_step_text}\n` : ''}
+${note.questions_text ? `## Dudas / Preguntas pendientes\n${note.questions_text}\n` : ''}
+${note.resources_text ? `## Recursos y referencias\n${note.resources_text}\n` : ''}
+${note.next_step_text ? `##  Próximo paso\n${note.next_step_text}\n` : ''}
 `;
 
     const blob = new Blob([mdContent], { type: 'text/markdown;charset=utf-8' });
@@ -1908,7 +2055,7 @@ ${note.next_step_text ? `## 🎯 Próximo paso\n${note.next_step_text}\n` : ''}
     activities.push(newAct);
     saveActivities(activities);
     enqueueChange({ ...newAct, collection: 'activities' });
-    showToast(`✅ Tarea de repaso programada para ${dateStr}`);
+    showToast(`Tarea de repaso programada para ${dateStr}`);
     renderActivityList();
     syncWithBackend();
   }
@@ -2056,7 +2203,7 @@ ${note.next_step_text ? `## 🎯 Próximo paso\n${note.next_step_text}\n` : ''}
           </div>
           <div class="stats-kpi-val" id="stats-val-streak">${report.streak.current_streak} días</div>
           <div class="stats-kpi-sub">
-            Récord: ${report.streak.best_streak}d | ${report.streak.today_qualifies ? '✓ Hoy calificado' : '⏳ Pendiente hoy'}
+            Récord: ${report.streak.best_streak}d | ${report.streak.today_qualifies ? '✓ Hoy calificado' : 'Pendiente hoy'}
           </div>
         </div>
       </div>
@@ -2083,7 +2230,7 @@ ${note.next_step_text ? `## 🎯 Próximo paso\n${note.next_step_text}\n` : ''}
                 ${report.daily_goal.current_minutes} / ${report.daily_goal.goal_minutes} min
               </div>
               <p style="font-size:0.82rem; color:var(--text-secondary); margin:0;">
-                ${report.daily_goal.is_completed ? '🎉 ¡Meta diaria alcanzada!' : `Faltan ${Math.max(0, report.daily_goal.goal_minutes - report.daily_goal.current_minutes)} min para completar tu objetivo.`}
+                ${report.daily_goal.is_completed ? '¡Meta diaria alcanzada!' : `Faltan ${Math.max(0, report.daily_goal.goal_minutes - report.daily_goal.current_minutes)} min para completar tu objetivo.`}
               </p>
             </div>
           </div>
@@ -2432,7 +2579,7 @@ ${note.next_step_text ? `## 🎯 Próximo paso\n${note.next_step_text}\n` : ''}
     saveSubjects(subjects);
     saveTopics(topics);
     renderStudyView();
-    showToast('✨ Materias sugeridas creadas con éxito', 'check_circle', 'var(--accent-teal)');
+    showToast('Materias sugeridas creadas con éxito', 'check_circle', 'var(--accent-teal)');
     syncWithBackend();
   }
 
@@ -3706,9 +3853,9 @@ ${note.next_step_text ? `## 🎯 Próximo paso\n${note.next_step_text}\n` : ''}
           if (tickRes && Array.isArray(tickRes.events)) {
             tickRes.events.forEach(evt => {
               if (evt.type === 'phase_completed') {
-                sendFocusNotification('¡Tiempo de Enfoque Completado! 🎯', 'Toma un merecido descanso.');
+                sendFocusNotification('¡Tiempo de Enfoque Completado! ', 'Toma un merecido descanso.');
               } else if (evt.type === 'break_completed') {
-                sendFocusNotification('¡Descanso Finalizado! ⚡', 'Listo para el siguiente ciclo de enfoque.');
+                sendFocusNotification('¡Descanso Finalizado! ', 'Listo para el siguiente ciclo de enfoque.');
               }
             });
           }
@@ -4163,7 +4310,7 @@ SIEMPRE devuelve un JSON válido.
             : response.status === 404 || response.status === 400
               ? 'Modelo no disponible o petición inválida.'
               : 'Error del servicio.';
-        addAgentMessage(`⚠️ Groq (${response.status}): ${hint}\n${detail}`);
+        addAgentMessage(`Groq (${response.status}): ${hint}\n${detail}`);
         return;
       }
 
@@ -4181,7 +4328,7 @@ SIEMPRE devuelve un JSON válido.
     } catch (err) {
       console.error(err);
       removeTypingIndicator();
-      addAgentMessage('⚠️ Error procesando la respuesta del agente.');
+      addAgentMessage('Error procesando la respuesta del agente.');
     }
   }
 
@@ -4284,7 +4431,7 @@ SIEMPRE devuelve un JSON válido.
           remainingQueue = resRej.queue;
           saveSyncQueue(remainingQueue);
         }
-        showToast(`⚠️ ${allRejected.length} elemento(s) rechazado(s) por validación.`, 'warning', 'var(--accent-amber)');
+        showToast(`${allRejected.length} elemento(s) rechazado(s) por validación.`, 'warning', 'var(--accent-amber)');
       }
 
       // Manejo de campos desconocidos reportados
@@ -4301,7 +4448,7 @@ SIEMPRE devuelve un JSON válido.
         }
         const first = allConflicts[0];
         const label = COLLECTION_LABELS[first.collection] || 'elemento';
-        showToast(`⚠️ Conflicto en ${label}: el servidor tiene una versión más nueva (v${first.server_version}).`, 'warning', 'var(--accent-amber)');
+        showToast(`Conflicto en ${label}: el servidor tiene una versión más nueva (v${first.server_version}).`, 'warning', 'var(--accent-amber)');
       }
 
       if (data.server_time) {
@@ -4495,9 +4642,9 @@ SIEMPRE devuelve un JSON válido.
         const actId = a.args?.activity_id;
         const act = activities.find(x => x.id === actId);
         const title = act ? `<strong>${escHTML(act.title)}</strong> (${act.date})` : `ID <code>${actId}</code>`;
-        return `🗑️ Eliminar: ${title}`;
+        return `Eliminar: ${title}`;
       }
-      return `⚙️ <strong>${escHTML(a.tool)}</strong>: <code>${escHTML(JSON.stringify(a.args))}</code>`;
+      return `<strong>${escHTML(a.tool)}</strong>: <code>${escHTML(JSON.stringify(a.args))}</code>`;
     }).join('<br>');
 
     div.innerHTML = `
@@ -4552,7 +4699,7 @@ SIEMPRE devuelve un JSON válido.
           await syncWithBackend();
         } catch (e) {
           removeTypingIndicator();
-          addAgentMessage(`⚠️ Error en confirmación: ${e.message}`);
+          addAgentMessage(`Error en confirmación: ${e.message}`);
         }
       });
     }
@@ -4575,7 +4722,7 @@ SIEMPRE devuelve un JSON válido.
     } catch (err) {
       console.error(err);
       removeTypingIndicator();
-      addAgentMessage(`⚠️ Backend: ${err.message}`);
+      addAgentMessage(`Backend: ${err.message}`);
     }
   }
 
@@ -4606,7 +4753,7 @@ SIEMPRE devuelve un JSON válido.
       removeTypingIndicator();
 
       if (!response.ok) {
-        addAgentMessage('⚠️ Error al conectar con n8n. Verifica la URL del Webhook.');
+        addAgentMessage('Error al conectar con n8n. Verifica la URL del Webhook.');
         return;
       }
 
@@ -4626,14 +4773,22 @@ SIEMPRE devuelve un JSON válido.
     } catch (err) {
       console.error(err);
       removeTypingIndicator();
-      addAgentMessage('⚠️ Error al conectar con el servidor n8n.');
+      addAgentMessage('Error al conectar con el servidor n8n.');
     }
   }
 
   // ── Initialize ──
   function init() {
+    initTheme();
     const appWrapper = $('#app-wrapper');
     if (appWrapper) appWrapper.style.display = '';
+
+    // Theme toggle button
+    $('#btn-theme-toggle')?.addEventListener('click', toggleTheme);
+
+    // Dashboard action buttons
+    $('#btn-dashboard-new-subject')?.addEventListener('click', () => openSubjectModal());
+    $('#btn-dashboard-manual-session')?.addEventListener('click', () => openManualTimeModal());
 
     // Navigation
     $$('.nav-item').forEach(btn => btn.addEventListener('click', () => switchView(btn.dataset.view)));
@@ -5123,7 +5278,7 @@ SIEMPRE devuelve un JSON válido.
           addTypingIndicator();
           callN8n(text, relevantActs);
         } else {
-          addAgentMessage("⚠️ Para usar el asistente:<br>• En local: El backend ya está activo en <code>127.0.0.1:8000</code>.<br>• En Vercel: Configura tu API Key o URL del backend en la pestaña <strong>Ajustes</strong>.");
+          addAgentMessage("Para usar el asistente:<br>• En local: El backend ya está activo en <code>127.0.0.1:8000</code>.<br>• En Vercel: Configura tu API Key o URL del backend en la pestaña <strong>Ajustes</strong>.");
         }
       };
 
