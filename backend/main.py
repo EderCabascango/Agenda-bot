@@ -120,6 +120,11 @@ class SyncRequest(BaseModel):
     since: str | None = None
 
 
+class MultiCollectionSyncRequest(BaseModel):
+    collections: dict[str, list[dict]] = {}
+    since: str | None = None
+
+
 @app.get("/activities")
 def get_activities(
     since: str | None = None,
@@ -135,6 +140,14 @@ def get_activities(
 def sync_activities_endpoint(body: SyncRequest, user: str = Depends(auth)):
     try:
         return db.sync_changes(user, body.changes, since=body.since)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/sync")
+def sync_all_collections_endpoint(body: MultiCollectionSyncRequest, user: str = Depends(auth)):
+    try:
+        return db.sync_collections(user, body.collections, since=body.since)
     except ValueError as e:
         raise HTTPException(400, str(e))
 

@@ -7,6 +7,44 @@
 const MAX_IMPORT_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 
 /**
+ * Adaptador de almacenamiento que gestiona excepciones de cuota (QuotaExceededError)
+ * de forma limpia y transparente, preparando la base para futuras extensiones (IndexedDB).
+ */
+const StorageAdapter = {
+  getItem(key, storage = (typeof localStorage !== 'undefined' ? localStorage : null)) {
+    if (!storage) return null;
+    try {
+      return storage.getItem(key);
+    } catch (e) {
+      console.warn(`[StorageAdapter] Error leyendo clave '${key}':`, e);
+      return null;
+    }
+  },
+  setItem(key, value, storage = (typeof localStorage !== 'undefined' ? localStorage : null)) {
+    if (!storage) return false;
+    try {
+      storage.setItem(key, value);
+      return true;
+    } catch (e) {
+      if (e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014 || e.number === -2147024882)) {
+        const err = new Error(`Almacenamiento local lleno (QuotaExceededError). Por favor exporta tu diario o limpia datos antiguos.`);
+        err.name = 'QuotaExceededError';
+        throw err;
+      }
+      throw e;
+    }
+  },
+  removeItem(key, storage = (typeof localStorage !== 'undefined' ? localStorage : null)) {
+    if (!storage) return;
+    try {
+      storage.removeItem(key);
+    } catch (e) {
+      console.warn(`[StorageAdapter] Error eliminando clave '${key}':`, e);
+    }
+  }
+};
+
+/**
  * Agrega o actualiza un cambio en la cola de sincronización de manera idempotente.
  * Si ya existe una modificación pendiente para el mismo ID, combina los campos conservando el base_version original.
  */
@@ -373,6 +411,7 @@ function prepareImportChanges(importedList, currentList, generateUUIDFn, options
 // Exportación compatible con Node.js y Navegadores
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    StorageAdapter,
     escHTML,
     enqueueChange,
     dequeueCommitted,
@@ -393,6 +432,7 @@ if (typeof module !== 'undefined' && module.exports) {
 }
 if (typeof window !== 'undefined') {
   window.SyncCore = {
+    StorageAdapter,
     escHTML,
     enqueueChange,
     dequeueCommitted,

@@ -423,3 +423,77 @@ def test_sync_changes_batch_atomicity_rollback_on_failure():
     assert after_acts[0]["version"] == 1
     assert db.get_activity(atom_user, "act_batch_1", include_deleted=True) is None
     assert db.get_activity(atom_user, "act_batch_3", include_deleted=True) is None
+
+
+def test_generic_collection_whitelist_and_schema_validation():
+    """(A1.6) Valida lista blanca estricta de colecciones y validación de tipos/tamaños en servidor."""
+    user = "user_schema_test"
+
+    # 1. Colección inválida es rechazada con ValueError
+    with pytest.raises(ValueError, match="Colección no permitida"):
+        db.sync_collection(user, "unauthorized_table", [{"id": "1", "title": "Test"}])
+
+    # 2. Campo que excede el límite máximo es rechazado
+    oversized_title = "A" * 600
+    with pytest.raises(ValueError, match="excede el límite máximo"):
+        db.sync_collection(user, "activities", [{"id": "act_oversized", "title": oversized_title, "date": "2026-10-10"}])
+
+    # 3. Campos desconocidos son ignorados/sanitizados sin romper la inserción
+    sanitized = db.validate_and_sanitize_item("activities", {
+        "id": "act_with_extra",
+        "title": "Actividad Válida",
+        "date": "2026-10-10",
+        "unknown_malicious_field": "DROP TABLE activities;",
+        "injected_col": 123
+    })
+    assert "unknown_malicious_field" not in sanitized
+    assert sanitized["title"] == "Actividad Válida"
+
+
+def test_multi_collection_sync_endpoint_and_backward_compatibility():
+    """(A1.8) Endpoint genérico POST /sync y compatibilidad total con /activities/sync."""
+    user = "user_multisync_test"
+
+    # 1. Multi-collection POST /sync
+    payload = {
+        "collections": {
+            "activities": [
+                {"id": "act_multi_1", "title": "Multi Sync Act 1", "date": "2026-10-10"}
+            ]
+        }
+    }
+    res = client.post("/sync", json=payload, headers=AUTH_HEADERS)
+    assert res.status_code == 200
+    data = res.json()
+    assert "results" in data
+    assert data["results"]["activities"]["applied"] == 1
+
+    # 2. Backward compatibility: POST /activities/sync continúa funcionando idéntico
+    res_legacy = client.post("/activities/sync", json={"changes": [{"id": "act_legacy_1", "title": "Legacy", "date": "2026-10-10"}]}, headers=AUTH_HEADERS)
+    assert res_legacy.status_code == 200
+    assert res_legacy.json()["applied"] == 1
+
+
+def test_concurrent_commit_and_cursor_pull_no_data_loss():
+    """(A1.7) Demuestra que un cambio confirmado concurrentemente a un pull no se pierde."""
+    user = "user_cursor_test"
+
+    t0 = db.utc_now_iso()
+
+    # Cliente A sube actividad 1
+    db.upsert_activity(user, {"id": "act_concurrent_1", "title": "Act 1", "date": "2026-10-10"})
+
+    # Cliente B hace pull desde t0 -> recibe Act 1
+    pull_1 = db.sync_collection(user, "activities", changes=[], since=t0)
+    assert len(pull_1["changes"]) == 1
+    assert pull_1["changes"][0]["id"] == "act_concurrent_1"
+
+    t1 = pull_1["server_time"]
+
+    # Cliente A sube actividad 2
+    db.upsert_activity(user, {"id": "act_concurrent_2", "title": "Act 2", "date": "2026-10-10"})
+
+    # Cliente B hace pull desde t1 -> recibe Act 2 sin perder nada
+    pull_2 = db.sync_collection(user, "activities", changes=[], since=t1)
+    assert len(pull_2["changes"]) == 1
+    assert pull_2["changes"][0]["id"] == "act_concurrent_2"

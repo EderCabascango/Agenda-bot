@@ -1,6 +1,7 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  StorageAdapter,
   escHTML,
   enqueueChange,
   dequeueCommitted,
@@ -344,6 +345,36 @@ describe('SyncCore - Complete Client Sync Logic Test Suite (Fase 1, 1.5, 1.6)', 
       assert.equal(escHTML(null), '');
       assert.equal(escHTML(undefined), '');
       assert.equal(escHTML(123), '123');
+    });
+  });
+
+  describe('A1.12 StorageAdapter QuotaExceededError Resilience', () => {
+    test('(A1.12.a) StorageAdapter.setItem throws QuotaExceededError when quota is full', () => {
+      const mockStorage = {
+        setItem(k, v) {
+          const err = new Error('Quota exceeded');
+          err.name = 'QuotaExceededError';
+          throw err;
+        }
+      };
+      assert.throws(
+        () => StorageAdapter.setItem('key', 'val', mockStorage),
+        /QuotaExceededError/
+      );
+    });
+
+    test('(A1.12.b) StorageAdapter.getItem and setItem handle normal operation and errors gracefully', () => {
+      const memory = {};
+      const mockStorage = {
+        getItem(k) { return memory[k] || null; },
+        setItem(k, v) { memory[k] = v; },
+        removeItem(k) { delete memory[k]; }
+      };
+
+      StorageAdapter.setItem('k1', 'val1', mockStorage);
+      assert.equal(StorageAdapter.getItem('k1', mockStorage), 'val1');
+      StorageAdapter.removeItem('k1', mockStorage);
+      assert.equal(StorageAdapter.getItem('k1', mockStorage), null);
     });
   });
 

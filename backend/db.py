@@ -122,6 +122,26 @@ def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_activities_user_date ON activities (user_id, date)")
 
 
+COLLECTION_SCHEMAS = {
+    "activities": {
+        "table": "activities",
+        "primary_key": ["user_id", "id"],
+        "columns": {
+            "title": {"type": str, "max_length": 500, "default": "", "sql_col": "title"},
+            "date": {"type": str, "max_length": 50, "default": "", "sql_col": "date"},
+            "startTime": {"type": str, "max_length": 20, "default": "", "sql_col": "start_time"},
+            "endTime": {"type": str, "max_length": 20, "default": "", "sql_col": "end_time"},
+            "description": {"type": str, "max_length": 50000, "default": "", "sql_col": "description"},
+            "priority": {"type": str, "max_length": 20, "default": "medium", "sql_col": "priority"},
+            "tags": {"type": list, "default": [], "sql_col": "tags", "serialize": json.dumps, "deserialize": lambda v: json.loads(v or "[]")},
+            "completed": {"type": bool, "default": False, "sql_col": "completed", "serialize": lambda v: int(bool(v)), "deserialize": lambda v: bool(v)},
+        },
+        "order_by": "date, start_time"
+    }
+}
+WHITELISTED_COLLECTIONS = set(COLLECTION_SCHEMAS.keys())
+
+
 def _conn(custom_path: str | None = None) -> sqlite3.Connection:
     global _INITIALIZED_DBS
     raw_path = custom_path or os.getenv("AGENDA_DB") or os.getenv("DATABASE_PATH") or DB_PATH
@@ -136,33 +156,88 @@ def _conn(custom_path: str | None = None) -> sqlite3.Connection:
     return conn
 
 
-def _row(r) -> dict:
-    return {
+def _format_collection_row(collection_name: str, r: sqlite3.Row) -> dict:
+    if not r:
+        return {}
+    schema = COLLECTION_SCHEMAS[collection_name]
+    res = {
         "id": r["id"],
-        "title": r["title"],
-        "date": r["date"],
-        "startTime": r["start_time"],
-        "endTime": r["end_time"],
-        "description": r["description"],
-        "priority": r["priority"],
-        "tags": json.loads(r["tags"] or "[]"),
-        "completed": bool(r["completed"]),
         "updated_at": r["updated_at"] or utc_now_iso(),
         "deleted_at": r["deleted_at"],
         "version": r["version"] or 1,
     }
+    for field_name, field_spec in schema["columns"].items():
+        sql_col = field_spec["sql_col"]
+        raw_val = r[sql_col] if sql_col in r.keys() else None
+        if "deserialize" in field_spec:
+            res[field_name] = field_spec["deserialize"](raw_val)
+        else:
+            res[field_name] = raw_val if raw_val is not None else field_spec.get("default")
+    return res
 
 
-def list_activities(
+def _row(r) -> dict:
+    """Compatibilidad: formatea una fila de la tabla activities."""
+    return _format_collection_row("activities", r)
+
+
+def validate_and_sanitize_item(collection_name: str, item: dict) -> dict:
+    """Valida y sanitiza un registro contra el esquema declarativo de la colección."""
+    if collection_name not in WHITELISTED_COLLECTIONS:
+        raise ValueError(f"Colección no permitida: '{collection_name}'")
+    if not isinstance(item, dict):
+        raise ValueError("El elemento a sincronizar debe ser un objeto JSON (dict)")
+    if not item.get("id") or not isinstance(item["id"], str) or len(item["id"].strip()) == 0:
+        raise ValueError("Cada cambio debe contener un 'id' válido (string no vacío)")
+    if len(item["id"]) > 100:
+        raise ValueError("El 'id' no puede superar los 100 caracteres")
+
+    schema = COLLECTION_SCHEMAS[collection_name]
+    sanitized = {
+        "id": item["id"].strip(),
+        "base_version": item.get("base_version"),
+        "deleted_at": item.get("deleted_at"),
+        "version": item.get("version"),
+    }
+
+    for field_name, field_spec in schema["columns"].items():
+        val = item.get(field_name, field_spec.get("default"))
+        expected_type = field_spec["type"]
+        if val is not None and not isinstance(val, expected_type):
+            if expected_type is str:
+                val = str(val)
+            elif expected_type is bool:
+                val = bool(val)
+            elif expected_type is list and not isinstance(val, list):
+                val = []
+
+        if expected_type is str and "max_length" in field_spec and val:
+            if len(val) > field_spec["max_length"]:
+                raise ValueError(f"El campo '{field_name}' excede el límite máximo de {field_spec['max_length']} caracteres")
+
+        sanitized[field_name] = val
+
+    return sanitized
+
+
+def list_collection(
     user_id: str,
-    start: str | None = None,
-    end: str | None = None,
+    collection_name: str,
     since: str | None = None,
     include_deleted: bool = False,
+    filters: dict | None = None,
     conn: sqlite3.Connection | None = None
 ) -> list[dict]:
-    """Lista actividades. Si no se provee `since`, devuelve actividades activas (`deleted_at IS NULL`)."""
-    q, args = "SELECT * FROM activities WHERE user_id=?", [user_id]
+    """Lista registros de una colección con soporte para filtrado incremental por `since`."""
+    if collection_name not in WHITELISTED_COLLECTIONS:
+        raise ValueError(f"Colección no permitida: '{collection_name}'")
+
+    schema = COLLECTION_SCHEMAS[collection_name]
+    table = schema["table"]
+
+    q = f"SELECT * FROM {table} WHERE user_id=?"
+    args: list[any] = [user_id]
+
     if since:
         q += " AND updated_at > ?"
         args.append(since)
@@ -171,66 +246,105 @@ def list_activities(
     else:
         if not include_deleted:
             q += " AND deleted_at IS NULL"
-        if start:
-            q += " AND date >= ?"
-            args.append(start)
-        if end:
-            q += " AND date <= ?"
-            args.append(end)
+        if filters:
+            if "start_date" in filters and filters["start_date"]:
+                q += " AND date >= ?"
+                args.append(filters["start_date"])
+            if "end_date" in filters and filters["end_date"]:
+                q += " AND date <= ?"
+                args.append(filters["end_date"])
 
-    q += " ORDER BY date, start_time"
+    if schema.get("order_by"):
+        q += f" ORDER BY {schema['order_by']}"
+
     if conn is not None:
-        return [_row(r) for r in conn.execute(q, args)]
+        return [_format_collection_row(collection_name, r) for r in conn.execute(q, args)]
     with _conn() as c:
-        return [_row(r) for r in c.execute(q, args)]
+        return [_format_collection_row(collection_name, r) for r in c.execute(q, args)]
 
 
-def get_activity(user_id: str, act_id: str, include_deleted: bool = True, conn: sqlite3.Connection | None = None) -> dict | None:
-    q = "SELECT * FROM activities WHERE user_id=? AND id=?"
+def get_collection_item(
+    user_id: str,
+    collection_name: str,
+    item_id: str,
+    include_deleted: bool = True,
+    conn: sqlite3.Connection | None = None
+) -> dict | None:
+    """Obtiene un único registro por ID dentro de una colección."""
+    if collection_name not in WHITELISTED_COLLECTIONS:
+        raise ValueError(f"Colección no permitida: '{collection_name}'")
+
+    schema = COLLECTION_SCHEMAS[collection_name]
+    table = schema["table"]
+
+    q = f"SELECT * FROM {table} WHERE user_id=? AND id=?"
     if not include_deleted:
         q += " AND deleted_at IS NULL"
+
     if conn is not None:
-        r = conn.execute(q, (user_id, act_id)).fetchone()
-        return _row(r) if r else None
+        r = conn.execute(q, (user_id, item_id)).fetchone()
+        return _format_collection_row(collection_name, r) if r else None
     with _conn() as c:
-        r = c.execute(q, (user_id, act_id)).fetchone()
-    return _row(r) if r else None
+        r = c.execute(q, (user_id, item_id)).fetchone()
+    return _format_collection_row(collection_name, r) if r else None
 
 
-def upsert_activity(user_id: str, a: dict, conn: sqlite3.Connection | None = None) -> dict:
-    """Inserta o actualiza una actividad con timestamp y versión autoritativos del servidor."""
-    a = {**a}
-    if not a.get("id"):
-        a["id"] = str(uuid.uuid4())
+def upsert_collection_item(
+    user_id: str,
+    collection_name: str,
+    item: dict,
+    conn: sqlite3.Connection | None = None
+) -> dict:
+    """Inserta o actualiza un registro asignando versión monotónica y updated_at autoritativo."""
+    if collection_name not in WHITELISTED_COLLECTIONS:
+        raise ValueError(f"Colección no permitida: '{collection_name}'")
 
+    item = {**item}
+    if not item.get("id"):
+        item["id"] = str(uuid.uuid4())
+
+    schema = COLLECTION_SCHEMAS[collection_name]
+    table = schema["table"]
+    sanitized = validate_and_sanitize_item(collection_name, item)
     now = utc_now_iso()
 
     def _exec(c: sqlite3.Connection):
-        existing = get_activity(user_id, a["id"], include_deleted=True, conn=c)
+        existing = get_collection_item(user_id, collection_name, sanitized["id"], include_deleted=True, conn=c)
         if existing:
             new_version = existing["version"] + 1
         else:
-            new_version = a.get("version") or 1
+            new_version = sanitized.get("version") or 1
 
         updated_at = now
-        deleted_at = a.get("deleted_at")
+        deleted_at = sanitized.get("deleted_at")
 
-        c.execute(
-            """INSERT INTO activities (user_id, id, title, date, start_time, end_time, description, priority, tags, completed, updated_at, deleted_at, version)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(user_id, id) DO UPDATE SET
-               title=excluded.title, date=excluded.date, start_time=excluded.start_time,
-               end_time=excluded.end_time, description=excluded.description, priority=excluded.priority,
-               tags=excluded.tags, completed=excluded.completed, updated_at=excluded.updated_at,
-               deleted_at=excluded.deleted_at, version=excluded.version""",
-            (
-                user_id, a["id"], a.get("title", ""), a.get("date", ""),
-                a.get("startTime", ""), a.get("endTime", ""), a.get("description", ""),
-                a.get("priority", "medium"), json.dumps(a.get("tags", [])),
-                int(bool(a.get("completed", False))), updated_at, deleted_at, new_version
-            ),
-        )
-        return get_activity(user_id, a["id"], include_deleted=True, conn=c)
+        col_names = ["user_id", "id"]
+        placeholders = ["?", "?"]
+        params = [user_id, sanitized["id"]]
+        update_assignments = []
+
+        for f_name, f_spec in schema["columns"].items():
+            sql_col = f_spec["sql_col"]
+            col_names.append(sql_col)
+            placeholders.append("?")
+            val = sanitized.get(f_name)
+            if "serialize" in f_spec:
+                val = f_spec["serialize"](val)
+            params.append(val)
+            update_assignments.append(f"{sql_col}=excluded.{sql_col}")
+
+        col_names.extend(["updated_at", "deleted_at", "version"])
+        placeholders.extend(["?", "?", "?"])
+        params.extend([updated_at, deleted_at, new_version])
+        update_assignments.extend(["updated_at=excluded.updated_at", "deleted_at=excluded.deleted_at", "version=excluded.version"])
+
+        sql = f"""INSERT INTO {table} ({", ".join(col_names)})
+                  VALUES ({", ".join(placeholders)})
+                  ON CONFLICT(user_id, id) DO UPDATE SET
+                  {", ".join(update_assignments)}"""
+
+        c.execute(sql, tuple(params))
+        return get_collection_item(user_id, collection_name, sanitized["id"], include_deleted=True, conn=c)
 
     if conn is not None:
         return _exec(conn)
@@ -240,14 +354,19 @@ def upsert_activity(user_id: str, a: dict, conn: sqlite3.Connection | None = Non
         return res
 
 
-def delete_activity(user_id: str, act_id: str, conn: sqlite3.Connection | None = None) -> bool:
+def delete_collection_item(
+    user_id: str,
+    collection_name: str,
+    item_id: str,
+    conn: sqlite3.Connection | None = None
+) -> bool:
     """Borrado lógico como tombstone para propagación en sincronización."""
     def _exec(c: sqlite3.Connection):
-        act = get_activity(user_id, act_id, include_deleted=False, conn=c)
+        act = get_collection_item(user_id, collection_name, item_id, include_deleted=False, conn=c)
         if not act:
             return False
         act["deleted_at"] = utc_now_iso()
-        upsert_activity(user_id, act, conn=c)
+        upsert_collection_item(user_id, collection_name, act, conn=c)
         return True
 
     if conn is not None:
@@ -258,30 +377,68 @@ def delete_activity(user_id: str, act_id: str, conn: sqlite3.Connection | None =
         return res
 
 
+def list_activities(
+    user_id: str,
+    start: str | None = None,
+    end: str | None = None,
+    since: str | None = None,
+    include_deleted: bool = False,
+    conn: sqlite3.Connection | None = None
+) -> list[dict]:
+    """Wrapper para compatibilidad con activities."""
+    filters = {}
+    if start:
+        filters["start_date"] = start
+    if end:
+        filters["end_date"] = end
+    return list_collection(user_id, "activities", since=since, include_deleted=include_deleted, filters=filters, conn=conn)
+
+
+def get_activity(user_id: str, act_id: str, include_deleted: bool = True, conn: sqlite3.Connection | None = None) -> dict | None:
+    """Wrapper para compatibilidad con activities."""
+    return get_collection_item(user_id, "activities", act_id, include_deleted=include_deleted, conn=conn)
+
+
+def upsert_activity(user_id: str, a: dict, conn: sqlite3.Connection | None = None) -> dict:
+    """Wrapper para compatibilidad con activities."""
+    return upsert_collection_item(user_id, "activities", a, conn=conn)
+
+
+def delete_activity(user_id: str, act_id: str, conn: sqlite3.Connection | None = None) -> bool:
+    """Wrapper para compatibilidad con activities."""
+    return delete_collection_item(user_id, "activities", act_id, conn=conn)
+
+
 def purge_tombstones(user_id: str | None = None, days: int = PURGE_DAYS_DEFAULT) -> int:
-    """Elimina físicamente los tombstones más antiguos que N días."""
+    """Elimina físicamente los tombstones más antiguos que N días en todas las tablas."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    q = "DELETE FROM activities WHERE deleted_at IS NOT NULL AND deleted_at < ?"
-    args = [cutoff]
-    if user_id:
-        q += " AND user_id = ?"
-        args.append(user_id)
+    total_purged = 0
     with _conn() as conn:
-        cursor = conn.execute(q, args)
-        return cursor.rowcount
+        for schema in COLLECTION_SCHEMAS.values():
+            table = schema["table"]
+            q = f"DELETE FROM {table} WHERE deleted_at IS NOT NULL AND deleted_at < ?"
+            args = [cutoff]
+            if user_id:
+                q += " AND user_id = ?"
+                args.append(user_id)
+            cursor = conn.execute(q, args)
+            total_purged += cursor.rowcount
+        conn.commit()
+    return total_purged
 
 
-def sync_changes(user_id: str, changes: list[dict], since: str | None = None, purge_days: int = PURGE_DAYS_DEFAULT) -> dict:
-    """Sincronización transaccional con autoridad del servidor:
-    1. Si el registro EXISTE en el servidor:
-       - Es OBLIGATORIO proveer `base_version`.
-       - Si no se provee `base_version` -> conflicto `missing_base_version` (NUNCA sobrescribe).
-       - Si `base_version < existing["version"]` -> conflicto `version_stale` (NUNCA sobrescribe).
-    2. Si el registro es NUEVO (ID no existe en servidor):
-       - No requiere `base_version`, se inserta con `version = 1`.
-    3. Si `since` es anterior al período de retención de tombstones (30 días):
-       - Se señaliza `resync_required = True`.
-    """
+def sync_collection(
+    user_id: str,
+    collection_name: str,
+    changes: list[dict],
+    since: str | None = None,
+    purge_days: int = PURGE_DAYS_DEFAULT,
+    conn: sqlite3.Connection | None = None
+) -> dict:
+    """Sincronización transaccional genérica por colección."""
+    if collection_name not in WHITELISTED_COLLECTIONS:
+        raise ValueError(f"Colección no permitida: '{collection_name}'")
+
     applied = 0
     conflicts = []
     now = utc_now_iso()
@@ -297,19 +454,21 @@ def sync_changes(user_id: str, changes: list[dict], since: str | None = None, pu
         except Exception:
             pass
 
-    with _conn() as conn:
-        for item in changes:
-            if not isinstance(item, dict) or not item.get("id"):
-                raise ValueError("Cada cambio debe contener un 'id' válido")
+    schema = COLLECTION_SCHEMAS[collection_name]
+    table = schema["table"]
 
-            act_id = item["id"]
-            existing = get_activity(user_id, act_id, include_deleted=True, conn=conn)
+    def _process_in_conn(c: sqlite3.Connection):
+        nonlocal applied
+        for raw_item in changes:
+            item = validate_and_sanitize_item(collection_name, raw_item)
+            item_id = item["id"]
+            existing = get_collection_item(user_id, collection_name, item_id, include_deleted=True, conn=c)
             base_version = item.get("base_version")
 
             if existing:
                 if base_version is None:
                     conflicts.append({
-                        "id": act_id,
+                        "id": item_id,
                         "server_version": existing["version"],
                         "server_updated_at": existing["updated_at"],
                         "server_item": existing,
@@ -319,7 +478,7 @@ def sync_changes(user_id: str, changes: list[dict], since: str | None = None, pu
 
                 if base_version < existing["version"]:
                     conflicts.append({
-                        "id": act_id,
+                        "id": item_id,
                         "server_version": existing["version"],
                         "server_updated_at": existing["updated_at"],
                         "server_item": existing,
@@ -333,37 +492,89 @@ def sync_changes(user_id: str, changes: list[dict], since: str | None = None, pu
 
             deleted_at = item.get("deleted_at")
 
-            conn.execute(
-                """INSERT INTO activities (user_id, id, title, date, start_time, end_time, description, priority, tags, completed, updated_at, deleted_at, version)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(user_id, id) DO UPDATE SET
-                   title=excluded.title, date=excluded.date, start_time=excluded.start_time,
-                   end_time=excluded.end_time, description=excluded.description, priority=excluded.priority,
-                   tags=excluded.tags, completed=excluded.completed, updated_at=excluded.updated_at,
-                   deleted_at=excluded.deleted_at, version=excluded.version""",
-                (
-                    user_id, act_id, item.get("title", ""), item.get("date", ""),
-                    item.get("startTime", ""), item.get("endTime", ""), item.get("description", ""),
-                    item.get("priority", "medium"), json.dumps(item.get("tags", [])),
-                    int(bool(item.get("completed", False))), now,
-                    deleted_at, new_version
-                ),
-            )
+            col_names = ["user_id", "id"]
+            placeholders = ["?", "?"]
+            params = [user_id, item_id]
+            update_assignments = []
+
+            for f_name, f_spec in schema["columns"].items():
+                sql_col = f_spec["sql_col"]
+                col_names.append(sql_col)
+                placeholders.append("?")
+                val = item.get(f_name)
+                if "serialize" in f_spec:
+                    val = f_spec["serialize"](val)
+                params.append(val)
+                update_assignments.append(f"{sql_col}=excluded.{sql_col}")
+
+            col_names.extend(["updated_at", "deleted_at", "version"])
+            placeholders.extend(["?", "?", "?"])
+            params.extend([now, deleted_at, new_version])
+            update_assignments.extend(["updated_at=excluded.updated_at", "deleted_at=excluded.deleted_at", "version=excluded.version"])
+
+            sql = f"""INSERT INTO {table} ({", ".join(col_names)})
+                      VALUES ({", ".join(placeholders)})
+                      ON CONFLICT(user_id, id) DO UPDATE SET
+                      {", ".join(update_assignments)}"""
+
+            c.execute(sql, tuple(params))
             applied += 1
 
-        conn.commit()
-
         if resync_required:
-            remote_changes = list_activities(user_id, include_deleted=False, conn=conn)
+            remote_changes = list_collection(user_id, collection_name, include_deleted=False, conn=c)
         elif since:
-            remote_changes = list_activities(user_id, since=since, include_deleted=True, conn=conn)
+            remote_changes = list_collection(user_id, collection_name, since=since, include_deleted=True, conn=c)
         else:
             remote_changes = []
+
+        return remote_changes
+
+    if conn is not None:
+        remotes = _process_in_conn(conn)
+    else:
+        with _conn() as c:
+            remotes = _process_in_conn(c)
+            c.commit()
 
     return {
         "applied": applied,
         "conflicts": conflicts,
         "server_time": now,
         "resync_required": resync_required,
-        "changes": remote_changes,
+        "changes": remotes,
+    }
+
+
+def sync_changes(user_id: str, changes: list[dict], since: str | None = None, purge_days: int = PURGE_DAYS_DEFAULT) -> dict:
+    """Wrapper para compatibilidad retroactiva sobre la colección 'activities'."""
+    return sync_collection(user_id, "activities", changes, since=since, purge_days=purge_days)
+
+
+def sync_collections(
+    user_id: str,
+    collections_payload: dict[str, list[dict]],
+    since: str | None = None,
+    purge_days: int = PURGE_DAYS_DEFAULT
+) -> dict:
+    """Sincronización multi-colección dentro de una única transacción atómica."""
+    for col_name in collections_payload.keys():
+        if col_name not in WHITELISTED_COLLECTIONS:
+            raise ValueError(f"Colección no permitida: '{col_name}'")
+
+    results = {}
+    now = utc_now_iso()
+    resync_required = False
+
+    with _conn() as conn:
+        for col_name, changes in collections_payload.items():
+            res = sync_collection(user_id, col_name, changes, since=since, purge_days=purge_days, conn=conn)
+            results[col_name] = res
+            if res.get("resync_required"):
+                resync_required = True
+        conn.commit()
+
+    return {
+        "server_time": now,
+        "resync_required": resync_required,
+        "results": results
     }
