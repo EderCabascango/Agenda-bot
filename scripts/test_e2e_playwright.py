@@ -718,7 +718,13 @@ def test_playwright_e2e_full_sync():
             # ============================================================
             print("\n[E2E 11] Probando tolerancia a huérfanos y neutralización de inyecciones XSS en materias/temas...")
             xss_dialogs = []
-            page_a.on("dialog", lambda dialog: (xss_dialogs.append(dialog.message), dialog.dismiss()))
+            def handle_study_xss_dialog(d):
+                try:
+                    xss_dialogs.append(d.message)
+                    d.dismiss()
+                except Exception:
+                    pass
+            page_a.on("dialog", handle_study_xss_dialog)
 
             # Inyectar materia y tema con payloads XSS y entidad huérfana
             page_a.evaluate("""async () => {
@@ -928,19 +934,20 @@ def test_playwright_e2e_full_sync():
             print(" -> Sesión activa sobrevive a recarga de página sin perder datos.")
 
             # ============================================================
-            # [E2E 17] Bloqueo de Sesión Activa Multi-Pestaña
+            # [E2E 17] Bloqueo de Sesión Activa Multi-Pestaña y Retoma de Control
             # ============================================================
-            print("\n[E2E 17] Probando advertencia de sesión activa en otra pestaña (Multi-tab lock)...")
+            print("\n[E2E 17] Probando advertencia de sesión activa en otra pestaña (Multi-tab lock) y retoma...")
             # Inyectar sesión activa con un tabId diferente
             page_a.evaluate("""() => {
                 const timerOtherTab = {
                     id: 'foc-other-tab-1',
-                    method: 'pomodoro',
+                    method: 'deep_work',
                     status: 'running',
                     phase: 'focus',
                     subject_id: 'subject-seed-mlops',
                     last_heartbeat: Date.now(),
-                    tabId: 'other_tab_xyz'
+                    tabId: 'other_tab_xyz',
+                    config: { allowPause: false, isCountdown: true, focusDurationSec: 7200 }
                 };
                 localStorage.setItem('diary_focus_active', JSON.stringify(timerOtherTab));
                 window.openFocusModal();
@@ -949,6 +956,18 @@ def test_playwright_e2e_full_sync():
             page_a.wait_for_selector("#focus-multitab-warning", state="visible", timeout=3000)
             assert "otra pestaña" in page_a.inner_text("#focus-multitab-warning")
             print(" -> Banner de bloqueo multi-pestaña mostrado correctamente.")
+
+            # Probar 'Retomar aquí'
+            page_a.click("#btn-focus-takeover")
+            time.sleep(0.3)
+            is_warning_hidden = page_a.is_hidden("#focus-multitab-warning")
+            assert is_warning_hidden is True, "El banner de advertencia debió ocultarse tras retomar la sesión"
+
+            # Verificar que en Deep Work el botón de pausa está oculto
+            is_pause_hidden = page_a.evaluate("() => document.getElementById('btn-pause-resume-focus').style.display === 'none'")
+            assert is_pause_hidden is True, "En Deep Work el botón de pausa debe estar oculto"
+            print(" -> Retoma de sesión exitosa y botón de pausa correctamente oculto en Deep Work.")
+
             page_a.evaluate("() => { window.clearActiveFocusSession(); window.closeFocusModal(); }")
 
             # ============================================================
@@ -990,7 +1009,13 @@ def test_playwright_e2e_full_sync():
             # ============================================================
             print("\n[E2E 19] Probando neutralización de ataques XSS en objetivo y distracciones...")
             timer_xss_dialogs = []
-            page_a.on("dialog", lambda dialog: (timer_xss_dialogs.append(dialog.message), dialog.dismiss()))
+            def handle_timer_xss_dialog(d):
+                try:
+                    timer_xss_dialogs.append(d.message)
+                    d.dismiss()
+                except Exception:
+                    pass
+            page_a.on("dialog", handle_timer_xss_dialog)
 
             page_a.evaluate("""() => {
                 window.openFocusModal({

@@ -699,10 +699,14 @@
         <button class="modal-close material-icons-round" id="detail-subject-close">close</button>
       </div>
       <div class="modal-body" style="display:flex; flex-direction:column; gap:16px;">
-        <div class="subject-detail-stats" id="detail-stats-bar" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; padding:12px; background:var(--bg-primary); border-radius:var(--radius-md);">
+        <div class="subject-detail-stats" id="detail-stats-bar" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; padding:12px; background:var(--bg-primary); border-radius:var(--radius-md);">
           <div>
             <span style="font-size:0.75rem; color:var(--text-secondary);">Tiempo total</span>
             <p id="detail-stat-hours" style="font-size:1.1rem; font-weight:700; margin:0;">0h</p>
+          </div>
+          <div>
+            <span style="font-size:0.75rem; color:var(--text-secondary);">Hoy</span>
+            <p id="detail-stat-today" style="font-size:1.1rem; font-weight:700; margin:0; color:var(--accent-teal);">0m</p>
           </div>
           <div>
             <span style="font-size:0.75rem; color:var(--text-secondary);">Meta semanal</span>
@@ -720,8 +724,14 @@
             <span>Nuevo Tema</span>
           </button>
         </div>
-        <div id="detail-topics-list" style="display:flex; flex-direction:column; gap:8px; max-height:300px; overflow-y:auto;">
+        <div id="detail-topics-list" style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto;">
           <!-- Renderizado dinámico de temas -->
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+          <h4 style="font-size:0.95rem; margin:0;">Últimas Sesiones</h4>
+        </div>
+        <div id="detail-recent-sessions-list" style="display:flex; flex-direction:column; gap:6px; max-height:160px; overflow-y:auto;">
+          <!-- Renderizado dinámico de sesiones -->
         </div>
       </div>
       <div class="modal-actions" style="margin-top:16px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">

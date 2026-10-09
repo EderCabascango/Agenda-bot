@@ -1848,8 +1848,16 @@
       ? FocusCore.summarizeSubject(sub, topics, focusSessions)
       : { total_hours: 0, session_count: 0, topic_stats: {} };
 
+    const today = todayStr();
+    const todaySec = (focusSessions || [])
+      .filter(s => s && s.subject_id === subjectId && !s.deleted_at && (s.started_at || '').startsWith(today))
+      .reduce((acc, s) => acc + (Number(s.effective_seconds) || 0), 0);
+    const todayMin = Math.round(todaySec / 60);
+
     const statHours = $('#detail-stat-hours');
     if (statHours) statHours.textContent = summary.total_hours + 'h';
+    const statToday = $('#detail-stat-today');
+    if (statToday) statToday.textContent = todayMin + 'm';
     const statGoal = $('#detail-stat-goal');
     if (statGoal) statGoal.textContent = ((sub.weekly_goal_minutes || 0) / 60).toFixed(1) + 'h';
     const statSessions = $('#detail-stat-sessions');
@@ -1899,6 +1907,72 @@
         });
       }
     }
+
+    // Renderizado de las últimas 10 sesiones de la materia
+    const sessionsList = $('#detail-recent-sessions-list');
+    if (sessionsList) {
+      const subSessions = (focusSessions || [])
+        .filter(s => s && s.subject_id === subjectId && !s.deleted_at)
+        .sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0))
+        .slice(0, 10);
+
+      if (subSessions.length === 0) {
+        sessionsList.innerHTML = '<p style="font-size:0.85rem; color:var(--text-muted); text-align:center; padding:12px;">No hay sesiones registradas.</p>';
+      } else {
+        sessionsList.innerHTML = subSessions.map(s => {
+          const sMin = Math.round((Number(s.effective_seconds) || 0) / 60);
+          const sDate = (s.started_at || '').substring(0, 10);
+          const isManual = s.source === 'manual';
+          const methodLabel = isManual ? 'Manual' : (s.method || 'pomodoro');
+          return `
+            <div class="topic-item" data-session-id="${escHTML(s.id)}" style="padding:8px 12px;">
+              <div>
+                <div style="font-weight:600; font-size:0.85rem; color:var(--text-primary);">
+                  ${escHTML(s.goal || (isManual ? 'Tiempo manual' : 'Sesión de enfoque'))}
+                </div>
+                <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:2px;">
+                  <span>${escHTML(sDate)} • ${sMin} min (${escHTML(methodLabel)})</span>
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <button class="topbar-btn btn-touch-target" data-action="delete-session" data-id="${escHTML(s.id)}" title="Eliminar sesión" style="color:var(--accent-red);">
+                  <span class="material-icons-round" style="font-size:18px;">delete_outline</span>
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        sessionsList.querySelectorAll('[data-action="delete-session"]').forEach(btn => {
+          btn.addEventListener('click', () => handleDeleteFocusSession(btn.dataset.id));
+        });
+      }
+    }
+  }
+
+  function handleDeleteFocusSession(sessionId) {
+    focusSessions = loadFocusSessions();
+    const idx = focusSessions.findIndex(s => s.id === sessionId);
+    if (idx === -1) return;
+
+    const existing = focusSessions[idx];
+    const now = new Date().toISOString();
+    const tombstone = {
+      ...existing,
+      deleted_at: now,
+      updated_at: now,
+      base_version: existing.version || 1
+    };
+    focusSessions[idx] = tombstone;
+    saveFocusSessions(focusSessions);
+    enqueueChange({ ...tombstone, collection: 'focus_sessions' });
+    showToast('Sesión eliminada ✓');
+
+    if (existing.subject_id) {
+      renderSubjectDetailContent(existing.subject_id);
+    }
+    renderStudyView();
+    syncWithBackend();
   }
 
   function openTopicModal(subjectId, topicId = null) {
@@ -2124,6 +2198,39 @@
 
   let activeFocusTimer = null;
   let focusIntervalHandle = null;
+  let wakeLockSentinel = null;
+  let pendingFocusNotification = null;
+
+  async function requestWakeLock() {
+    if ('wakeLock' in navigator && activeFocusTimer && (activeFocusTimer.status === 'running' || activeFocusTimer.status === 'break')) {
+      try {
+        wakeLockSentinel = await navigator.wakeLock.request('screen');
+        wakeLockSentinel.addEventListener('release', () => {
+          wakeLockSentinel = null;
+        });
+      } catch (err) {}
+    }
+  }
+
+  function releaseWakeLock() {
+    if (wakeLockSentinel) {
+      try { wakeLockSentinel.release(); } catch (e) {}
+      wakeLockSentinel = null;
+    }
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      if (activeFocusTimer && (activeFocusTimer.status === 'running' || activeFocusTimer.status === 'break')) {
+        requestWakeLock();
+      }
+      if (pendingFocusNotification) {
+        const { title, body } = pendingFocusNotification;
+        pendingFocusNotification = null;
+        sendFocusNotification(title, body);
+      }
+    }
+  });
 
   function playTimerChime() {
     try {
@@ -2145,6 +2252,9 @@
   }
 
   function sendFocusNotification(title, body) {
+    if (document.hidden) {
+      pendingFocusNotification = { title, body };
+    }
     playTimerChime();
     if (typeof Notification !== 'undefined') {
       if (Notification.permission === 'granted') {
@@ -2172,6 +2282,7 @@
   }
 
   function clearActiveFocusSession() {
+    releaseWakeLock();
     try {
       const adapter = (typeof SyncCore !== 'undefined' && SyncCore.StorageAdapter) ? SyncCore.StorageAdapter : {
         removeItem: (k) => localStorage.removeItem(k)
@@ -2191,6 +2302,26 @@
       const isRecent = (Date.now() - (stored.last_heartbeat || 0)) < 15000;
       if (isRecent) {
         warningEl.style.display = 'flex';
+        warningEl.innerHTML = `
+          <span>Hay una sesión activa en otra pestaña.</span>
+          <div style="display:flex; gap:8px; margin-top:4px;">
+            <button id="btn-focus-takeover" class="btn-primary" style="padding:4px 8px; font-size:0.75rem;">Retomar aquí</button>
+            <button id="btn-focus-readonly" class="btn-secondary" style="padding:4px 8px; font-size:0.75rem;">Ver solo lectura</button>
+          </div>
+        `;
+        $('#btn-focus-takeover')?.addEventListener('click', () => {
+          stored.tabId = TAB_ID;
+          stored.last_heartbeat = Date.now();
+          activeFocusTimer = stored;
+          saveActiveFocusSession(activeFocusTimer);
+          warningEl.style.display = 'none';
+          renderFocusTimerUI();
+          requestWakeLock();
+          showToast('Sesión tomada en esta pestaña ✓');
+        });
+        $('#btn-focus-readonly')?.addEventListener('click', () => {
+          warningEl.style.display = 'none';
+        });
         return true;
       }
     }
@@ -2318,8 +2449,19 @@
     const distCount = $('#focus-distractions-count');
     if (distCount) distCount.textContent = `${activeFocusTimer.distractions ? activeFocusTimer.distractions.length : 0} registradas`;
 
+    const playPauseBtn = $('#btn-pause-resume-focus');
     const playPauseIcon = $('#focus-play-pause-icon');
     const playPauseLabel = $('#focus-play-pause-label');
+
+    // Deep Work no permite pausar: ocultar botón de pausa
+    if (playPauseBtn) {
+      if (activeFocusTimer.method === 'deep_work' || (activeFocusTimer.config && activeFocusTimer.config.allowPause === false)) {
+        playPauseBtn.style.display = 'none';
+      } else {
+        playPauseBtn.style.display = 'inline-flex';
+      }
+    }
+
     if (playPauseIcon && playPauseLabel) {
       if (activeFocusTimer.status === 'running') {
         playPauseIcon.textContent = 'pause';
@@ -2642,7 +2784,8 @@
 
       if (activeFocusTimer.status === 'running' || activeFocusTimer.status === 'break') {
         if (typeof TimerCore !== 'undefined') {
-          activeFocusTimer = TimerCore.tick(activeFocusTimer);
+          const tickRes = TimerCore.tick(activeFocusTimer);
+          activeFocusTimer = (tickRes && tickRes.state) ? tickRes.state : activeFocusTimer;
 
           if (activeFocusTimer.status === 'waiting') {
             const gapMsg = $('#focus-gap-message');
@@ -2653,16 +2796,14 @@
             $('#focus-gap-overlay')?.classList.add('open');
           }
 
-          // Comprobar fin de ciclo de cuenta regresiva
-          const metrics = TimerCore.getElapsedAndRemaining(activeFocusTimer);
-          if (activeFocusTimer.config.isCountdown && metrics.remainingSeconds <= 0) {
-            if (activeFocusTimer.phase === 'focus') {
-              sendFocusNotification('¡Tiempo de Enfoque Completado! 🎯', 'Toma un merecido descanso.');
-              activeFocusTimer = TimerCore.startBreak(activeFocusTimer);
-            } else {
-              sendFocusNotification('¡Descanso Finalizado! ⚡', 'Listo para el siguiente ciclo de enfoque.');
-              activeFocusTimer = TimerCore.endBreak(activeFocusTimer);
-            }
+          if (tickRes && Array.isArray(tickRes.events)) {
+            tickRes.events.forEach(evt => {
+              if (evt.type === 'phase_completed') {
+                sendFocusNotification('¡Tiempo de Enfoque Completado! 🎯', 'Toma un merecido descanso.');
+              } else if (evt.type === 'break_completed') {
+                sendFocusNotification('¡Descanso Finalizado! ⚡', 'Listo para el siguiente ciclo de enfoque.');
+              }
+            });
           }
         }
 
@@ -3763,6 +3904,15 @@ SIEMPRE devuelve un JSON válido.
 
     $('#btn-finish-focus')?.addEventListener('click', () => {
       if (!activeFocusTimer || typeof TimerCore === 'undefined') return;
+      const finRes = TimerCore.finish(activeFocusTimer);
+      if (finRes && finRes.action === 'ask_discard') {
+        if (confirm('La sesión duró menos de 1 minuto. ¿Deseas descartarla sin guardar?')) {
+          clearActiveFocusSession();
+          closeFocusModal();
+          showToast('Sesión corta descartada');
+          return;
+        }
+      }
       activeFocusTimer.status = 'completed';
       saveActiveFocusSession(activeFocusTimer);
       renderFocusTimerUI();
