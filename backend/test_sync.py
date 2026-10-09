@@ -39,9 +39,11 @@ RUNNABLE_CONFIG = {"configurable": {"user_id": USER, "thread_id": f"{USER}:test"
 @pytest.fixture(autouse=True)
 def clean_db():
     """Limpia la base de datos antes de cada test."""
+    db._LAST_ASSIGNED_TS = ""
     with db._conn() as c:
         c.execute("DELETE FROM activities WHERE user_id=?", (USER,))
     yield
+    db._LAST_ASSIGNED_TS = ""
 
 
 def test_agent_created_activity_is_not_deleted_by_client_sync():
@@ -148,7 +150,7 @@ def test_incremental_sync_with_since_parameter():
 
 
 def test_sync_atomicity_does_not_leave_empty_table():
-    """(e) Una falla durante la sincronización no debe vaciar la base de datos."""
+    """(e) Un ítem inválido es rechazado de forma no bloqueante sin vaciar la DB ni afectar ítems válidos."""
     db.upsert_activity(USER, {
         "id": "act_secure",
         "title": "Dato Valioso",
@@ -163,10 +165,15 @@ def test_sync_atomicity_does_not_leave_empty_table():
     }
 
     res = client.post("/activities/sync", json=bad_payload, headers=AUTH_HEADERS)
-    assert res.status_code in [400, 422]
+    assert res.status_code == 200
+    data = res.json()
+    assert data["applied"] == 1
+    assert len(data["rejected"]) == 1
 
     current = db.list_activities(USER)
-    assert any(a["id"] == "act_secure" for a in current)
+    ids = [a["id"] for a in current]
+    assert "act_secure" in ids
+    assert "valid_1" in ids
 
 
 def test_tombstones_excluded_in_tools_and_error_on_update():
@@ -426,26 +433,35 @@ def test_sync_changes_batch_atomicity_rollback_on_failure():
 
 
 def test_generic_collection_whitelist_and_schema_validation():
-    """(A1.6) Valida lista blanca estricta de colecciones y validación de tipos/tamaños en servidor."""
+    """(A1.6) Valida lista blanca estricta de colecciones y validación no bloqueante con rejected y unknown_fields."""
     user = "user_schema_test"
 
     # 1. Colección inválida es rechazada con ValueError
     with pytest.raises(ValueError, match="Colección no permitida"):
         db.sync_collection(user, "unauthorized_table", [{"id": "1", "title": "Test"}])
 
-    # 2. Campo que excede el límite máximo es rechazado
+    # 2. Ítem individual que excede el límite máximo es reportado en 'rejected' sin fallar el lote
     oversized_title = "A" * 600
-    with pytest.raises(ValueError, match="excede el límite máximo"):
-        db.sync_collection(user, "activities", [{"id": "act_oversized", "title": oversized_title, "date": "2026-10-10"}])
+    res = db.sync_collection(user, "activities", [
+        {"id": "act_valid_1", "title": "Válida 1", "date": "2026-10-10"},
+        {"id": "act_oversized", "title": oversized_title, "date": "2026-10-10"},
+        {"id": "act_valid_2", "title": "Válida 2", "date": "2026-10-10"}
+    ])
+    assert res["applied"] == 2
+    assert len(res["rejected"]) == 1
+    assert res["rejected"][0]["id"] == "act_oversized"
+    assert "excede el límite máximo" in res["rejected"][0]["reason"]
 
-    # 3. Campos desconocidos son ignorados/sanitizados sin romper la inserción
-    sanitized = db.validate_and_sanitize_item("activities", {
+    # 3. Campos desconocidos son reportados en 'unknown_fields' y sanitizados sin romper la inserción
+    sanitized, err, unknown_fields = db.validate_and_sanitize_item("activities", {
         "id": "act_with_extra",
         "title": "Actividad Válida",
         "date": "2026-10-10",
         "unknown_malicious_field": "DROP TABLE activities;",
         "injected_col": 123
     })
+    assert err is None
+    assert set(unknown_fields) == {"unknown_malicious_field", "injected_col"}
     assert "unknown_malicious_field" not in sanitized
     assert sanitized["title"] == "Actividad Válida"
 
@@ -478,7 +494,7 @@ def test_concurrent_commit_and_cursor_pull_no_data_loss():
     """(A1.7) Demuestra que un cambio confirmado concurrentemente a un pull no se pierde."""
     user = "user_cursor_test"
 
-    t0 = db.utc_now_iso()
+    t0 = db.monotonic_utc_now_iso()
 
     # Cliente A sube actividad 1
     db.upsert_activity(user, {"id": "act_concurrent_1", "title": "Act 1", "date": "2026-10-10"})
@@ -497,3 +513,124 @@ def test_concurrent_commit_and_cursor_pull_no_data_loss():
     pull_2 = db.sync_collection(user, "activities", changes=[], since=t1)
     assert len(pull_2["changes"]) == 1
     assert pull_2["changes"][0]["id"] == "act_concurrent_2"
+
+
+def test_real_thread_race_and_monotonic_lock():
+    """(Paso 0.2) Simula concurrencia con 2 hilos reales y valida que BEGIN IMMEDIATE y timestamps evitan pérdidas."""
+    import threading
+    import time
+    user = "user_thread_race"
+
+    t_start = db.monotonic_utc_now_iso()
+    results = {}
+
+    def thread_1_work():
+        time.sleep(0.01)
+        res = db.upsert_activity(user, {"id": "act_thread_1", "title": "Hilo 1", "date": "2026-10-10"})
+        results["t1"] = res
+
+    def thread_2_work():
+        time.sleep(0.02)
+        res = db.upsert_activity(user, {"id": "act_thread_2", "title": "Hilo 2", "date": "2026-10-10"})
+        results["t2"] = res
+
+    t1 = threading.Thread(target=thread_1_work)
+    t2 = threading.Thread(target=thread_2_work)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    # Pull con cursor t_start debe traer ambas actividades sin omisiones
+    pull = db.sync_collection(user, "activities", changes=[], since=t_start)
+    ids = [c["id"] for c in pull["changes"]]
+    assert "act_thread_1" in ids
+    assert "act_thread_2" in ids
+    assert len(ids) == 2
+
+
+def test_monotonic_timestamp_clock_moving_backward():
+    """(Paso 0.2) Valida que si el reloj del sistema retrocede, updated_at sigue siendo estrictamente monótono."""
+    user = "user_clock_skew"
+
+    act1 = db.upsert_activity(user, {"id": "act_clock_1", "title": "Clock 1", "date": "2026-10-10"})
+    ts1 = act1["updated_at"]
+
+    # Simular retroceso del reloj a 1 hora antes
+    past_dt = datetime.now(timezone.utc) - timedelta(hours=1)
+    from unittest.mock import patch
+    with patch("db.datetime") as mock_dt:
+        mock_dt.now.return_value = past_dt
+        mock_dt.fromisoformat = datetime.fromisoformat
+        mock_dt.timezone = timezone
+        act2 = db.upsert_activity(user, {"id": "act_clock_2", "title": "Clock 2", "date": "2026-10-10"})
+        ts2 = act2["updated_at"]
+
+    # ts2 DEBE ser estrictamente mayor que ts1 a pesar de que el reloj retrocedió
+    assert ts2 > ts1
+
+
+def test_legacy_contract_backward_compatibility():
+    """(Paso 0.4) Verifica que los endpoints cumplen estrictamente el contrato capturado en commit 2d3da78."""
+    import json
+    fixture_path = os.path.join(os.path.dirname(__file__), "fixtures", "legacy_contract_fixture.json")
+    with open(fixture_path, "r", encoding="utf-8") as f:
+        contract = json.load(f)
+
+    # 1. GET /activities
+    res_get = client.get("/activities", headers=AUTH_HEADERS)
+    assert res_get.status_code == contract["get_activities"]["status_code"]
+    items = res_get.json()
+    if items:
+        first = items[0]
+        for key in contract["get_activities"]["item_required_keys"]:
+            assert key in first, f"Falta clave requerida en GET /activities: {key}"
+
+    # 2. POST /activities/sync
+    res_sync = client.post("/activities/sync", json={"changes": [], "since": None}, headers=AUTH_HEADERS)
+    assert res_sync.status_code == contract["post_activities_sync"]["status_code"]
+    sync_data = res_sync.json()
+    for key in contract["post_activities_sync"]["required_keys"]:
+        assert key in sync_data, f"Falta clave requerida en POST /activities/sync: {key}"
+
+    # 3. PUT /activities
+    res_put = client.put("/activities", json=[{"id": "act_put_1", "title": "Put Test", "date": "2026-10-10"}], headers=AUTH_HEADERS)
+    assert res_put.status_code == contract["put_activities"]["status_code"]
+    put_data = res_put.json()
+    for key in contract["put_activities"]["required_keys"]:
+        assert key in put_data, f"Falta clave requerida en PUT /activities: {key}"
+
+
+def test_multi_collection_atomic_rollback_on_failure():
+    """(Paso 0.4) Verifica que si falla la escritura en una segunda colección, la primera colección hace rollback 100%."""
+    user = "user_multicoll_rollback"
+
+    # Insertamos un registro previo
+    db.upsert_activity(user, {"id": "act_orig_rollback", "title": "Original Inalterable", "date": "2026-10-10"})
+
+    # Simulamos inyección de error en db.sync_collection durante la segunda iteración
+    orig_sync_coll = db.sync_collection
+    call_count = 0
+
+    def faulty_sync_collection(uid, col_name, changes, *a, **k):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise sqlite3.OperationalError("Simulated database failure during collection 2 commit")
+        return orig_sync_coll(uid, col_name, changes, *a, **k)
+
+    from unittest.mock import patch
+    with patch("db.WHITELISTED_COLLECTIONS", {"activities", "coll_two"}):
+        with patch("db.sync_collection", side_effect=faulty_sync_collection):
+            with pytest.raises(sqlite3.OperationalError, match="Simulated database failure during collection 2 commit"):
+                db.sync_collections(user, {
+                    "activities": [{"id": "act_partial_should_rollback", "title": "No Debe Quedar", "date": "2026-10-10"}],
+                    "coll_two": [{"id": "dummy_1", "title": "Dummy"}]  # trigger second call
+                })
+
+    # Verificamos que la actividad parcial NO se guardó en la DB
+    assert db.get_activity(user, "act_partial_should_rollback") is None
+    orig = db.get_activity(user, "act_orig_rollback")
+    assert orig is not None
+    assert orig["title"] == "Original Inalterable"
+

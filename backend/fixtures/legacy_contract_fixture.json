@@ -1,0 +1,37 @@
+{
+  "commit_reference": "2d3da78",
+  "get_activities": {
+    "status_code": 200,
+    "item_required_keys": [
+      "id",
+      "title",
+      "date",
+      "startTime",
+      "endTime",
+      "description",
+      "priority",
+      "tags",
+      "completed",
+      "updated_at",
+      "deleted_at",
+      "version"
+    ]
+  },
+  "post_activities_sync": {
+    "status_code": 200,
+    "required_keys": [
+      "applied",
+      "conflicts",
+      "server_time",
+      "resync_required",
+      "changes"
+    ]
+  },
+  "put_activities": {
+    "status_code": 200,
+    "required_keys": [
+      "saved",
+      "conflicts"
+    ]
+  }
+}

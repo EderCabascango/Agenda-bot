@@ -20,8 +20,27 @@ def init_db(db_path: str | None = None):
     conn.close()
 
 
+_LAST_ASSIGNED_TS = ""
+
+
 def utc_now_iso() -> str:
+    """Retorna timestamp UTC en formato ISO 8601 con microsegundos."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def monotonic_utc_now_iso() -> str:
+    """Garantiza timestamps ISO estrictamente crecientes incluso si el reloj del sistema retrocede."""
+    global _LAST_ASSIGNED_TS
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    if _LAST_ASSIGNED_TS and now_str <= _LAST_ASSIGNED_TS:
+        try:
+            clean_last = _LAST_ASSIGNED_TS.rstrip("Z")
+            dt = datetime.fromisoformat(clean_last) + timedelta(microseconds=1000)
+            now_str = dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        except Exception:
+            pass
+    _LAST_ASSIGNED_TS = now_str
+    return now_str
 
 
 def create_pre_migration_backup(db_path: str) -> str | None:
@@ -106,7 +125,7 @@ def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
     if missing_cols or missing_data:
         # Hay migración real pendiente -> crear respaldo permanente pre-migración
         create_pre_migration_backup(db_path)
-        now = utc_now_iso()
+        now = monotonic_utc_now_iso()
 
         if "updated_at" not in cols:
             conn.execute("ALTER TABLE activities ADD COLUMN updated_at TEXT DEFAULT ''")
@@ -162,7 +181,7 @@ def _format_collection_row(collection_name: str, r: sqlite3.Row) -> dict:
     schema = COLLECTION_SCHEMAS[collection_name]
     res = {
         "id": r["id"],
-        "updated_at": r["updated_at"] or utc_now_iso(),
+        "updated_at": r["updated_at"] or monotonic_utc_now_iso(),
         "deleted_at": r["deleted_at"],
         "version": r["version"] or 1,
     }
@@ -181,18 +200,29 @@ def _row(r) -> dict:
     return _format_collection_row("activities", r)
 
 
-def validate_and_sanitize_item(collection_name: str, item: dict) -> dict:
-    """Valida y sanitiza un registro contra el esquema declarativo de la colección."""
+STANDARD_METADATA_FIELDS = {
+    "id", "base_version", "deleted_at", "version", "updated_at", "created_at", "user_id"
+}
+
+
+def validate_and_sanitize_item(collection_name: str, item: dict) -> tuple[dict | None, str | None, list[str]]:
+    """
+    Valida y sanitiza un registro contra el esquema declarativo de la colección.
+    Retorna: (sanitized_dict, error_reason_str | None, list_of_unknown_fields)
+    """
     if collection_name not in WHITELISTED_COLLECTIONS:
-        raise ValueError(f"Colección no permitida: '{collection_name}'")
+        return None, f"Colección no permitida: '{collection_name}'", []
     if not isinstance(item, dict):
-        raise ValueError("El elemento a sincronizar debe ser un objeto JSON (dict)")
+        return None, "El elemento a sincronizar debe ser un objeto JSON (dict)", []
     if not item.get("id") or not isinstance(item["id"], str) or len(item["id"].strip()) == 0:
-        raise ValueError("Cada cambio debe contener un 'id' válido (string no vacío)")
+        return None, "Cada cambio debe contener un 'id' válido (string no vacío)", []
     if len(item["id"]) > 100:
-        raise ValueError("El 'id' no puede superar los 100 caracteres")
+        return None, "El 'id' no puede superar los 100 caracteres", []
 
     schema = COLLECTION_SCHEMAS[collection_name]
+    known_fields = STANDARD_METADATA_FIELDS.union(schema["columns"].keys())
+    unknown_fields = [k for k in item.keys() if k not in known_fields]
+
     sanitized = {
         "id": item["id"].strip(),
         "base_version": item.get("base_version"),
@@ -208,16 +238,34 @@ def validate_and_sanitize_item(collection_name: str, item: dict) -> dict:
                 val = str(val)
             elif expected_type is bool:
                 val = bool(val)
+            elif expected_type is int:
+                try:
+                    val = int(val)
+                except (ValueError, TypeError):
+                    return None, f"El campo '{field_name}' debe ser un entero válido", []
+            elif expected_type is float:
+                try:
+                    val = float(val)
+                except (ValueError, TypeError):
+                    return None, f"El campo '{field_name}' debe ser un número válido", []
             elif expected_type is list and not isinstance(val, list):
                 val = []
 
         if expected_type is str and "max_length" in field_spec and val:
             if len(val) > field_spec["max_length"]:
-                raise ValueError(f"El campo '{field_name}' excede el límite máximo de {field_spec['max_length']} caracteres")
+                return None, f"El campo '{field_name}' excede el límite máximo de {field_spec['max_length']} caracteres", []
+
+        if "enum" in field_spec and val is not None:
+            if val not in field_spec["enum"]:
+                return None, f"El campo '{field_name}' tiene un valor inválido '{val}'. Permitidos: {field_spec['enum']}", []
+
+        if "min_val" in field_spec and val is not None:
+            if val < field_spec["min_val"]:
+                return None, f"El campo '{field_name}' debe ser >= {field_spec['min_val']}", []
 
         sanitized[field_name] = val
 
-    return sanitized
+    return sanitized, None, unknown_fields
 
 
 def list_collection(
@@ -305,10 +353,12 @@ def upsert_collection_item(
 
     schema = COLLECTION_SCHEMAS[collection_name]
     table = schema["table"]
-    sanitized = validate_and_sanitize_item(collection_name, item)
-    now = utc_now_iso()
+    sanitized, err, unknowns = validate_and_sanitize_item(collection_name, item)
+    if err:
+        raise ValueError(err)
 
     def _exec(c: sqlite3.Connection):
+        now = monotonic_utc_now_iso()
         existing = get_collection_item(user_id, collection_name, sanitized["id"], include_deleted=True, conn=c)
         if existing:
             new_version = existing["version"] + 1
@@ -349,6 +399,7 @@ def upsert_collection_item(
     if conn is not None:
         return _exec(conn)
     with _conn() as c:
+        c.execute("BEGIN IMMEDIATE")
         res = _exec(c)
         c.commit()
         return res
@@ -365,13 +416,14 @@ def delete_collection_item(
         act = get_collection_item(user_id, collection_name, item_id, include_deleted=False, conn=c)
         if not act:
             return False
-        act["deleted_at"] = utc_now_iso()
+        act["deleted_at"] = monotonic_utc_now_iso()
         upsert_collection_item(user_id, collection_name, act, conn=c)
         return True
 
     if conn is not None:
         return _exec(conn)
     with _conn() as c:
+        c.execute("BEGIN IMMEDIATE")
         res = _exec(c)
         c.commit()
         return res
@@ -411,9 +463,10 @@ def delete_activity(user_id: str, act_id: str, conn: sqlite3.Connection | None =
 
 def purge_tombstones(user_id: str | None = None, days: int = PURGE_DAYS_DEFAULT) -> int:
     """Elimina físicamente los tombstones más antiguos que N días en todas las tablas."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     total_purged = 0
     with _conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         for schema in COLLECTION_SCHEMAS.values():
             table = schema["table"]
             q = f"DELETE FROM {table} WHERE deleted_at IS NOT NULL AND deleted_at < ?"
@@ -441,8 +494,21 @@ def sync_collection(
 
     applied = 0
     conflicts = []
-    now = utc_now_iso()
+    rejected = []
+    unknown_fields_report = []
     resync_required = False
+
+    # 1. Validación de esquema PRE-TRANSACCIÓN (sin bloquear el lote completo)
+    valid_items = []
+    for raw_item in changes:
+        sanitized, err, unknowns = validate_and_sanitize_item(collection_name, raw_item)
+        if err:
+            item_id = raw_item.get("id") if isinstance(raw_item, dict) else "unknown"
+            rejected.append({"id": str(item_id), "collection": collection_name, "reason": err})
+        else:
+            valid_items.append(sanitized)
+            if unknowns:
+                unknown_fields_report.append({"id": sanitized["id"], "collection": collection_name, "fields": unknowns})
 
     if since:
         try:
@@ -456,11 +522,13 @@ def sync_collection(
 
     schema = COLLECTION_SCHEMAS[collection_name]
     table = schema["table"]
+    now = ""
 
     def _process_in_conn(c: sqlite3.Connection):
-        nonlocal applied
-        for raw_item in changes:
-            item = validate_and_sanitize_item(collection_name, raw_item)
+        nonlocal applied, now
+        now = monotonic_utc_now_iso()
+
+        for item in valid_items:
             item_id = item["id"]
             existing = get_collection_item(user_id, collection_name, item_id, include_deleted=True, conn=c)
             base_version = item.get("base_version")
@@ -533,13 +601,16 @@ def sync_collection(
         remotes = _process_in_conn(conn)
     else:
         with _conn() as c:
+            c.execute("BEGIN IMMEDIATE")
             remotes = _process_in_conn(c)
             c.commit()
 
     return {
         "applied": applied,
         "conflicts": conflicts,
-        "server_time": now,
+        "rejected": rejected,
+        "unknown_fields": unknown_fields_report,
+        "server_time": now or monotonic_utc_now_iso(),
         "resync_required": resync_required,
         "changes": remotes,
     }
@@ -562,10 +633,12 @@ def sync_collections(
             raise ValueError(f"Colección no permitida: '{col_name}'")
 
     results = {}
-    now = utc_now_iso()
+    now = ""
     resync_required = False
 
     with _conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        now = monotonic_utc_now_iso()
         for col_name, changes in collections_payload.items():
             res = sync_collection(user_id, col_name, changes, since=since, purge_days=purge_days, conn=conn)
             results[col_name] = res
@@ -574,7 +647,7 @@ def sync_collections(
         conn.commit()
 
     return {
-        "server_time": now,
+        "server_time": now or monotonic_utc_now_iso(),
         "resync_required": resync_required,
         "results": results
     }

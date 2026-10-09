@@ -40,40 +40,98 @@
     return 'Buenas noches';
   }
 
-  // ── Data Layer (LocalStorage & Sync Queue) ──
+  // ── Data Layer (StorageAdapter, Sync Queue & Conflicts) ──
   const STORAGE_KEY = 'diary_activities';
   const SETTINGS_KEY = 'diary_settings';
   const SYNC_QUEUE_KEY = 'diary_sync_queue';
   const LAST_SYNC_KEY = 'diary_last_sync';
+  const CONFLICTS_KEY = 'diary_conflicts';
+  const REJECTED_KEY = 'diary_rejected_items';
+
+  function safeStorageGet(key, defaultVal = null) {
+    try {
+      const adapter = (typeof SyncCore !== 'undefined' && SyncCore.StorageAdapter) ? SyncCore.StorageAdapter : {
+        getItem: (k) => localStorage.getItem(k)
+      };
+      const raw = adapter.getItem(key);
+      if (raw === null || raw === undefined) return defaultVal;
+      return JSON.parse(raw);
+    } catch {
+      return defaultVal;
+    }
+  }
+
+  function safeStorageSet(key, value) {
+    try {
+      const adapter = (typeof SyncCore !== 'undefined' && SyncCore.StorageAdapter) ? SyncCore.StorageAdapter : {
+        setItem: (k, v) => localStorage.setItem(k, v)
+      };
+      const str = typeof value === 'string' ? value : JSON.stringify(value);
+      adapter.setItem(key, str);
+      return true;
+    } catch (e) {
+      if (e && e.name === 'QuotaExceededError') {
+        showToast('Almacenamiento local lleno (QuotaExceededError). Por favor exporta tu diario o limpia datos.', 'warning', 'var(--accent-coral, #e74c3c)');
+      }
+      return false;
+    }
+  }
 
   function loadActivities() {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
-    catch { return []; }
+    return safeStorageGet(STORAGE_KEY, []);
   }
   function saveActivities(list) {
     activities = list;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    safeStorageSet(STORAGE_KEY, list);
   }
   function loadSettings() {
-    try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; }
-    catch { return {}; }
+    return safeStorageGet(SETTINGS_KEY, {});
   }
   function saveSettings(s) {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+    safeStorageSet(SETTINGS_KEY, s);
   }
 
   function getSyncQueue() {
-    try { return JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY)) || []; }
-    catch { return []; }
+    return safeStorageGet(SYNC_QUEUE_KEY, []);
   }
   function saveSyncQueue(q) {
-    localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(q));
+    safeStorageSet(SYNC_QUEUE_KEY, q);
   }
   function getLastSync() {
-    return localStorage.getItem(LAST_SYNC_KEY) || null;
+    try {
+      const adapter = (typeof SyncCore !== 'undefined' && SyncCore.StorageAdapter) ? SyncCore.StorageAdapter : {
+        getItem: (k) => localStorage.getItem(k)
+      };
+      return adapter.getItem(LAST_SYNC_KEY) || null;
+    } catch {
+      return null;
+    }
   }
   function setLastSync(ts) {
-    if (ts) localStorage.setItem(LAST_SYNC_KEY, ts);
+    if (!ts) return;
+    try {
+      const adapter = (typeof SyncCore !== 'undefined' && SyncCore.StorageAdapter) ? SyncCore.StorageAdapter : {
+        setItem: (k, v) => localStorage.setItem(k, v)
+      };
+      adapter.setItem(LAST_SYNC_KEY, ts);
+    } catch (e) {
+      if (e && e.name === 'QuotaExceededError') {
+        showToast('Almacenamiento local lleno (QuotaExceededError).', 'warning', 'var(--accent-coral, #e74c3c)');
+      }
+    }
+  }
+  function getConflictsStore() {
+    return safeStorageGet(CONFLICTS_KEY, {});
+  }
+  function saveConflictsStore(store) {
+    safeStorageSet(CONFLICTS_KEY, store);
+    updateConflictsBadge();
+  }
+  function getRejectedStore() {
+    return safeStorageGet(REJECTED_KEY, {});
+  }
+  function saveRejectedStore(store) {
+    safeStorageSet(REJECTED_KEY, store);
   }
 
   function enqueueChange(change) {
@@ -1800,7 +1858,11 @@ SIEMPRE devuelve un JSON válido.
   async function syncWithBackend() {
     activities = loadActivities();
     const base = getBackendBaseUrl();
-    const queue = getSyncQueue();
+    let queue = getSyncQueue();
+    if (typeof SyncCore !== 'undefined' && SyncCore.migrateLegacyQueue) {
+      queue = SyncCore.migrateLegacyQueue(queue);
+      saveSyncQueue(queue);
+    }
     const lastSync = getLastSync();
 
     try {
@@ -1813,18 +1875,34 @@ SIEMPRE devuelve un JSON válido.
       const data = await res.json();
 
       // Limpia de la cola los cambios procesados exitosamente
-      const remainingQueue = (typeof SyncCore !== 'undefined' && SyncCore.purgeCommittedAndConflicted)
+      let remainingQueue = (typeof SyncCore !== 'undefined' && SyncCore.purgeCommittedAndConflicted)
         ? SyncCore.purgeCommittedAndConflicted(queue, queue)
         : [];
       saveSyncQueue(remainingQueue);
 
+      // Manejo de ítems rechazados por validación del servidor
+      if (Array.isArray(data.rejected) && data.rejected.length > 0) {
+        let rejectedStore = getRejectedStore();
+        if (typeof SyncCore !== 'undefined' && SyncCore.handleRejectedItems) {
+          const resRej = SyncCore.handleRejectedItems(rejectedStore, queue, data.rejected);
+          saveRejectedStore(resRej.rejectedStore);
+          remainingQueue = resRej.queue;
+          saveSyncQueue(remainingQueue);
+        }
+        showToast(`⚠️ ${data.rejected.length} elemento(s) rechazado(s) por validación del servidor.`, 'warning', 'var(--accent-amber)');
+      }
+
+      // Manejo de campos desconocidos reportados
+      if (Array.isArray(data.unknown_fields) && data.unknown_fields.length > 0) {
+        console.warn('[SyncCore] Campos desconocidos reportados por el servidor:', data.unknown_fields);
+      }
+
       // Manejo de conflictos sin pérdida silenciosa
       if (Array.isArray(data.conflicts) && data.conflicts.length > 0) {
-        let conflictsStore = {};
-        try { conflictsStore = JSON.parse(localStorage.getItem('diary_conflicts')) || {}; } catch (e) {}
+        let conflictsStore = getConflictsStore();
         if (typeof SyncCore !== 'undefined' && SyncCore.handleSyncConflicts) {
           const resConf = SyncCore.handleSyncConflicts(conflictsStore, queue, data.conflicts);
-          localStorage.setItem('diary_conflicts', JSON.stringify(resConf.conflictsStore));
+          saveConflictsStore(resConf.conflictsStore);
         }
         const first = data.conflicts[0];
         const act = activities.find(a => a.id === first.id);
@@ -1892,15 +1970,6 @@ SIEMPRE devuelve un JSON válido.
   }
 
   // ── Conflicts Resolution UI ──
-  function getConflictsStore() {
-    try { return JSON.parse(localStorage.getItem('diary_conflicts')) || {}; }
-    catch { return {}; }
-  }
-  function saveConflictsStore(store) {
-    localStorage.setItem('diary_conflicts', JSON.stringify(store));
-    updateConflictsBadge();
-  }
-
   function updateConflictsBadge() {
     const store = getConflictsStore();
     const count = Object.keys(store).length;

@@ -408,6 +408,67 @@ function prepareImportChanges(importedList, currentList, generateUUIDFn, options
   };
 }
 
+/**
+ * Registra ítems rechazados por el servidor (ej. validación) en un almacén visible,
+ * retirándolos de la cola de reintento activo sin perder los datos originales.
+ */
+function handleRejectedItems(rejectedStore, queue, serverRejected = []) {
+  const store = { ...(rejectedStore || {}) };
+  let remainingQueue = [...(queue || [])];
+
+  if (!Array.isArray(serverRejected) || serverRejected.length === 0) {
+    return { rejectedStore: store, queue: remainingQueue };
+  }
+
+  const rejectedIds = new Set();
+  serverRejected.forEach(rej => {
+    if (!rej || !rej.id) return;
+    rejectedIds.add(rej.id);
+    const localItem = remainingQueue.find(q => q.id === rej.id);
+    store[rej.id] = {
+      id: rej.id,
+      collection: rej.collection || 'activities',
+      reason: rej.reason || 'Rechazado por validación del servidor',
+      localItem: localItem || null,
+      rejectedAt: new Date().toISOString()
+    };
+  });
+
+  remainingQueue = remainingQueue.filter(item => !rejectedIds.has(item.id));
+  return { rejectedStore: store, queue: remainingQueue };
+}
+
+/**
+ * Migra una cola de cambios de la versión anterior a la estructura estandarizada,
+ * garantizando compatibilidad retroactiva sin perder ni duplicar modificaciones pendientes.
+ */
+function migrateLegacyQueue(legacyQueue, defaultCollection = 'activities') {
+  if (!Array.isArray(legacyQueue)) return [];
+  const map = new Map();
+
+  legacyQueue.forEach(item => {
+    if (!item || !item.id) return;
+    const existing = map.get(item.id);
+    if (existing) {
+      map.set(item.id, {
+        ...existing,
+        ...item,
+        collection: item.collection || existing.collection || defaultCollection,
+        base_version: existing.base_version !== undefined ? existing.base_version : item.base_version
+      });
+    } else {
+      map.set(item.id, {
+        ...item,
+        collection: item.collection || defaultCollection
+      });
+    }
+  });
+
+  return Array.from(map.values());
+}
+
+const mergeCollectionChanges = mergeRemoteChanges;
+
 // Exportación compatible con Node.js y Navegadores
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -419,7 +480,10 @@ if (typeof module !== 'undefined' && module.exports) {
     handleSyncConflicts,
     rebaseConflictChange,
     discardConflictChange,
+    handleRejectedItems,
+    migrateLegacyQueue,
     mergeRemoteChanges,
+    mergeCollectionChanges,
     filterActiveActivities,
     getActiveDashboardActivities,
     getCalendarDayActivities,
@@ -440,7 +504,10 @@ if (typeof window !== 'undefined') {
     handleSyncConflicts,
     rebaseConflictChange,
     discardConflictChange,
+    handleRejectedItems,
+    migrateLegacyQueue,
     mergeRemoteChanges,
+    mergeCollectionChanges,
     filterActiveActivities,
     getActiveDashboardActivities,
     getCalendarDayActivities,
@@ -451,3 +518,4 @@ if (typeof window !== 'undefined') {
     prepareImportChanges
   };
 }
+

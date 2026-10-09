@@ -378,4 +378,80 @@ describe('SyncCore - Complete Client Sync Logic Test Suite (Fase 1, 1.5, 1.6)', 
     });
   });
 
+  describe('Paso 0.1 Generic Multi-Collection Functions & Legacy Migration', () => {
+    const {
+      handleRejectedItems,
+      migrateLegacyQueue,
+      mergeCollectionChanges
+    } = require('./sync-core.js');
+
+    test('(0.1.a) Generic queue and merge works uniformly across two distinct collections (activities & dummy_items)', () => {
+      // Colección 1: activities
+      let actsQueue = [];
+      actsQueue = enqueueChange(actsQueue, { id: 'act-1', title: 'Actividad 1', date: '2026-10-10', base_version: 1 });
+      actsQueue = enqueueChange(actsQueue, { id: 'act-1', title: 'Actividad 1 Editada', date: '2026-10-10' });
+      assert.equal(actsQueue.length, 1);
+      assert.equal(actsQueue[0].title, 'Actividad 1 Editada');
+
+      const actsMerged = mergeCollectionChanges(
+        [{ id: 'act-1', title: 'Actividad 1', version: 1 }],
+        [{ id: 'act-1', title: 'Actividad 1 Server', version: 2 }]
+      );
+      assert.equal(actsMerged.activities[0].title, 'Actividad 1 Server');
+
+      // Colección 2: dummy_items
+      let dummyQueue = [];
+      dummyQueue = enqueueChange(dummyQueue, { id: 'dummy-1', name: 'Item Ficticio', score: 100, base_version: 1 });
+      dummyQueue = enqueueChange(dummyQueue, { id: 'dummy-1', name: 'Item Ficticio Editado', score: 150 });
+      assert.equal(dummyQueue.length, 1);
+      assert.equal(dummyQueue[0].name, 'Item Ficticio Editado');
+
+      const dummyMerged = mergeCollectionChanges(
+        [{ id: 'dummy-1', name: 'Item Ficticio', version: 1 }],
+        [{ id: 'dummy-1', name: 'Item Ficticio Server', version: 2 }]
+      );
+      assert.equal(dummyMerged.activities[0].name, 'Item Ficticio Server');
+    });
+
+    test('(0.1.b) migrateLegacyQueue migrates pending changes without duplicates or data loss', () => {
+      const legacyQueue = [
+        { id: 'item-1', title: 'Tarea 1', base_version: 1 },
+        { id: 'item-1', title: 'Tarea 1 Actualizada', date: '2026-10-10' },
+        { id: 'item-2', title: 'Tarea 2', base_version: 2 }
+      ];
+
+      const migrated = migrateLegacyQueue(legacyQueue, 'activities');
+      assert.equal(migrated.length, 2);
+      assert.equal(migrated[0].id, 'item-1');
+      assert.equal(migrated[0].title, 'Tarea 1 Actualizada');
+      assert.equal(migrated[0].base_version, 1);
+      assert.equal(migrated[0].collection, 'activities');
+      assert.equal(migrated[1].id, 'item-2');
+      assert.equal(migrated[1].collection, 'activities');
+    });
+
+    test('(0.3.a) handleRejectedItems sequesters invalid items and purges them from retry queue', () => {
+      let queue = [
+        { id: 'act-valid', title: 'Válida' },
+        { id: 'act-invalid', title: 'Inválida' }
+      ];
+      let rejectedStore = {};
+
+      const serverRejections = [
+        { id: 'act-invalid', collection: 'activities', reason: 'Campo excede tamaño máximo' }
+      ];
+
+      const res = handleRejectedItems(rejectedStore, queue, serverRejections);
+      rejectedStore = res.rejectedStore;
+      queue = res.queue;
+
+      assert.equal(queue.length, 1);
+      assert.equal(queue[0].id, 'act-valid');
+      assert.ok(rejectedStore['act-invalid']);
+      assert.equal(rejectedStore['act-invalid'].reason, 'Campo excede tamaño máximo');
+      assert.equal(rejectedStore['act-invalid'].localItem.title, 'Inválida');
+    });
+  });
+
 });
+
