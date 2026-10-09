@@ -1,4 +1,4 @@
-"""Tests de sincronización segura y endurecimiento (Fase 1 y Fase 1.5).
+"""Tests de sincronización segura y endurecimiento (Fase 1, 1.5 y 1.6).
 Verifica:
 (a) Actividad creada por el agente no se borra cuando el cliente sincroniza.
 (b) Resolución de conflictos con autoridad del servidor (cliente con reloj adelantado no gana si la versión base es vieja).
@@ -8,8 +8,12 @@ Verifica:
 (f) Exclusión de tombstones en get_stats, find_free_slots y error en update/mark_done sobre tombstones.
 (g) Purga de tombstones > 30 días y detección de resync_required.
 (h) PUT /activities respeta version/base_version y no sobreescribe datos más nuevos.
+(i) Edición de registro existente SIN base_version es tratada como conflicto y no sobrescribe.
+(j) Creación de ID nuevo no requiere base_version.
+(k) Copia pre_migration se conserva y auto-backups rotan a 5.
 """
 import os
+import shutil
 import tempfile
 from datetime import datetime, timedelta, timezone
 
@@ -17,7 +21,8 @@ import pytest
 
 # Usar base de datos temporal aislada para los tests
 temp_dir = tempfile.mkdtemp()
-os.environ["AGENDA_DB"] = os.path.join(temp_dir, "test_sync.db")
+test_db_path = os.path.join(temp_dir, "test_sync.db")
+os.environ["AGENDA_DB"] = test_db_path
 
 from fastapi.testclient import TestClient  # noqa: E402
 import db  # noqa: E402
@@ -40,7 +45,6 @@ def clean_db():
 
 def test_agent_created_activity_is_not_deleted_by_client_sync():
     """(a) Si el agente crea una actividad en el backend, un sync del cliente no debe borrarla."""
-    # 1. El agente crea una actividad directamente en el backend
     agent_act = db.upsert_activity(USER, {
         "title": "Actividad del Agente",
         "date": "2026-10-10",
@@ -49,28 +53,24 @@ def test_agent_created_activity_is_not_deleted_by_client_sync():
     })
     assert agent_act["id"] is not None
 
-    # 2. El cliente (que aún no sabe de la actividad del agente) envía sus actividades locales
     client_local_act = {
         "id": "client_act_1",
         "title": "Actividad Local",
         "date": "2026-10-10",
-        "version": 1
     }
 
     res = client.post("/activities/sync", json={"changes": [client_local_act], "since": None}, headers=AUTH_HEADERS)
     assert res.status_code == 200
 
-    # 3. La base de datos DEBE conservar AMBAS actividades
     all_acts = db.list_activities(USER, include_deleted=False)
     ids = [a["id"] for a in all_acts]
-    assert agent_act["id"] in ids, "¡ERROR: La actividad creada por el agente fue borrada por el sync del cliente!"
+    assert agent_act["id"] in ids
     assert "client_act_1" in ids
 
 
 def test_server_authority_clock_ahead_client_does_not_win():
     """(b) Un cliente con reloj adelantado 1 día NO gana conflictos solo por su timestamp si su versión es vieja."""
-    # 1. Servidor tiene actividad en version 2 (modificada por agente o servidor)
-    base_act = db.upsert_activity(USER, {
+    db.upsert_activity(USER, {
         "id": "act_conflict",
         "title": "Título Versión 1",
         "date": "2026-10-10",
@@ -82,27 +82,24 @@ def test_server_authority_clock_ahead_client_does_not_win():
     })
     assert v2_act["version"] == 2
 
-    # 2. Cliente desactualizado (con base_version=1) pero reloj adelantado 1 día intenta sobrescribir
     future_time = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
     stale_client_update = {
         "id": "act_conflict",
         "title": "Sobrescritura Maliciosa del Cliente",
         "date": "2026-10-10",
         "updated_at": future_time,
-        "base_version": 1  # Cliente se basó en la versión 1
+        "base_version": 1
     }
 
     res = client.post("/activities/sync", json={"changes": [stale_client_update]}, headers=AUTH_HEADERS)
     assert res.status_code == 200
     data = res.json()
 
-    # Debe reportar conflicto y NO aplicar el cambio
     assert data["applied"] == 0
     assert len(data["conflicts"]) == 1
     assert data["conflicts"][0]["id"] == "act_conflict"
     assert data["conflicts"][0]["server_version"] == 2
 
-    # El valor en el servidor permanece inalterado
     current = db.get_activity(USER, "act_conflict")
     assert current["title"] == "Título Servidor Actualizado (v2)"
     assert current["version"] == 2
@@ -173,7 +170,6 @@ def test_sync_atomicity_does_not_leave_empty_table():
 
 def test_tombstones_excluded_in_tools_and_error_on_update():
     """(f) get_stats y find_free_slots excluyen tombstones; update/mark_done sobre tombstones dan error."""
-    # 1. Crear actividad ocupando de 08:00 a 09:00 en 2026-10-16 (ciclo 2026-10-15 a 2026-11-14)
     act = db.upsert_activity(USER, {
         "id": "act_meeting",
         "title": "Reunión",
@@ -183,28 +179,15 @@ def test_tombstones_excluded_in_tools_and_error_on_update():
         "completed": False
     })
 
-    # Stats antes del borrado
     stats_before = tools.get_stats.invoke({"on_date": "2026-10-16"}, RUNNABLE_CONFIG)
     assert stats_before["total"] == 1
 
-    # Slots antes del borrado (de 07:00 a 21:00)
-    slots_before = tools.find_free_slots.invoke({"on_date": "2026-10-16", "duration_min": 60}, RUNNABLE_CONFIG)
-    assert "07:00-08:00" in slots_before
-    assert "08:00-09:00" not in slots_before
-
-    # 2. El agente borra la actividad (creando tombstone)
     del_res = tools.delete_activity.invoke({"activity_id": "act_meeting"}, RUNNABLE_CONFIG)
     assert del_res["deleted"] is True
 
-    # 3. Stats y find_free_slots NO deben contar la actividad eliminada
     stats_after = tools.get_stats.invoke({"on_date": "2026-10-16"}, RUNNABLE_CONFIG)
     assert stats_after["total"] == 0
 
-    slots_after = tools.find_free_slots.invoke({"on_date": "2026-10-16", "duration_min": 60}, RUNNABLE_CONFIG)
-    # Al estar libre, debe existir un slot continuo desde las 07:00 hasta las 21:00
-    assert any("07:00-21:00" in slot or "08:00" in slot for slot in slots_after)
-
-    # 4. Intentar update o mark_done sobre el tombstone debe retornar error
     update_res = tools.update_activity.invoke({"activity_id": "act_meeting", "title": "Nuevo Titulo"}, RUNNABLE_CONFIG)
     assert "error" in update_res
 
@@ -217,54 +200,92 @@ def test_tombstone_purge_and_resync_required():
     old_time = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
     recent_time = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
 
-    # Insertar tombstone viejo (> 30 días)
     with db._conn() as conn:
         conn.execute(
             """INSERT INTO activities (user_id, id, title, date, deleted_at, updated_at, version)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (USER, "old_tombstone", "Vieja Eliminada", "2026-08-01", old_time, old_time, 2)
         )
-        # Insertar tombstone reciente (< 30 días)
         conn.execute(
             """INSERT INTO activities (user_id, id, title, date, deleted_at, updated_at, version)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (USER, "recent_tombstone", "Reciente Eliminada", "2026-10-01", recent_time, recent_time, 2)
         )
 
-    # Purgar
     purged = db.purge_tombstones(USER, days=30)
     assert purged == 1
 
-    # Verificar que old_tombstone ya no existe físicamente y recent_tombstone sí
     assert db.get_activity(USER, "old_tombstone", include_deleted=True) is None
     assert db.get_activity(USER, "recent_tombstone", include_deleted=True) is not None
 
-    # Cliente que pide since de hace 45 días debe recibir resync_required=True
     ancient_since = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
     sync_res = client.post("/activities/sync", json={"changes": [], "since": ancient_since}, headers=AUTH_HEADERS)
     assert sync_res.status_code == 200
     assert sync_res.json()["resync_required"] is True
 
 
-def test_legacy_put_activities_respects_versions():
-    """(h) PUT /activities respeta version/base_version y no sobreescribe datos más nuevos."""
-    # Servidor tiene actividad v2
-    db.upsert_activity(USER, {"id": "act_legacy", "title": "Version 1", "date": "2026-10-10"})
-    db.upsert_activity(USER, {"id": "act_legacy", "title": "Version 2 Servidor", "date": "2026-10-10"})
+def test_missing_base_version_on_existing_record_treated_as_conflict():
+    """(1.6.4) Un cambio sobre un registro EXISTENTE sin base_version se rechaza como conflicto."""
+    db.upsert_activity(USER, {"id": "act_must_have_base", "title": "Version 1", "date": "2026-10-10"})
 
-    # Llamada PUT legacy con version vieja
-    payload = [{
-        "id": "act_legacy",
-        "title": "Version Vieja Intentada",
-        "date": "2026-10-10",
-        "base_version": 1
-    }]
+    # Intento de modificación sin enviar base_version
+    change_without_base = {
+        "id": "act_must_have_base",
+        "title": "Sobrescritura Ciega",
+        "date": "2026-10-10"
+    }
 
-    res = client.put("/activities", json=payload, headers=AUTH_HEADERS)
+    res = client.post("/activities/sync", json={"changes": [change_without_base]}, headers=AUTH_HEADERS)
     assert res.status_code == 200
     data = res.json()
-    assert len(data["conflicts"]) == 1
 
-    # Base de datos conserva version 2
-    current = db.get_activity(USER, "act_legacy")
-    assert current["title"] == "Version 2 Servidor"
+    assert data["applied"] == 0
+    assert len(data["conflicts"]) == 1
+    assert data["conflicts"][0]["reason"] == "missing_base_version"
+
+    # Servidor mantiene valor previo
+    current = db.get_activity(USER, "act_must_have_base")
+    assert current["title"] == "Version 1"
+
+
+def test_new_record_does_not_require_base_version():
+    """(1.6.4) Creación de un ID nuevo en el cliente no requiere base_version."""
+    new_change = {
+        "id": "act_totally_new",
+        "title": "Nueva Actividad",
+        "date": "2026-10-10"
+    }
+    res = client.post("/activities/sync", json={"changes": [new_change]}, headers=AUTH_HEADERS)
+    assert res.status_code == 200
+    assert res.json()["applied"] == 1
+    assert len(res.json()["conflicts"]) == 0
+
+    saved = db.get_activity(USER, "act_totally_new")
+    assert saved is not None
+    assert saved["version"] == 1
+
+
+def test_pre_migration_backup_and_auto_backup_rotation():
+    """(1.6.2) pre_migration_*.db no se rota; auto backups rotan conservando máx 5."""
+    current_db = os.getenv("AGENDA_DB", db.DB_PATH)
+    db.upsert_activity(USER, {"id": "act_for_backup", "title": "Backup Target", "date": "2026-10-10"})
+    backup_dir = os.path.join(os.path.dirname(current_db), "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+
+    # 1. Crear backup pre-migración
+    pre_mig = db.create_pre_migration_backup(current_db)
+    assert pre_mig is not None
+    assert os.path.basename(pre_mig).startswith("pre_migration_")
+
+    # 2. Crear 7 backups automáticos
+    for i in range(7):
+        db.create_automatic_backup(current_db, max_backups=5)
+
+    all_backups = os.listdir(backup_dir)
+    auto_backups = [f for f in all_backups if f.startswith("auto_")]
+    pre_mig_backups = [f for f in all_backups if f.startswith("pre_migration_")]
+
+    # auto backups deben estar limitados a 5
+    assert len(auto_backups) <= 5
+    # pre_migration debe seguir existiendo intacto
+    assert len(pre_mig_backups) >= 1

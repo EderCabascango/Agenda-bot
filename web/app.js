@@ -872,6 +872,7 @@
     renderDashboard();
     renderActivityList();
     renderCalendar();
+    scheduleWebAlarms();
     showToast('Actividad eliminada', 'delete', 'var(--accent-red)');
   }
 
@@ -1147,6 +1148,23 @@
     if (btnImport) {
       btnImport.addEventListener('click', () => $('#import-file').click());
     }
+    function savePreImportSnapshot(currentActs) {
+      try {
+        const keys = Object.keys(localStorage).filter(k => k.startsWith('diary_backup_pre_import_')).sort();
+        while (keys.length >= 2) {
+          const oldest = keys.shift();
+          localStorage.removeItem(oldest);
+        }
+        localStorage.setItem('diary_backup_pre_import_' + Date.now(), JSON.stringify(currentActs, null, 2));
+      } catch (err) {
+        if (err.name === 'QuotaExceededError' || err.code === 22) {
+          showToast('Almacenamiento lleno para snapshots automáticos', 'warning', 'var(--accent-amber)');
+        } else {
+          console.warn('Error guardando snapshot pre-import:', err);
+        }
+      }
+    }
+
     const importFile = $('#import-file');
     if (importFile) {
       importFile.addEventListener('change', (e) => {
@@ -1155,54 +1173,63 @@
         const reader = new FileReader();
         reader.onload = async (ev) => {
           try {
-            const imported = JSON.parse(ev.target.result);
-            if (!Array.isArray(imported)) {
-              showToast('Formato inválido (se esperaba un array JSON)', 'error', 'var(--accent-red)');
+            // 1. Validar minuciosamente estructura, tipos y campos
+            const val = (typeof SyncCore !== 'undefined' && SyncCore.validateImportPayload)
+              ? SyncCore.validateImportPayload(ev.target.result)
+              : { valid: Array.isArray(JSON.parse(ev.target.result)), sanitized: JSON.parse(ev.target.result) };
+
+            if (!val.valid) {
+              showToast(val.error || 'Archivo inválido', 'error', 'var(--accent-red)');
               return;
             }
 
             const proceed = confirm(
-              `¿Deseas restaurar ${imported.length} actividades?\nSe creará un respaldo automático previo de tu agenda actual antes de importar.`
+              `¿Deseas restaurar ${val.sanitized.length} actividades?\nSe creará un respaldo automático de tu agenda actual antes de importar.`
             );
             if (!proceed) {
               importFile.value = '';
               return;
             }
 
-            // 1. Respaldo automático previo en localStorage
-            const currentSnapshot = JSON.stringify(activities, null, 2);
-            try {
-              localStorage.setItem('diary_backup_pre_import_' + Date.now(), currentSnapshot);
-            } catch (storageErr) {
-              console.warn('No se pudo guardar snapshot local:', storageErr);
-            }
+            // 2. Respaldo automático conservando máx 2 snapshots
+            savePreImportSnapshot(activities);
 
-            // 2. Preparar cambios no destructivos con SyncCore
+            // 3. Preparar cambios no destructivos con SyncCore
             if (typeof SyncCore !== 'undefined' && SyncCore.prepareImportChanges) {
-              const { mergedActivities, changesToEnqueue } = SyncCore.prepareImportChanges(
-                imported,
+              const { mergedActivities, changesToEnqueue, stats } = SyncCore.prepareImportChanges(
+                val.sanitized,
                 activities,
                 generateUUID
               );
               activities = mergedActivities;
               changesToEnqueue.forEach(ch => enqueueChange(ch));
+
+              saveActivities(activities);
+              renderDashboard();
+              renderActivityList();
+              renderCalendar();
+              renderDiarioGrid();
+              scheduleWebAlarms();
+
+              const msg = `Importación: ${stats.imported} importadas${stats.skipped ? `, ${stats.skipped} omitidas (borradas)` : ''}${stats.conflicted ? `, ${stats.conflicted} no degradadas` : ''} ✓`;
+              showToast(msg);
             } else {
-              activities = imported;
-              imported.forEach(ch => enqueueChange(ch));
+              activities = val.sanitized;
+              val.sanitized.forEach(ch => enqueueChange(ch));
+              saveActivities(activities);
+              renderDashboard();
+              renderActivityList();
+              renderCalendar();
+              renderDiarioGrid();
+              scheduleWebAlarms();
+              showToast(`${val.sanitized.length} actividades importadas ✓`);
             }
 
-            saveActivities(activities);
-            renderDashboard();
-            renderActivityList();
-            renderCalendar();
-            renderDiarioGrid();
-            showToast(`${imported.length} actividades importadas ✓`);
-
-            // 3. Sincronizar con el backend
+            // 4. Sincronizar en segundo plano
             syncWithBackend();
           } catch (err) {
             console.error('Error al importar:', err);
-            showToast('Error al importar el archivo JSON', 'error', 'var(--accent-red)');
+            showToast('Error al procesar archivo JSON', 'error', 'var(--accent-red)');
           } finally {
             importFile.value = '';
           }
@@ -1756,6 +1783,20 @@ SIEMPRE devuelve un JSON válido.
         : [];
       saveSyncQueue(remainingQueue);
 
+      // Manejo de conflictos sin pérdida silenciosa
+      if (Array.isArray(data.conflicts) && data.conflicts.length > 0) {
+        let conflictsStore = {};
+        try { conflictsStore = JSON.parse(localStorage.getItem('diary_conflicts')) || {}; } catch (e) {}
+        if (typeof SyncCore !== 'undefined' && SyncCore.handleSyncConflicts) {
+          const resConf = SyncCore.handleSyncConflicts(conflictsStore, queue, data.conflicts);
+          localStorage.setItem('diary_conflicts', JSON.stringify(resConf.conflictsStore));
+        }
+        const first = data.conflicts[0];
+        const act = activities.find(a => a.id === first.id);
+        const name = act ? act.title : first.id;
+        showToast(`⚠️ Conflicto en "${name}": el servidor tiene una versión más nueva (v${first.server_version}).`, 'warning', 'var(--accent-amber)');
+      }
+
       if (data.server_time) {
         setLastSync(data.server_time);
       }
@@ -1763,7 +1804,8 @@ SIEMPRE devuelve un JSON válido.
       // Mezclar cambios remotos usando SyncCore
       if (typeof SyncCore !== 'undefined' && SyncCore.mergeRemoteChanges) {
         const { activities: merged, modified } = SyncCore.mergeRemoteChanges(activities, data.changes, {
-          resyncRequired: Boolean(data.resync_required)
+          resyncRequired: Boolean(data.resync_required),
+          pendingQueue: remainingQueue
         });
         if (modified) {
           activities = merged;

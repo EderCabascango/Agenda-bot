@@ -12,9 +12,21 @@ from langchain_core.messages import AIMessage, HumanMessage  # noqa: E402
 from langgraph.types import Command  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
-import db  # noqa: E402
+from contextlib import asynccontextmanager
+import db
 
-app = FastAPI(title="Mi Diario - Agente")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Purga de tombstones > 30 días al inicio
+    try:
+        purged = db.purge_tombstones(days=30)
+        if purged:
+            print(f"[INFO] Tombstones purgados en startup: {purged}")
+    except Exception as e:
+        print(f"[WARN] Error al purgar tombstones en startup: {e}")
+    yield
+
+app = FastAPI(title="Mi Diario - Agente", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),

@@ -1,13 +1,20 @@
 import os
 import shutil
 import sqlite3
+import sys
 import tempfile
+
+# Add backend directory to sys.path
+backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend"))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
 import db
 
 def verify_real_db():
-    db_path = os.path.join(os.path.dirname(__file__), "agenda.db")
+    db_path = os.path.join(backend_dir, "agenda.db")
     if not os.path.exists(db_path):
-        print("agenda.db no existe aún.")
+        print(f"agenda.db no existe en {db_path}.")
         return
 
     # 1. Trigger connection to ensure migration runs

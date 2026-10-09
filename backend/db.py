@@ -18,27 +18,45 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-def _backup_db_if_exists(db_path: str, max_backups: int = 5):
-    """Crea una copia de seguridad timestamped de la base de datos en 'backups/' y conserva sólo las últimas max_backups copias."""
+def create_pre_migration_backup(db_path: str) -> str | None:
+    """Crea una copia permanente e inmutable 'pre_migration_*.db' que NUNCA se rota."""
     if os.path.isfile(db_path) and os.path.getsize(db_path) > 0:
         db_dir = os.path.dirname(db_path) or "."
         backup_dir = os.path.join(db_dir, "backups")
         os.makedirs(backup_dir, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        base_name = os.path.basename(db_path)
-        backup_name = f"{base_name}_backup_{ts}.db"
+        base_name = os.path.splitext(os.path.basename(db_path))[0]
+        backup_path = os.path.join(backup_dir, f"pre_migration_{base_name}_{ts}.db")
+        if not os.path.exists(backup_path):
+            try:
+                shutil.copy2(db_path, backup_path)
+                return backup_path
+            except Exception as e:
+                print(f"[WARN] No se pudo crear backup pre-migración: {e}")
+    return None
+
+
+def create_automatic_backup(db_path: str, max_backups: int = 5) -> str | None:
+    """Crea una copia de respaldo automática y rota conservando solo las últimas max_backups copias (excluyendo pre_migration)."""
+    if os.path.isfile(db_path) and os.path.getsize(db_path) > 0:
+        db_dir = os.path.dirname(db_path) or "."
+        backup_dir = os.path.join(db_dir, "backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        base_name = os.path.splitext(os.path.basename(db_path))[0]
+        backup_name = f"auto_{base_name}_backup_{ts}.db"
         backup_path = os.path.join(backup_dir, backup_name)
         if not os.path.exists(backup_path):
             try:
                 shutil.copy2(db_path, backup_path)
             except Exception as e:
-                print(f"[WARN] No se pudo crear backup de {db_path}: {e}")
+                print(f"[WARN] No se pudo crear backup automático de {db_path}: {e}")
 
-        # Rotación de backups: conservar máximo max_backups
+        # Rotación: rota SOLO los archivos auto_*_backup_*.db, nunca toca los pre_migration_*.db
         try:
             backups = sorted([
                 os.path.join(backup_dir, f) for f in os.listdir(backup_dir)
-                if f.startswith(f"{base_name}_backup_") and f.endswith(".db")
+                if f.startswith(f"auto_{base_name}_backup_") and f.endswith(".db")
             ], key=os.path.getmtime)
             while len(backups) > max_backups:
                 oldest = backups.pop(0)
@@ -46,45 +64,67 @@ def _backup_db_if_exists(db_path: str, max_backups: int = 5):
                     os.remove(oldest)
         except Exception as e:
             print(f"[WARN] Error rotando backups: {e}")
+        return backup_path
+    return None
 
 
-def _migrate_schema(conn: sqlite3.Connection):
-    """Aplica migraciones hacia adelante manteniendo retrocompatibilidad total."""
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS activities (
-            user_id TEXT NOT NULL, id TEXT NOT NULL, title TEXT NOT NULL, date TEXT NOT NULL,
-            start_time TEXT DEFAULT '', end_time TEXT DEFAULT '', description TEXT DEFAULT '',
-            priority TEXT DEFAULT 'medium', tags TEXT DEFAULT '[]', completed INTEGER DEFAULT 0,
-            PRIMARY KEY (user_id, id))"""
-    )
+def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
+    """Verifica si se requiere migración real. Si es así, crea respaldo pre-migración y aplica cambios."""
+    # Verificar si la tabla existe
+    t_exists = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='activities'").fetchone()
+
+    if not t_exists:
+        # Primera inicialización de tabla vacía
+        conn.execute(
+            """CREATE TABLE activities (
+                user_id TEXT NOT NULL, id TEXT NOT NULL, title TEXT NOT NULL, date TEXT NOT NULL,
+                start_time TEXT DEFAULT '', end_time TEXT DEFAULT '', description TEXT DEFAULT '',
+                priority TEXT DEFAULT 'medium', tags TEXT DEFAULT '[]', completed INTEGER DEFAULT 0,
+                updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
+                PRIMARY KEY (user_id, id))"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_activities_user_sync ON activities (user_id, updated_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_activities_user_date ON activities (user_id, date)")
+        return
+
     cursor = conn.execute("PRAGMA table_info(activities)")
     cols = {row["name"] for row in cursor.fetchall()}
-    now = utc_now_iso()
 
-    if "updated_at" not in cols:
-        conn.execute("ALTER TABLE activities ADD COLUMN updated_at TEXT DEFAULT ''")
-    if "deleted_at" not in cols:
-        conn.execute("ALTER TABLE activities ADD COLUMN deleted_at TEXT DEFAULT NULL")
-    if "version" not in cols:
-        conn.execute("ALTER TABLE activities ADD COLUMN version INTEGER DEFAULT 1")
+    missing_cols = {"updated_at", "deleted_at", "version"} - cols
+    missing_data = False
+    if "updated_at" in cols:
+        empty_count = conn.execute("SELECT COUNT(*) FROM activities WHERE updated_at IS NULL OR updated_at = ''").fetchone()[0]
+        if empty_count > 0:
+            missing_data = True
 
-    conn.execute("UPDATE activities SET updated_at = ? WHERE updated_at IS NULL OR updated_at = ''", (now,))
-    conn.execute("UPDATE activities SET version = 1 WHERE version IS NULL OR version < 1")
+    if missing_cols or missing_data:
+        # Hay migración real pendiente -> crear respaldo permanente pre-migración
+        create_pre_migration_backup(db_path)
+        now = utc_now_iso()
 
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_activities_user_sync ON activities (user_id, updated_at)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_activities_user_date ON activities (user_id, date)")
+        if "updated_at" not in cols:
+            conn.execute("ALTER TABLE activities ADD COLUMN updated_at TEXT DEFAULT ''")
+        if "deleted_at" not in cols:
+            conn.execute("ALTER TABLE activities ADD COLUMN deleted_at TEXT DEFAULT NULL")
+        if "version" not in cols:
+            conn.execute("ALTER TABLE activities ADD COLUMN version INTEGER DEFAULT 1")
+
+        conn.execute("UPDATE activities SET updated_at = ? WHERE updated_at IS NULL OR updated_at = ''", (now,))
+        conn.execute("UPDATE activities SET version = 1 WHERE version IS NULL OR version < 1")
+
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_activities_user_sync ON activities (user_id, updated_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_activities_user_date ON activities (user_id, date)")
 
 
 def _conn() -> sqlite3.Connection:
     global _SCHEMA_INITIALIZED
     db_path = os.getenv("AGENDA_DB", DB_PATH)
-    if not _SCHEMA_INITIALIZED:
-        _backup_db_if_exists(db_path)
     conn = sqlite3.connect(db_path, timeout=15.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 10000")
+
     if not _SCHEMA_INITIALIZED:
-        _migrate_schema(conn)
+        _migrate_schema_if_needed(conn, db_path)
         _SCHEMA_INITIALIZED = True
     return conn
 
@@ -114,7 +154,7 @@ def list_activities(
     include_deleted: bool = False,
     conn: sqlite3.Connection | None = None
 ) -> list[dict]:
-    """Lista actividades. Si se provee `since`, devuelve todas las modificadas después de esa fecha (incluyendo tombstones si include_deleted=True)."""
+    """Lista actividades. Si no se provee `since`, devuelve actividades activas (`deleted_at IS NULL`)."""
     q, args = "SELECT * FROM activities WHERE user_id=?", [user_id]
     if since:
         q += " AND updated_at > ?"
@@ -222,11 +262,14 @@ def purge_tombstones(user_id: str | None = None, days: int = PURGE_DAYS_DEFAULT)
 
 def sync_changes(user_id: str, changes: list[dict], since: str | None = None, purge_days: int = PURGE_DAYS_DEFAULT) -> dict:
     """Sincronización transaccional con autoridad del servidor:
-    1. Si el cliente envía una versión base menor a la versión actual del servidor,
-       se rechaza el cambio y se reporta conflicto sin sobrescribir.
-    2. El servidor asigna timestamp monotónico y versión incremental.
-    3. Si `since` es anterior al período de retención de tombstones (30 días),
-       se señaliza `resync_required=True` para requerir full pull.
+    1. Si el registro EXISTE en el servidor:
+       - Es OBLIGATORIO proveer `base_version`.
+       - Si no se provee `base_version` -> conflicto `missing_base_version` (NUNCA sobrescribe).
+       - Si `base_version < existing["version"]` -> conflicto `version_stale` (NUNCA sobrescribe).
+    2. Si el registro es NUEVO (ID no existe en servidor):
+       - No requiere `base_version`, se inserta con `version = 1`.
+    3. Si `since` es anterior al período de retención de tombstones (30 días):
+       - Se señaliza `resync_required = True`.
     """
     applied = 0
     conflicts = []
@@ -250,17 +293,25 @@ def sync_changes(user_id: str, changes: list[dict], since: str | None = None, pu
 
             act_id = item["id"]
             existing = get_activity(user_id, act_id, include_deleted=True, conn=conn)
-
             base_version = item.get("base_version")
-            if base_version is None and "version" in item:
-                base_version = item["version"]
 
             if existing:
-                if base_version is not None and base_version < existing["version"]:
+                if base_version is None:
                     conflicts.append({
                         "id": act_id,
                         "server_version": existing["version"],
                         "server_updated_at": existing["updated_at"],
+                        "server_item": existing,
+                        "reason": "missing_base_version"
+                    })
+                    continue
+
+                if base_version < existing["version"]:
+                    conflicts.append({
+                        "id": act_id,
+                        "server_version": existing["version"],
+                        "server_updated_at": existing["updated_at"],
+                        "server_item": existing,
                         "reason": "version_stale"
                     })
                     continue
