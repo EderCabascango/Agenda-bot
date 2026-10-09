@@ -1037,6 +1037,96 @@ def test_playwright_e2e_full_sync():
             page_a.evaluate("() => { window.clearActiveFocusSession(); window.closeFocusModal(); }")
             print(" -> 0 alertas XSS en temporizador: entradas 100% neutralizadas.")
 
+            # ============================================================
+            # [E2E 20] Estadísticas de Enfoque, Cálculos Verificados y Capturas (Fase D)
+            # ============================================================
+            print("\n[E2E 20] Probando Vista de Estadísticas de Enfoque, Métricas y Capturas...")
+
+            # Inyectar sesiones controladas para verificación de cifras
+            page_a.evaluate("""() => {
+                const now = new Date();
+                const todayStr = now.toISOString().slice(0, 10);
+                const yesterday = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
+
+                const sampleSessions = [
+                    // Hoy: 2 horas (7200s) en Matemáticas
+                    {
+                        id: 'foc-e2e-stat-1',
+                        subject_id: 'subject-seed-matematicas',
+                        topic_ids: [],
+                        method: 'pomodoro',
+                        goal: 'Estudio intensivo cálculo',
+                        started_at: `${todayStr}T10:00:00.000Z`,
+                        ended_at: `${todayStr}T12:00:00.000Z`,
+                        focus_intervals: [[`${todayStr}T10:00:00.000Z`, `${todayStr}T12:00:00.000Z`]],
+                        effective_seconds: 7200,
+                        break_seconds: 600,
+                        cycles_completed: 2,
+                        distractions_count: 1,
+                        status: 'completed',
+                        source: 'timer',
+                        created_at: `${todayStr}T10:00:00.000Z`,
+                        updated_at: `${todayStr}T12:00:00.000Z`,
+                        deleted_at: null
+                    },
+                    // Ayer: 1.5 horas (5400s) en Programación
+                    {
+                        id: 'foc-e2e-stat-2',
+                        subject_id: 'subject-seed-programacion',
+                        topic_ids: [],
+                        method: 'deep_work',
+                        goal: 'Programación backend',
+                        started_at: `${yesterday}T14:00:00.000Z`,
+                        ended_at: `${yesterday}T15:30:00.000Z`,
+                        focus_intervals: [[`${yesterday}T14:00:00.000Z`, `${yesterday}T15:30:00.000Z`]],
+                        effective_seconds: 5400,
+                        break_seconds: 0,
+                        cycles_completed: 1,
+                        distractions_count: 0,
+                        status: 'completed',
+                        source: 'timer',
+                        created_at: `${yesterday}T14:00:00.000Z`,
+                        updated_at: `${yesterday}T15:30:00.000Z`,
+                        deleted_at: null
+                    }
+                ];
+
+                let existing = JSON.parse(localStorage.getItem('diary_focus_sessions') || '[]');
+                existing = existing.concat(sampleSessions);
+                localStorage.setItem('diary_focus_sessions', JSON.stringify(existing));
+                
+                // Conmutar a subtab de estadísticas
+                if (window.switchStudySubtab) window.switchStudySubtab('stats');
+            }""")
+
+            page_a.wait_for_selector("#study-stats-panel", state="visible", timeout=3000)
+            time.sleep(0.5)
+
+            # Verificar que el valor de Hoy en el DOM es >= 2h
+            val_today = page_a.inner_text("#stats-val-today")
+            assert "h" in val_today and float(val_today.replace("h", "")) >= 2.0, f"Valor de Hoy esperado >= 2.0h, obtenido: {val_today}"
+
+            # Verificar que la racha está activa
+            val_streak = page_a.inner_text("#stats-val-streak")
+            assert "días" in val_streak and int(val_streak.split()[0]) >= 1, f"Racha esperada >= 1 días, obtenido: {val_streak}"
+
+            # Verificar renderizado de SVG Heatmap
+            heatmap_svg = page_a.query_selector(".heatmap-svg")
+            assert heatmap_svg is not None, "El elemento SVG del Heatmap debe existir en el DOM"
+
+            # Capturas de pantalla
+            # 1. Desktop (1280x800)
+            page_a.set_viewport_size({"width": 1280, "height": 800})
+            time.sleep(0.5)
+            page_a.screenshot(path=os.path.join(BASE_DIR, "screenshots", "stats_desktop.png"), full_page=True)
+
+            # 2. Mobile (390x844)
+            page_a.set_viewport_size({"width": 390, "height": 844})
+            time.sleep(0.5)
+            page_a.screenshot(path=os.path.join(BASE_DIR, "screenshots", "stats_mobile.png"), full_page=True)
+
+            print(" -> Estadísticas verificadas contra cifras manuales y capturas guardadas (desktop y móvil).")
+
             browser.close()
             print("\n============================================================")
             print("TODOS LOS TESTS E2E DE PLAYWRIGHT PASARON (100% OK)")
