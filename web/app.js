@@ -1507,28 +1507,410 @@
   // ── Study View Logic (Materias, Temas y Métricas - Fase B & D) ──
   let showArchivedSubjects = false;
   let selectedSubjectIdForDetail = null;
-  let activeStudySubtab = 'subjects'; // 'subjects' | 'stats'
+  let activeStudySubtab = 'subjects'; // 'subjects' | 'stats' | 'notes'
 
   function switchStudySubtab(tab) {
     activeStudySubtab = tab;
     const btnSubjects = $('#subtab-btn-subjects');
     const btnStats = $('#subtab-btn-stats');
+    const btnNotes = $('#subtab-btn-notes');
     const panelSubjects = $('#study-subjects-panel');
     const panelStats = $('#study-stats-panel');
+    const panelNotes = $('#study-notes-panel');
 
-    if (tab === 'stats') {
-      btnSubjects?.classList.remove('active');
+    btnSubjects?.classList.remove('active');
+    btnStats?.classList.remove('active');
+    btnNotes?.classList.remove('active');
+    if (panelSubjects) panelSubjects.style.display = 'none';
+    if (panelStats) panelStats.style.display = 'none';
+    if (panelNotes) panelNotes.style.display = 'none';
+
+    if (tab === 'notes') {
+      btnNotes?.classList.add('active');
+      if (panelNotes) panelNotes.style.display = 'block';
+      renderLearningNotesView();
+    } else if (tab === 'stats') {
       btnStats?.classList.add('active');
-      if (panelSubjects) panelSubjects.style.display = 'none';
       if (panelStats) panelStats.style.display = 'block';
       renderStudyStatsView();
     } else {
-      btnStats?.classList.remove('active');
       btnSubjects?.classList.add('active');
-      if (panelStats) panelStats.style.display = 'none';
       if (panelSubjects) panelSubjects.style.display = 'block';
       renderStudySubjectsView();
     }
+  }
+
+  function renderSafeMarkdown(text) {
+    if (!text) return '';
+    const escaped = escHTML(text);
+    return escaped
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`(.*?)`/g, '<code style="background:var(--bg-primary); padding:2px 6px; border-radius:4px; font-size:0.85em;">$1</code>')
+      .replace(/^- (.*)$/gm, '• $1')
+      .replace(/\n/g, '<br/>');
+  }
+
+  function renderLearningNotesView() {
+    const grid = $('#learning-notes-grid');
+    if (!grid) return;
+
+    learningNotes = loadLearningNotes();
+    subjects = loadSubjects();
+
+    // Populate subject filter
+    const subFilter = $('#notes-subject-filter');
+    if (subFilter) {
+      const activeSubs = subjects.filter(s => s && !s.deleted_at && !s.archived);
+      const currentVal = subFilter.value;
+      subFilter.innerHTML = '<option value="">Todas las materias</option>' +
+        activeSubs.map(s => `<option value="${escHTML(s.id)}" ${s.id === currentVal ? 'selected' : ''}>${escHTML(s.name)}</option>`).join('');
+    }
+
+    const searchQuery = ($('#notes-search-input')?.value || '').toLowerCase().trim();
+    const selectedSubId = subFilter?.value || '';
+
+    const activeNotes = learningNotes.filter(n => {
+      if (!n || n.deleted_at) return false;
+      if (selectedSubId && n.subject_id !== selectedSubId) return false;
+
+      if (searchQuery) {
+        const txt = ((n.learned_text || '') + ' ' + (n.questions_text || '') + ' ' + (n.next_step_text || '')).toLowerCase();
+        const subName = (subjects.find(s => s.id === n.subject_id)?.name || '').toLowerCase();
+        return txt.includes(searchQuery) || subName.includes(searchQuery);
+      }
+      return true;
+    });
+
+    if (activeNotes.length === 0) {
+      grid.innerHTML = `
+        <div class="empty-state" style="grid-column: 1 / -1; padding: 40px 20px; text-align: center;">
+          <span class="material-icons-round" style="font-size: 48px; color: var(--text-muted); opacity: 0.5;">description</span>
+          <p style="margin-top: 8px; color: var(--text-secondary); font-size: 0.95rem;">No se encontraron notas de aprendizaje.</p>
+          <p style="font-size: 0.82rem; color: var(--text-muted);">Completa una sesión de enfoque o haz clic en "+ Nueva Nota" para registrar tus avances.</p>
+        </div>
+      `;
+      return;
+    }
+
+    // Sort newest first
+    activeNotes.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+
+    grid.innerHTML = activeNotes.map(n => {
+      const sub = subjects.find(s => s.id === n.subject_id);
+      const subName = sub ? sub.name : 'Sin Materia';
+      const dateStr = (n.created_at || '').substring(0, 10) || 'Hoy';
+
+      const compStars = '★'.repeat(n.comprehension_level || 4) + '☆'.repeat(5 - (n.comprehension_level || 4));
+      const focusLight = '⚡'.repeat(n.focus_level || 4);
+
+      return `
+        <div class="card-taskly" data-note-id="${escHTML(n.id)}" style="display:flex; flex-direction:column; justify-content:space-between; gap:12px;">
+          <div>
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+              <span class="chip-pill" style="background:var(--amarillo-suave); color:#9A6A00;">${escHTML(subName)}</span>
+              <span style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">${escHTML(dateStr)}</span>
+            </div>
+
+            <div style="display:flex; gap:12px; font-size:0.78rem; margin-bottom:10px; color:var(--text-secondary);">
+              <span title="Nivel de comprensión: ${n.comprehension_level || 4}/5"><b style="color:var(--accent-amber);">${compStars}</b></span>
+              <span title="Nivel de concentración: ${n.focus_level || 4}/5"><b>${focusLight}</b></span>
+            </div>
+
+            <div style="font-size:0.88rem; color:var(--text-primary); line-height:1.5; margin-bottom:8px;">
+              <strong>Aprendizaje clave:</strong>
+              <div style="margin-top:4px; background:var(--bg-primary); padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle);">
+                ${renderSafeMarkdown(n.learned_text || 'Sin notas registradas.')}
+              </div>
+            </div>
+
+            ${n.questions_text ? `
+              <div style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:6px;">
+                <strong style="color:var(--accent-red);">Dudas:</strong> ${escHTML(n.questions_text)}
+              </div>
+            ` : ''}
+
+            ${n.next_step_text ? `
+              <div style="font-size:0.82rem; color:var(--text-secondary);">
+                <strong>Próximo paso:</strong> ${escHTML(n.next_step_text)}
+              </div>
+            ` : ''}
+          </div>
+
+          <div style="display:flex; align-items:center; justify-content:space-between; padding-top:10px; border-top:1px solid var(--border-subtle); gap:6px; flex-wrap:wrap;">
+            <div style="display:flex; gap:4px;">
+              <button class="btn-outline btn-touch-target" data-action="export-note-md" data-id="${escHTML(n.id)}" title="Exportar a Markdown" style="height:34px; padding:0 8px; font-size:0.75rem;">
+                <span class="material-icons-round" style="font-size:16px;">download</span> .md
+              </button>
+              <button class="btn-outline btn-touch-target" data-action="create-review-task" data-id="${escHTML(n.id)}" title="Crear tarea de repaso" style="height:34px; padding:0 8px; font-size:0.75rem; color:var(--accent-amber); border-color:var(--accent-amber);">
+                <span class="material-icons-round" style="font-size:16px;">event_repeat</span> Repaso
+              </button>
+            </div>
+
+            <div style="display:flex; gap:4px;">
+              <button class="topbar-btn btn-touch-target" data-action="edit-note" data-id="${escHTML(n.id)}" title="Editar nota" style="width:34px; height:34px;">
+                <span class="material-icons-round" style="font-size:18px;">edit</span>
+              </button>
+              <button class="topbar-btn btn-touch-target" data-action="delete-note" data-id="${escHTML(n.id)}" title="Eliminar nota" style="width:34px; height:34px; color:var(--accent-red);">
+                <span class="material-icons-round" style="font-size:18px;">delete_outline</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Attach listeners
+    grid.querySelectorAll('[data-action="export-note-md"]').forEach(btn => {
+      btn.addEventListener('click', () => handleExportNoteMarkdown(btn.dataset.id));
+    });
+    grid.querySelectorAll('[data-action="create-review-task"]').forEach(btn => {
+      btn.addEventListener('click', () => handleCreateReviewTaskFromNote(btn.dataset.id));
+    });
+    grid.querySelectorAll('[data-action="edit-note"]').forEach(btn => {
+      btn.addEventListener('click', () => openNoteModal(btn.dataset.id));
+    });
+    grid.querySelectorAll('[data-action="delete-note"]').forEach(btn => {
+      btn.addEventListener('click', () => handleDeleteNote(btn.dataset.id));
+    });
+  }
+
+  function openNoteModal(noteId = null) {
+    const overlay = $('#modal-note-overlay');
+    if (!overlay) return;
+
+    subjects = loadSubjects();
+    learningNotes = loadLearningNotes();
+
+    const titleEl = $('#modal-note-title');
+    const idInput = $('#note-id-input');
+    const subSelect = $('#note-subject-select');
+    const learnedInput = $('#note-learned-text');
+    const questionsInput = $('#note-questions-text');
+    const resourcesInput = $('#note-resources-text');
+    const nextStepInput = $('#note-next-step-text');
+    const compSelect = $('#note-comprehension-select');
+    const focusSelect = $('#note-focus-select');
+    const errorsDiv = $('#note-form-errors');
+
+    if (errorsDiv) errorsDiv.style.display = 'none';
+
+    if (subSelect) {
+      const activeSubs = subjects.filter(s => s && !s.deleted_at && !s.archived);
+      subSelect.innerHTML = '<option value="">-- Seleccionar Materia --</option>' +
+        activeSubs.map(s => `<option value="${escHTML(s.id)}">${escHTML(s.name)}</option>`).join('');
+    }
+
+    if (noteId) {
+      const note = learningNotes.find(n => n.id === noteId);
+      if (note) {
+        if (titleEl) titleEl.textContent = 'Editar Nota de Aprendizaje';
+        if (idInput) idInput.value = note.id;
+        if (subSelect) subSelect.value = note.subject_id || '';
+        if (learnedInput) learnedInput.value = note.learned_text || '';
+        if (questionsInput) questionsInput.value = note.questions_text || '';
+        if (resourcesInput) resourcesInput.value = note.resources_text || '';
+        if (nextStepInput) nextStepInput.value = note.next_step_text || '';
+        if (compSelect) compSelect.value = String(note.comprehension_level || 4);
+        if (focusSelect) focusSelect.value = String(note.focus_level || 4);
+      }
+    } else {
+      if (titleEl) titleEl.textContent = 'Nueva Nota de Aprendizaje';
+      if (idInput) idInput.value = '';
+      if (subSelect) subSelect.value = selectedSubjectIdForDetail || '';
+      if (learnedInput) learnedInput.value = '';
+      if (questionsInput) questionsInput.value = '';
+      if (resourcesInput) resourcesInput.value = '';
+      if (nextStepInput) nextStepInput.value = '';
+      if (compSelect) compSelect.value = '4';
+      if (focusSelect) focusSelect.value = '4';
+    }
+
+    overlay.classList.add('open');
+  }
+
+  function closeNoteModal() {
+    const overlay = $('#modal-note-overlay');
+    if (overlay) overlay.classList.remove('open');
+  }
+
+  function handleSaveNote() {
+    const idInput = $('#note-id-input');
+    const subSelect = $('#note-subject-select');
+    const learnedInput = $('#note-learned-text');
+    const questionsInput = $('#note-questions-text');
+    const resourcesInput = $('#note-resources-text');
+    const nextStepInput = $('#note-next-step-text');
+    const compSelect = $('#note-comprehension-select');
+    const focusSelect = $('#note-focus-select');
+    const errorsDiv = $('#note-form-errors');
+
+    const noteId = idInput?.value || null;
+    const subjectId = subSelect?.value || null;
+    const learnedText = learnedInput?.value.trim() || '';
+
+    if (!subjectId) {
+      if (errorsDiv) {
+        errorsDiv.textContent = 'Selecciona una materia para la nota.';
+        errorsDiv.style.display = 'block';
+      }
+      return;
+    }
+
+    if (!learnedText) {
+      if (errorsDiv) {
+        errorsDiv.textContent = 'El campo "¿Qué aprendiste?" es obligatorio.';
+        errorsDiv.style.display = 'block';
+      }
+      return;
+    }
+
+    learningNotes = loadLearningNotes();
+    const now = new Date().toISOString();
+
+    if (noteId) {
+      const idx = learningNotes.findIndex(n => n.id === noteId);
+      if (idx !== -1) {
+        const existing = learningNotes[idx];
+        const updated = {
+          ...existing,
+          subject_id: subjectId,
+          learned_text: learnedText,
+          questions_text: questionsInput?.value.trim() || '',
+          resources_text: resourcesInput?.value.trim() || '',
+          next_step_text: nextStepInput?.value.trim() || '',
+          comprehension_level: Number(compSelect?.value || 4),
+          focus_level: Number(focusSelect?.value || 4),
+          updated_at: now,
+          version: (existing.version || 1) + 1,
+          base_version: existing.version || 1
+        };
+        learningNotes[idx] = updated;
+        saveLearningNotes(learningNotes);
+        enqueueChange({ ...updated, collection: 'learning_notes' });
+        showToast('Nota de aprendizaje actualizada ✓');
+      }
+    } else {
+      const newNote = {
+        id: uid(),
+        session_id: null,
+        activity_id: null,
+        subject_id: subjectId,
+        topic_ids: [],
+        learned_text: learnedText,
+        questions_text: questionsInput?.value.trim() || '',
+        resources_text: resourcesInput?.value.trim() || '',
+        next_step_text: nextStepInput?.value.trim() || '',
+        comprehension_level: Number(compSelect?.value || 4),
+        focus_level: Number(focusSelect?.value || 4),
+        version: 1,
+        created_at: now,
+        updated_at: now,
+        deleted_at: null
+      };
+      learningNotes.push(newNote);
+      saveLearningNotes(learningNotes);
+      enqueueChange({ ...newNote, collection: 'learning_notes' });
+      showToast('Nota de aprendizaje creada ✓');
+    }
+
+    closeNoteModal();
+    renderLearningNotesView();
+    syncWithBackend();
+  }
+
+  function handleDeleteNote(noteId) {
+    learningNotes = loadLearningNotes();
+    const idx = learningNotes.findIndex(n => n.id === noteId);
+    if (idx === -1) return;
+
+    const existing = learningNotes[idx];
+    const now = new Date().toISOString();
+    const tombstone = {
+      ...existing,
+      deleted_at: now,
+      updated_at: now,
+      base_version: existing.version || 1
+    };
+    learningNotes[idx] = tombstone;
+    saveLearningNotes(learningNotes);
+    enqueueChange({ ...tombstone, collection: 'learning_notes' });
+    showToast('Nota eliminada ✓');
+
+    renderLearningNotesView();
+    syncWithBackend();
+  }
+
+  function handleExportNoteMarkdown(noteId) {
+    learningNotes = loadLearningNotes();
+    subjects = loadSubjects();
+    const note = learningNotes.find(n => n.id === noteId);
+    if (!note) return;
+
+    const sub = subjects.find(s => s.id === note.subject_id);
+    const subName = sub ? sub.name : 'Materia';
+    const dateStr = (note.created_at || '').substring(0, 10);
+
+    const mdContent = `# Nota de Aprendizaje: ${subName}
+**Fecha:** ${dateStr}
+**Comprensión:** ${note.comprehension_level || 4}/5 ★
+**Concentración:** ${note.focus_level || 4}/5 ⚡
+
+---
+
+## 📌 Qué aprendí / avances
+${note.learned_text || 'Sin registro'}
+
+${note.questions_text ? `## ❓ Dudas / Preguntas pendientes\n${note.questions_text}\n` : ''}
+${note.resources_text ? `## 📚 Recursos y referencias\n${note.resources_text}\n` : ''}
+${note.next_step_text ? `## 🎯 Próximo paso\n${note.next_step_text}\n` : ''}
+`;
+
+    const blob = new Blob([mdContent], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `nota_${subName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${dateStr}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showToast('Nota descargada como Markdown (.md) ✓', 'download', 'var(--accent-teal)');
+  }
+
+  function handleCreateReviewTaskFromNote(noteId) {
+    learningNotes = loadLearningNotes();
+    subjects = loadSubjects();
+    const note = learningNotes.find(n => n.id === noteId);
+    if (!note) return;
+
+    const sub = subjects.find(s => s.id === note.subject_id);
+    const subName = sub ? sub.name : 'Materia';
+
+    // Fecha programada: mañana
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const dateStr = tomorrow.toISOString().substring(0, 10);
+
+    activities = loadActivities();
+    const newAct = {
+      id: uid(),
+      title: `Repaso: ${subName}`,
+      date: dateStr,
+      startTime: '09:00',
+      endTime: '10:00',
+      description: `Repaso de nota de aprendizaje.\n\nPuntos a revisar:\n${note.learned_text || ''}\n\nDudas pendientes:\n${note.questions_text || 'Ninguna'}`,
+      priority: 'high',
+      tags: ['repaso', 'estudio'],
+      completed: false
+    };
+
+    activities.push(newAct);
+    saveActivities(activities);
+    enqueueChange({ ...newAct, collection: 'activities' });
+    showToast(`✅ Tarea de repaso programada para ${dateStr}`);
+    renderActivityList();
+    syncWithBackend();
   }
 
   function renderStudyStatsView() {
@@ -4335,15 +4717,27 @@ SIEMPRE devuelve un JSON válido.
     $('#conflicts-done-btn')?.addEventListener('click', closeConflictsModal);
     $('#conflicts-overlay')?.addEventListener('click', (e) => { if (e.target === e.currentTarget) closeConflictsModal(); });
 
-    // Study view event listeners (Phase B & D)
+    // Study view event listeners (Phase B, D & E)
     $('#subtab-btn-subjects')?.addEventListener('click', () => switchStudySubtab('subjects'));
     $('#subtab-btn-stats')?.addEventListener('click', () => switchStudySubtab('stats'));
+    $('#subtab-btn-notes')?.addEventListener('click', () => switchStudySubtab('notes'));
     $('#btn-seed-subjects')?.addEventListener('click', handleSeedSubjects);
     $('#btn-add-subject')?.addEventListener('click', () => openSubjectModal());
     $('#study-filter-archived')?.addEventListener('change', (e) => {
       showArchivedSubjects = e.target.checked;
       renderStudyView();
     });
+
+    // Learning Notes (Fase E)
+    $('#btn-add-note')?.addEventListener('click', () => openNoteModal());
+    $('#note-modal-close')?.addEventListener('click', closeNoteModal);
+    $('#btn-cancel-note')?.addEventListener('click', closeNoteModal);
+    $('#btn-save-note')?.addEventListener('click', handleSaveNote);
+    $('#modal-note-overlay')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) closeNoteModal();
+    });
+    $('#notes-search-input')?.addEventListener('input', () => renderLearningNotesView());
+    $('#notes-subject-filter')?.addEventListener('change', () => renderLearningNotesView());
 
     // Subject modal
     $('#modal-subject-close')?.addEventListener('click', closeSubjectModal);

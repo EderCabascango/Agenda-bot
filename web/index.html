@@ -271,6 +271,10 @@
               <span class="material-icons-round">analytics</span>
               <span>Estadísticas de Enfoque</span>
             </button>
+            <button class="study-subtab-btn btn-touch-target" id="subtab-btn-notes" data-subtab="notes">
+              <span class="material-icons-round">description</span>
+              <span>Notas de Aprendizaje</span>
+            </button>
           </div>
 
           <!-- SUB-PANEL 1: MATERIAS Y TEMAS -->
@@ -328,6 +332,30 @@
           <div id="study-stats-panel" style="display:none;">
             <!-- Renderizado dinámico por renderStudyStatsView() -->
             <div id="study-stats-container"></div>
+          </div>
+
+          <!-- SUB-PANEL 3: NOTAS DE APRENDIZAJE (FASE E) -->
+          <div id="study-notes-panel" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:20px;">
+              <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; flex:1;">
+                <div class="search" style="max-width:320px;">
+                  <span class="material-icons-round" style="font-size:18px;">search</span>
+                  <input type="text" id="notes-search-input" placeholder="Buscar concepto o tema..." style="border:none; background:none; outline:none; width:100%; font-size:0.88rem;" />
+                </div>
+                <select id="notes-subject-filter" style="height:44px; max-width:200px; border-radius:var(--radius-pill); padding:0 14px;">
+                  <option value="">Todas las materias</option>
+                </select>
+              </div>
+              <button class="btn-primary btn-touch-target" id="btn-add-note" style="gap:6px; padding:0 18px; border-radius:var(--radius-pill); background:var(--accent-amber); color:#111; font-weight:700;">
+                <span class="material-icons-round">add</span>
+                <span>Nueva Nota</span>
+              </button>
+            </div>
+
+            <!-- Notes Grid Container -->
+            <div class="notes-grid" id="learning-notes-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:16px;">
+              <!-- Renderizado dinámico por renderLearningNotesView() -->
+            </div>
           </div>
         </section>
 
@@ -1115,6 +1143,73 @@
         <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:8px;">
           <button class="btn-secondary btn-touch-target" id="btn-cancel-manual-time" type="button">Cancelar</button>
           <button class="btn-primary btn-touch-target" id="btn-save-manual-time" type="button">Guardar Registro</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Crear / Editar Nota de Aprendizaje (Fase E) -->
+  <div class="modal-overlay" id="modal-note-overlay">
+    <div class="modal" id="modal-learning-note" style="max-width: 560px;">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="material-icons-round" style="color:var(--accent-amber);">description</span>
+          <h3 class="modal-title" id="modal-note-title">Nota de Aprendizaje</h3>
+        </div>
+        <button class="modal-close material-icons-round" id="note-modal-close">close</button>
+      </div>
+      <form id="form-note-edit" onsubmit="return false;" class="modal-body">
+        <input type="hidden" id="note-id-input" />
+        <div class="form-group" style="margin-bottom:12px;">
+          <label for="note-subject-select">Materia *</label>
+          <select id="note-subject-select" style="height:44px;" required>
+            <option value="">-- Seleccionar Materia --</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:12px;">
+          <label for="note-learned-text">¿Qué aprendiste o avanzaste? (Markdown) *</label>
+          <textarea id="note-learned-text" rows="3" placeholder="Conceptos clave, definiciones, fórmulas..." required></textarea>
+        </div>
+        <div class="form-row" style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+          <div class="form-group">
+            <label for="note-questions-text">Dudas / Preguntas</label>
+            <textarea id="note-questions-text" rows="2" placeholder="Puntos pendientes por aclarar..."></textarea>
+          </div>
+          <div class="form-group">
+            <label for="note-resources-text">Recursos / Links</label>
+            <textarea id="note-resources-text" rows="2" placeholder="Documentación, libros, URLs..."></textarea>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:12px;">
+          <label for="note-next-step-text">Próximo paso sugerido</label>
+          <input type="text" id="note-next-step-text" placeholder="Ej: Resolver ejercicios práctico 3" />
+        </div>
+        <div class="form-row" style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+          <div class="form-group">
+            <label for="note-comprehension-select">Comprensión (1 a 5 ★)</label>
+            <select id="note-comprehension-select">
+              <option value="5">★★★★★ (5/5 Excelente)</option>
+              <option value="4" selected>★★★★☆ (4/5 Bueno)</option>
+              <option value="3">★★★☆☆ (3/5 Medio)</option>
+              <option value="2">★★☆☆☆ (2/5 Básico)</option>
+              <option value="1">★☆☆☆☆ (1/5 Confuso)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="note-focus-select">Concentración (1 a 5 ⚡)</label>
+            <select id="note-focus-select">
+              <option value="5">⚡⚡⚡⚡⚡ (5/5 Máxima)</option>
+              <option value="4" selected>⚡⚡⚡⚡☆ (4/5 Alta)</option>
+              <option value="3">⚡⚡⚡☆☆ (3/5 Normal)</option>
+              <option value="2">⚡⚡☆☆☆ (2/5 Con distracciones)</option>
+              <option value="1">⚡☆☆☆☆ (1/5 Baja)</option>
+            </select>
+          </div>
+        </div>
+        <div id="note-form-errors" class="form-errors" style="color:var(--accent-red); font-size:0.85rem; margin-bottom:12px; display:none;"></div>
+        <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:8px;">
+          <button class="btn-secondary btn-touch-target" id="btn-cancel-note" type="button">Cancelar</button>
+          <button class="btn-primary btn-touch-target" id="btn-save-note" type="button" style="background:var(--accent-amber); color:#111; font-weight:700;">Guardar Nota</button>
         </div>
       </form>
     </div>
