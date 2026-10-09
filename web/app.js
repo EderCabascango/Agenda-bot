@@ -395,7 +395,7 @@
     diarioRows.forEach(row => {
       html += `<tr>`;
       // Label cell
-      html += `<td class="act-label" style="background:${row.color || '#5B6FA0'};color:#fff;" title="${row.label}">${row.label}</td>`;
+      html += `<td class="act-label" style="background:${row.color || '#5B6FA0'};color:#fff;" title="${escHTML(row.label)}">${escHTML(row.label)}</td>`;
 
       cycleDates.forEach(dateObj => {
         const dateStr = toDateStr(dateObj);
@@ -414,7 +414,7 @@
         if (isToday)  cls += ' is-today-col';
 
         const tooltip = `${row.label} – ${d}/${m}: ${done ? '✅ completado' : missed ? '✕ no realizado' : has ? '⬜ pendiente' : '—'}`;
-        html += `<td class="${cls}" data-date="${dateStr}" data-row="${row.label}" title="${tooltip}"></td>`;
+        html += `<td class="${cls}" data-date="${escHTML(dateStr)}" data-row="${escHTML(row.label)}" title="${escHTML(tooltip)}"></td>`;
       });
       html += `</tr>`;
     });
@@ -2629,11 +2629,10 @@ SIEMPRE devuelve un JSON válido.
     renderDashboard();
   }
 
-  // ── Window Exports for Tests & Integrations (Guarded by Test Mode) ──
+  // ── Window Exports for Tests & Integrations (Guarded strictly by ?e2e=1 or localStorage) ──
   const isTestMode = typeof window !== 'undefined' && (
     (window.location && window.location.search && (window.location.search.includes('e2e=1') || window.location.search.includes('test=1'))) ||
-    (typeof localStorage !== 'undefined' && localStorage.getItem('diary_test_mode') === '1') ||
-    (typeof window.location !== 'undefined' && (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'))
+    (typeof localStorage !== 'undefined' && localStorage.getItem('diary_test_mode') === '1')
   );
 
   if (isTestMode) {

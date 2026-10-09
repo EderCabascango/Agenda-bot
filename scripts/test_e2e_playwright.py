@@ -417,6 +417,57 @@ def test_playwright_e2e_full_sync():
             assert dom_check["statPending"] == "1", f"El contador de pendientes debe ser 1, obtenido: {dom_check['statPending']}"
             print(" -> Verificación DOM exitosa: Tombstones 100% invisibles en DOM y excluidos de contadores.")
 
+            # ----------------------------------------------------
+            # 7. Verificación de Resistencia a XSS en el DOM (0.3)
+            # ----------------------------------------------------
+            print("\n[E2E 7] Probando resistencia a inyecciones XSS en título, descripción, tags e importación...")
+            dialog_triggered = []
+            page_a.on("dialog", lambda dialog: (dialog_triggered.append(dialog.message), dialog.dismiss()))
+
+            xss_result = page_a.evaluate("""() => {
+                const dt = new Date();
+                const today = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+                const xssActs = [
+                    {
+                        id: 'act-xss-1',
+                        title: '<img src=x onerror=alert("xss_img")>',
+                        description: '"><script>alert("xss_script")</script>',
+                        tags: ["' onclick='alert(\\"xss_tag\\")", 'javascript:alert("xss_js")'],
+                        date: today,
+                        startTime: '14:00',
+                        endTime: '15:00',
+                        priority: 'high',
+                        completed: false
+                    }
+                ];
+                if (window.__AppAgendaTest && window.__AppAgendaTest.saveActivities) {
+                    window.__AppAgendaTest.saveActivities(xssActs);
+                }
+                if (window.renderDashboard) window.renderDashboard();
+                if (window.renderActivityList) window.renderActivityList();
+                if (window.renderCalendar) window.renderCalendar();
+
+                const bodyHtml = document.body.innerHTML;
+                const searchInp = document.getElementById('search-input');
+                if (searchInp) {
+                    searchInp.value = 'img';
+                    searchInp.dispatchEvent(new Event('input'));
+                }
+
+                return {
+                    hasRawScriptTag: bodyHtml.includes('<script>alert('),
+                    hasRawImgOnError: bodyHtml.includes('<img src=x onerror='),
+                    hasEscapedImg: bodyHtml.includes('&lt;img src=x onerror='),
+                    hasEscapedScript: bodyHtml.includes('&lt;script&gt;')
+                };
+            }""")
+
+            assert len(dialog_triggered) == 0, f"No debe dispararse ningún alert/dialog por XSS, disparados: {dialog_triggered}"
+            assert xss_result["hasRawScriptTag"] is False, "No debe existir ningún tag <script> inyectado sin escapar en el DOM"
+            assert xss_result["hasRawImgOnError"] is False, "No debe existir ningún tag <img> con onerror sin escapar en el DOM"
+            assert xss_result["hasEscapedImg"] is True, "El payload del <img> debe estar escapado como entidad HTML"
+            print(" -> Verificación XSS exitosa: 0 alertas disparadas, payloads 100% neutralizados.")
+
             browser.close()
             print("\n============================================================")
             print("TODOS LOS TESTS E2E DE PLAYWRIGHT PASARON (100% OK)")

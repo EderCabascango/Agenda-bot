@@ -14,6 +14,7 @@ Verifica:
 """
 import os
 import shutil
+import sqlite3
 import tempfile
 from datetime import datetime, timedelta, timezone
 
@@ -365,24 +366,60 @@ def test_tombstone_purge_with_simulated_clock():
 
 
 def test_sync_changes_batch_atomicity_rollback_on_failure():
-    """(1.9.4) Atomicidad: si un lote de cambios falla en el ítem N, ningún ítem del lote se persiste."""
+    """(0.2) Atomicidad: inyecta un fallo DURANTE la ejecución SQL del ítem N y verifica rollback total."""
     atom_user = "user_atomicity_test"
-    valid_item = {
-        "id": "act_atom_1",
-        "title": "Actividad Válida 1",
-        "date": "2026-10-10",
-        "startTime": "08:00",
-        "endTime": "09:00"
-    }
-    # Ítem inválido que causa ValueError durante la iteración del lote
-    invalid_item = {
-        "id": None,
-        "title": "Actividad Sin ID Inválida"
-    }
 
-    with pytest.raises(ValueError, match="Cada cambio debe contener un 'id' válido"):
-        db.sync_changes(atom_user, [valid_item, invalid_item])
+    # 1. Estado inicial previo
+    db.upsert_activity(atom_user, {
+        "id": "act_pre_existing",
+        "title": "Titulo Previo Original",
+        "date": "2026-10-10"
+    })
+    initial_acts = db.list_activities(atom_user, include_deleted=True)
+    assert len(initial_acts) == 1
 
-    # Verificar que el ítem válido NUNCA fue commiteado (rollback total / atomicidad de lote)
-    persisted = db.get_activity(atom_user, "act_atom_1", include_deleted=True)
-    assert persisted is None, "El lote debió revertirse completamente (0 escrituras parciales)"
+    # Lote de 3 cambios válidos
+    item1 = {"id": "act_batch_1", "title": "Nuevo 1", "date": "2026-10-10"}
+    item2 = {"id": "act_pre_existing", "title": "Titulo Modificado en Lote", "date": "2026-10-10", "base_version": 1}
+    item3 = {"id": "act_batch_3", "title": "Nuevo 3", "date": "2026-10-10"}
+
+    # Monkeypatch conn.execute para fallar durante la escritura SQL del 3er ítem
+    real_conn_factory = db._conn
+
+    class FaultyConnWrapper:
+        def __init__(self, raw_conn):
+            self._raw = raw_conn
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return self._raw.__exit__(exc_type, exc_val, exc_tb)
+
+        def execute(self, sql, params=()):
+            if "INSERT INTO activities" in sql and params and len(params) > 1 and params[1] == "act_batch_3":
+                raise sqlite3.OperationalError("Simulated write error during item N SQL execution")
+            return self._raw.execute(sql, params)
+
+        def commit(self):
+            return self._raw.commit()
+
+        def close(self):
+            return self._raw.close()
+
+        def __getattr__(self, name):
+            return getattr(self._raw, name)
+
+    from unittest.mock import patch
+    with patch("db._conn", side_effect=lambda *a, **k: FaultyConnWrapper(real_conn_factory(*a, **k))):
+        with pytest.raises(sqlite3.OperationalError, match="Simulated write error during item N SQL execution"):
+            db.sync_changes(atom_user, [item1, item2, item3])
+
+    # Verificar que la DB quedó 100% IDÉNTICA al estado previo al lote (0 escrituras parciales)
+    after_acts = db.list_activities(atom_user, include_deleted=True)
+    assert len(after_acts) == 1
+    assert after_acts[0]["id"] == "act_pre_existing"
+    assert after_acts[0]["title"] == "Titulo Previo Original"
+    assert after_acts[0]["version"] == 1
+    assert db.get_activity(atom_user, "act_batch_1", include_deleted=True) is None
+    assert db.get_activity(atom_user, "act_batch_3", include_deleted=True) is None
