@@ -25,7 +25,6 @@ import tempfile
 import threading
 import sqlite3
 import pytest
-from playwright.sync_api import sync_playwright
 
 # Add backend directory to sys.path
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -33,9 +32,19 @@ BACKEND_DIR = os.path.join(BASE_DIR, "backend")
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
+# Configurar base de datos temporal antes de importar main/db
+E2E_TEMP_DIR = tempfile.mkdtemp()
+E2E_TEST_DB = os.path.join(E2E_TEMP_DIR, "test_e2e_agenda.db")
+os.environ["AGENDA_DB"] = E2E_TEST_DB
+os.environ["DATABASE_PATH"] = E2E_TEST_DB
+
+assert "tmp" in E2E_TEST_DB.lower() or "temp" in E2E_TEST_DB.lower(), f"ERROR CRÍTICO: AGENDA_DB ({E2E_TEST_DB}) debe ser temporal."
+assert os.path.abspath(E2E_TEST_DB) != os.path.abspath(os.path.join(BACKEND_DIR, "agenda.db")), "ERROR: El test E2E no puede usar la base de datos real."
+
 import db
 import uvicorn
 from main import app
+from playwright.sync_api import sync_playwright
 
 
 def get_free_port():
@@ -88,9 +97,7 @@ class TestServer:
 
 
 def test_playwright_e2e_full_sync():
-    temp_dir = tempfile.mkdtemp()
-    test_db = os.path.join(temp_dir, "test_e2e_agenda.db")
-    server = TestServer(test_db)
+    server = TestServer(E2E_TEST_DB)
     server.start()
 
     try:

@@ -981,7 +981,7 @@ def test_parameterized_collection_enum_and_range_validations():
     # 7. focus_sessions: iana_timezone inválida -> rechazado
     res_foc_tz = db.sync_collection(user, "focus_sessions", changes=[{"id": "foc_bad_tz", "iana_timezone": "Invalid/Fake_Zone"}])
     assert len(res_foc_tz["rejected"]) == 1
-    assert "Zona horaria IANA inválida" in res_foc_tz["rejected"][0]["reason"]
+    assert "iana_timezone" in res_foc_tz["rejected"][0]["reason"]
 
 
 def test_invalid_collection_rejected():
@@ -1284,6 +1284,139 @@ def test_timer_core_session_record_contract_validation():
     assert len(saved["focus_intervals"]) == 2
     assert saved["focus_intervals"][0][0] == "2026-10-10T10:00:00.000000Z"
     assert saved["topic_ids"] == ["top-contract-1", "top-contract-2"]
+
+
+def test_timer_core_js_subprocess_contract():
+    """(Paso 0.7) Valida que el archivo timer-core.js real ejecutado bajo Node genera contratos 100% conformes."""
+    import subprocess
+    import json
+
+    js_code = """
+    const TimerCore = require('./web/timer-core.js');
+    const records = [];
+
+    // 1. Pomodoro completado
+    const t0 = new Date('2026-10-10T10:00:00.000Z').getTime();
+    const t1 = new Date('2026-10-10T10:25:00.000Z').getTime();
+    const timerPom = TimerCore.createTimer('pomodoro', { subject_id: 'sub-js-1', topic_ids: ['top-1', 'top-2'], goal: 'Estudio de React' }, () => t0);
+    TimerCore.start(timerPom, () => t0);
+    TimerCore.logDistraction(timerPom);
+    TimerCore.logDistraction(timerPom);
+    TimerCore.finish(timerPom, () => t1);
+    records.push(TimerCore.buildSessionRecord(timerPom, {}, () => t1));
+
+    // 2. Stopwatch abandonado
+    const t2 = new Date('2026-10-10T11:00:00.000Z').getTime();
+    const t3 = new Date('2026-10-10T11:15:00.000Z').getTime();
+    const timerStop = TimerCore.createTimer('stopwatch', { subject_id: null, topic_ids: [], goal: '' }, () => t2);
+    TimerCore.start(timerStop, () => t2);
+    TimerCore.abandon(timerStop, () => t3);
+    records.push(TimerCore.buildSessionRecord(timerStop, {}, () => t3));
+
+    // 3. Registro manual
+    const recManual = TimerCore.buildManualSession({
+      subject_id: 'sub-js-2',
+      topic_ids: [],
+      goal: 'Lectura manual',
+      method: 'manual',
+      started_at: '2026-10-10T14:00:00.000Z',
+      ended_at: '2026-10-10T15:00:00.000Z',
+      effective_seconds: 3600
+    });
+    records.push(recManual);
+
+    console.log(JSON.stringify(records));
+    """
+
+    ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    res = subprocess.run(["node", "-e", js_code], cwd=ROOT_DIR, capture_output=True, text=True, check=True)
+    generated_records = json.loads(res.stdout)
+    assert len(generated_records) == 3
+
+    for rec in generated_records:
+        sanitized, err, unknowns = db.validate_and_sanitize_item("focus_sessions", rec)
+        assert err is None, f"Contrato JS falló validación Python: {err}"
+        assert len(unknowns) == 0, f"Contrato JS generó campos desconocidos: {unknowns}"
+        assert "version" not in rec, "El builder del cliente NO debe incluir version"
+        assert "distractions_count" in rec, "El builder del cliente DEBE incluir distractions_count"
+
+
+def test_iana_timezone_and_limits_validation():
+    """(Paso 0.4) Valida rechazo de iana_timezone inválida, topic_ids > 50 y focus_intervals > 500."""
+    # 1. Zona horaria inválida
+    bad_tz_item = {
+        "id": "foc-tz-bad",
+        "method": "pomodoro",
+        "started_at": "2026-10-10T10:00:00.000000Z",
+        "ended_at": "2026-10-10T10:25:00.000000Z",
+        "focus_intervals": [["2026-10-10T10:00:00.000000Z", "2026-10-10T10:25:00.000000Z"]],
+        "effective_seconds": 1500,
+        "iana_timezone": "Planeta/Marte"
+    }
+    _, err_tz, _ = db.validate_and_sanitize_item("focus_sessions", bad_tz_item)
+    assert err_tz is not None
+    assert "iana_timezone" in err_tz
+
+    # 2. Topic IDs > 50
+    bad_topics_item = {
+        "id": "foc-topics-bad",
+        "method": "pomodoro",
+        "started_at": "2026-10-10T10:00:00.000000Z",
+        "ended_at": "2026-10-10T10:25:00.000000Z",
+        "topic_ids": [f"top-{i}" for i in range(51)],
+        "focus_intervals": [["2026-10-10T10:00:00.000000Z", "2026-10-10T10:25:00.000000Z"]],
+        "effective_seconds": 1500
+    }
+    _, err_top, _ = db.validate_and_sanitize_item("focus_sessions", bad_topics_item)
+    assert err_top is not None
+    assert "topic_ids" in err_top
+
+    # 3. Focus intervals > 500
+    bad_intervals_item = {
+        "id": "foc-intervals-bad",
+        "method": "pomodoro",
+        "started_at": "2026-10-10T10:00:00.000000Z",
+        "ended_at": "2026-10-10T11:00:00.000000Z",
+        "focus_intervals": [["2026-10-10T10:00:00.000000Z", "2026-10-10T10:00:01.000000Z"]] * 501,
+        "effective_seconds": 501
+    }
+    _, err_int, _ = db.validate_and_sanitize_item("focus_sessions", bad_intervals_item)
+    assert err_int is not None
+    assert "focus_intervals" in err_int
+
+
+def test_created_at_schema_and_migration():
+    """(Paso 0.4) Valida que todas las colecciones tienen created_at y la migración rellena desde updated_at."""
+    temp_dir = tempfile.mkdtemp()
+    legacy_db_path = os.path.join(temp_dir, "legacy_schema.db")
+    
+    # Crear BD con esquema antiguo sin created_at en subjects
+    conn = sqlite3.connect(legacy_db_path)
+    conn.execute("""
+        CREATE TABLE subjects (
+            user_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL,
+            color TEXT DEFAULT '#5B6FA0', icon TEXT DEFAULT 'book',
+            weekly_goal_minutes INTEGER DEFAULT 0, archived INTEGER DEFAULT 0,
+            updated_at TEXT DEFAULT '2026-10-01T12:00:00.000000Z', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
+            PRIMARY KEY (user_id, id)
+        )
+    """)
+    conn.execute("INSERT INTO subjects (user_id, id, name, updated_at) VALUES ('u1', 'sub-old-1', 'Legacy Sub', '2026-10-01T12:00:00.000000Z')")
+    conn.commit()
+    conn.close()
+
+    # Ejecutar migración
+    db.init_db(legacy_db_path)
+    conn2 = db._conn(legacy_db_path)
+    cur = conn2.cursor()
+    cur.execute("SELECT id, created_at, updated_at FROM subjects WHERE id='sub-old-1'")
+    row = cur.fetchone()
+    assert row is not None
+    assert row[1] == "2026-10-01T12:00:00.000000Z"
+    assert row[2] == "2026-10-01T12:00:00.000000Z"
+    conn2.close()
+
+
 
 
 

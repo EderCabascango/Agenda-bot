@@ -21,7 +21,12 @@ if backend_dir not in sys.path:
 
 # Configurar base de datos temporal antes de importar main/db
 temp_dir = tempfile.mkdtemp()
-os.environ["AGENDA_DB"] = os.path.join(temp_dir, "integration_agenda.db")
+test_db_path = os.path.join(temp_dir, "integration_agenda.db")
+os.environ["AGENDA_DB"] = test_db_path
+os.environ["DATABASE_PATH"] = test_db_path
+
+assert "tmp" in test_db_path.lower() or "temp" in test_db_path.lower(), f"ERROR CRÍTICO: AGENDA_DB ({test_db_path}) debe ser temporal."
+assert os.path.abspath(test_db_path) != os.path.abspath("backend/agenda.db"), "ERROR: No se puede ejecutar tests contra la BD real."
 
 from fastapi.testclient import TestClient
 import db

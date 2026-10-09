@@ -157,7 +157,7 @@ def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
                 user_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL,
                 color TEXT DEFAULT '#5B6FA0', icon TEXT DEFAULT 'book',
                 weekly_goal_minutes INTEGER DEFAULT 0, archived INTEGER DEFAULT 0,
-                updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
                 PRIMARY KEY (user_id, id))"""
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_subjects_user_sync ON subjects (user_id, updated_at)")
@@ -168,7 +168,7 @@ def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
             """CREATE TABLE topics (
                 user_id TEXT NOT NULL, id TEXT NOT NULL, subject_id TEXT DEFAULT '',
                 name TEXT NOT NULL, status TEXT DEFAULT 'pending',
-                updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
                 PRIMARY KEY (user_id, id))"""
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_topics_user_sync ON topics (user_id, updated_at)")
@@ -186,7 +186,7 @@ def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
                 break_seconds INTEGER DEFAULT 0, cycles_completed INTEGER DEFAULT 0,
                 distractions_count INTEGER DEFAULT 0, status TEXT DEFAULT 'completed',
                 source TEXT DEFAULT 'timer', iana_timezone TEXT DEFAULT 'UTC',
-                updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
                 PRIMARY KEY (user_id, id))"""
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_focus_sessions_user_sync ON focus_sessions (user_id, updated_at)")
@@ -203,13 +203,24 @@ def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
                 learned_text TEXT DEFAULT '', questions_text TEXT DEFAULT '', resources_text TEXT DEFAULT '',
                 next_step_text TEXT DEFAULT '', comprehension_level INTEGER DEFAULT NULL,
                 focus_level INTEGER DEFAULT NULL, conflict_of TEXT DEFAULT NULL,
-                updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
                 PRIMARY KEY (user_id, id))"""
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_learning_notes_user_sync ON learning_notes (user_id, updated_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_learning_notes_user_subject ON learning_notes (user_id, subject_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_learning_notes_user_session ON learning_notes (user_id, session_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_learning_notes_user_activity ON learning_notes (user_id, activity_id)")
+
+    # Migración de created_at para tablas existentes
+    for tbl in ["subjects", "topics", "focus_sessions", "learning_notes"]:
+        if tbl in existing_tables:
+            c_info = conn.execute(f"PRAGMA table_info({tbl})").fetchall()
+            tbl_cols = {row["name"] for row in c_info}
+            if "created_at" not in tbl_cols:
+                conn.execute(f"ALTER TABLE {tbl} ADD COLUMN created_at TEXT DEFAULT ''")
+                conn.execute(f"UPDATE {tbl} SET created_at = updated_at WHERE created_at IS NULL OR created_at = ''")
+
+    conn.commit()
 
 
 COLLECTION_SCHEMAS = {
@@ -409,6 +420,21 @@ def validate_and_sanitize_item(collection_name: str, item: dict) -> tuple[dict |
 
     # Invariantes específicas para focus_sessions
     if collection_name == "focus_sessions" and not sanitized.get("deleted_at"):
+        # Validación de iana_timezone
+        tz = sanitized.get("iana_timezone")
+        if tz:
+            try:
+                import zoneinfo
+                if tz != "UTC" and tz not in zoneinfo.available_timezones():
+                    return None, f"iana_timezone inválida '{tz}'. Debe ser una zona horaria IANA válida.", []
+            except Exception:
+                pass
+
+        # Validación de límite de topic_ids
+        t_ids = sanitized.get("topic_ids") or []
+        if isinstance(t_ids, list) and len(t_ids) > 50:
+            return None, "topic_ids excede el número máximo permitido (50 temas)", []
+
         s_at = sanitized.get("started_at")
         e_at = sanitized.get("ended_at")
         if s_at and e_at and e_at < s_at:
@@ -417,8 +443,8 @@ def validate_and_sanitize_item(collection_name: str, item: dict) -> tuple[dict |
         intervals = sanitized.get("focus_intervals") or []
         if not isinstance(intervals, list):
             return None, "focus_intervals debe ser una lista", []
-        if len(intervals) > 100:
-            return None, "focus_intervals excede el número máximo permitido (100 tramos)", []
+        if len(intervals) > 500:
+            return None, "focus_intervals excede el número máximo permitido (500 tramos)", []
 
         total_interval_seconds = 0
         prev_end = None
