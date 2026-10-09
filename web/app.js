@@ -501,8 +501,8 @@
           const tag = (a.tags && a.tags[0]) ? a.tags[0] : 'General';
           const isDone = a.completed;
 
-          // Check if this activity is a study activity (only study activities get a Focus/Play button)
-          const isStudyAct = (a.tags && a.tags.some(t => ['estudio', 'proyectos', 'aprender', 'ia', 'desarrollo', 'programación', 'materia'].includes(t.toLowerCase()))) || a.subject_id;
+          // Check if focus is allowed for this activity (default true)
+          const isFocusAllowed = (a.allow_focus !== false);
 
           let inProgress = false;
           if (a.startTime && a.endTime && !isDone && !isOverdue) {
@@ -538,7 +538,7 @@
                   <p class="agenda-item-title ${isDone ? 'done-text' : ''}">${escHTML(a.title)}</p>
                   <p class="agenda-item-sub">${escHTML(tag)} • <span class="status-text">${statusLabel}</span></p>
                 </div>
-                ${!isDone && isStudyAct ? `
+                ${!isDone && isFocusAllowed ? `
                   <button class="btn-agenda-focus" data-agenda-focus="${a.id}" title="Iniciar Enfoque de Estudio">
                     <span class="material-icons-round">play_arrow</span>
                   </button>
@@ -1256,9 +1256,11 @@
       $('#form-desc').value = a.description || '';
       $('#form-priority').value = a.priority;
       $('#form-tags').value = (a.tags || []).join(', ');
+      if ($('#form-allow-focus')) $('#form-allow-focus').checked = (a.allow_focus !== false);
     } else {
       $('#modal-title').textContent = 'Nueva Actividad';
       $('#form-date').value = calSelectedDate || todayStr();
+      if ($('#form-allow-focus')) $('#form-allow-focus').checked = true;
     }
     $('#modal-overlay').classList.add('open');
     setTimeout(() => $('#form-title').focus(), 100);
@@ -1284,6 +1286,7 @@
       description: $('#form-desc').value.trim(),
       priority: $('#form-priority').value,
       tags: $('#form-tags').value.split(',').map(t => t.trim()).filter(Boolean),
+      allow_focus: $('#form-allow-focus') ? $('#form-allow-focus').checked : true,
       completed: false,
       updated_at: nowIso,
       version: 1
