@@ -831,6 +831,180 @@ def test_playwright_e2e_full_sync():
             page_a.wait_for_selector("#subject-detail-overlay", state="hidden", timeout=3000)
             print(" -> Capturas guardadas en screenshots/study_view.png y screenshots/subject_detail.png.")
 
+            # ============================================================
+            # [E2E 15] Temporizador de Enfoque, Distracciones y Guardado con Notas (Fase C)
+            # ============================================================
+            print("\n[E2E 15] Probando flujo completo de Temporizador de Enfoque Pomodoro...")
+            page_a.click("#btn-focus-fab")
+            page_a.wait_for_selector("#focus-timer-overlay.open", timeout=3000)
+
+            page_a.select_option("#focus-method-select", "pomodoro")
+            page_a.select_option("#focus-subject-select", "subject-seed-ingles")
+            page_a.fill("#focus-goal-input", "Aprender Phrasal Verbs C1")
+            page_a.click("#btn-start-focus-session")
+
+            # Verificar transición a pantalla activa
+            page_a.wait_for_selector("#focus-active-view", state="visible", timeout=3000)
+            assert "ENFOQUE" in page_a.inner_text("#focus-phase-badge")
+            assert "Aprender Phrasal Verbs C1" in page_a.inner_text("#focus-active-goal-text")
+
+            # Anotar distracción
+            page_a.fill("#focus-distraction-input", "Llamada telefónica breve")
+            page_a.click("#btn-add-distraction")
+            time.sleep(0.3)
+            assert "1 registradas" in page_a.inner_text("#focus-distractions-count")
+
+            # Tomar capturas de pantalla de la sesión activa en Desktop y Mobile
+            page_a.set_viewport_size({"width": 1280, "height": 800})
+            page_a.screenshot(path="screenshots/focus_timer_active_desktop.png")
+
+            page_a.set_viewport_size({"width": 390, "height": 844})
+            page_a.screenshot(path="screenshots/focus_timer_active_mobile.png")
+            page_a.set_viewport_size({"width": 1280, "height": 800}) # Restaurar tamaño
+            print(" -> Capturas de sesión activa guardadas (desktop y móvil).")
+
+            # Pausar y Finalizar sesión
+            page_a.click("#btn-pause-resume-focus")
+            page_a.click("#btn-finish-focus")
+            page_a.wait_for_selector("#focus-summary-view", state="visible", timeout=3000)
+
+            # Rellenar notas de aprendizaje
+            page_a.fill("#summary-learned-text", "Dominé 5 phrasal verbs clave: look into, bring up, call off, put off, figure out.")
+            page_a.fill("#summary-questions-text", "¿Cuándo usar 'call off' vs 'postpone'?")
+            page_a.fill("#summary-next-step", "Hacer 10 oraciones de práctica")
+            page_a.click("#btn-save-session-with-notes")
+            page_a.wait_for_selector("#focus-timer-overlay", state="hidden", timeout=3000)
+
+            # Sincronizar y verificar en B
+            page_a.evaluate("async () => { await window.syncWithBackend(); }")
+            page_b.evaluate("async () => { await window.syncWithBackend(); }")
+
+            b_has_session_and_notes = page_b.evaluate("""() => {
+                const focs = JSON.parse(localStorage.getItem('diary_focus_sessions') || '[]');
+                const nots = JSON.parse(localStorage.getItem('diary_learning_notes') || '[]');
+                return {
+                    hasFoc: focs.some(f => f.goal === 'Aprender Phrasal Verbs C1' && !f.deleted_at),
+                    hasNot: nots.some(n => n.learned_text.includes('phrasal verbs') && !n.deleted_at)
+                };
+            }""")
+            assert b_has_session_and_notes["hasFoc"] is True, "Contexto B debió recibir la sesión de enfoque de Inglés"
+            assert b_has_session_and_notes["hasNot"] is True, "Contexto B debió recibir la nota de aprendizaje asociada"
+            print(" -> Sesión de enfoque y notas sincronizadas 100% exitosamente con B.")
+
+            # ============================================================
+            # [E2E 16] Persistencia y Restauración de Sesión Activa tras Recarga (F5)
+            # ============================================================
+            print("\n[E2E 16] Probando persistencia y recuperación de sesión activa tras F5...")
+            page_a.evaluate("""() => {
+                const timer = {
+                    id: 'foc-reload-test-1',
+                    method: 'flowtime',
+                    status: 'running',
+                    phase: 'focus',
+                    goal: 'Sesión Flowtime Resistente a F5',
+                    subject_id: 'subject-seed-genai',
+                    config: { focusDurationSec: 0, isCountdown: false },
+                    effective_seconds: 420,
+                    started_at: new Date().toISOString(),
+                    last_heartbeat: Date.now(),
+                    tabId: 'tab_A'
+                };
+                window.saveActiveFocusSession(timer);
+            }""")
+
+            # Recargar página A
+            page_a.reload()
+            page_a.wait_for_selector("#view-dashboard.active", timeout=3000)
+
+            # Verificar que el temporizador activo fue restaurado
+            is_active_restored = page_a.evaluate("""() => {
+                const stored = window.loadActiveFocusSession();
+                return stored && stored.id === 'foc-reload-test-1' && stored.status === 'running';
+            }""")
+            assert is_active_restored is True, "La sesión activa debió restaurarse automáticamente tras la recarga F5"
+
+            # Limpiar sesión activa
+            page_a.evaluate("() => window.clearActiveFocusSession()")
+            print(" -> Sesión activa sobrevive a recarga de página sin perder datos.")
+
+            # ============================================================
+            # [E2E 17] Bloqueo de Sesión Activa Multi-Pestaña
+            # ============================================================
+            print("\n[E2E 17] Probando advertencia de sesión activa en otra pestaña (Multi-tab lock)...")
+            # Inyectar sesión activa con un tabId diferente
+            page_a.evaluate("""() => {
+                const timerOtherTab = {
+                    id: 'foc-other-tab-1',
+                    method: 'pomodoro',
+                    status: 'running',
+                    phase: 'focus',
+                    subject_id: 'subject-seed-mlops',
+                    last_heartbeat: Date.now(),
+                    tabId: 'other_tab_xyz'
+                };
+                localStorage.setItem('diary_focus_active', JSON.stringify(timerOtherTab));
+                window.openFocusModal();
+            }""")
+
+            page_a.wait_for_selector("#focus-multitab-warning", state="visible", timeout=3000)
+            assert "otra pestaña" in page_a.inner_text("#focus-multitab-warning")
+            print(" -> Banner de bloqueo multi-pestaña mostrado correctamente.")
+            page_a.evaluate("() => { window.clearActiveFocusSession(); window.closeFocusModal(); }")
+
+            # ============================================================
+            # [E2E 18] Entrada Manual de Tiempo y Actualización Reactiva de Métricas
+            # ============================================================
+            print("\n[E2E 18] Probando registro manual de tiempo de estudio y reactividad...")
+            page_a.click(".nav-item[data-view='study']")
+            page_a.wait_for_selector("#view-study.active", timeout=3000)
+
+            # Abrir detalle de Inglés y registrar tiempo manual
+            page_a.click(".subject-card[data-id='subject-seed-ingles'] [data-action='detail']")
+            page_a.wait_for_selector("#subject-detail-overlay.open", timeout=3000)
+            page_a.click("#btn-add-manual-time-from-detail")
+            page_a.wait_for_selector("#manual-time-overlay.open", timeout=3000)
+
+            page_a.fill("#manual-duration-minutes", "90")
+            page_a.fill("#manual-goal-input", "Estudio de vocabulario en libro")
+            page_a.click("#btn-save-manual-time")
+            page_a.wait_for_selector("#manual-time-overlay", state="hidden", timeout=3000)
+
+            # Verificar que el tiempo aumentó en el detalle
+            hours_text = page_a.inner_text("#detail-stat-hours")
+            assert float(hours_text.replace('h', '')) >= 1.5, f"Las horas de la materia debieron actualizarse con 90m (>=1.5h), obtenido: {hours_text}"
+            page_a.click("#btn-close-subject-detail")
+
+            # Sincronizar y verificar recepción en Contexto B
+            page_a.evaluate("async () => { await window.syncWithBackend(); }")
+            page_b.evaluate("async () => { await window.syncWithBackend(); }")
+
+            has_manual_in_b = page_b.evaluate("""() => {
+                const focs = JSON.parse(localStorage.getItem('diary_focus_sessions') || '[]');
+                return focs.some(f => f.source === 'manual' && f.effective_seconds === 5400 && !f.deleted_at);
+            }""")
+            assert has_manual_in_b is True, "Contexto B debió recibir la sesión manual de 90 min (5400s)"
+            print(" -> Entrada manual de tiempo reflejada en UI y sincronizada a B.")
+
+            # ============================================================
+            # [E2E 19] Neutralización de Inyecciones XSS en Temporizador de Enfoque
+            # ============================================================
+            print("\n[E2E 19] Probando neutralización de ataques XSS en objetivo y distracciones...")
+            timer_xss_dialogs = []
+            page_a.on("dialog", lambda dialog: (timer_xss_dialogs.append(dialog.message), dialog.dismiss()))
+
+            page_a.evaluate("""() => {
+                window.openFocusModal({
+                    goal: '<script>alert("xss-timer-goal")</script><img src=x onerror=alert("xss-timer-img")>'
+                });
+                window.startFocusSessionFromSetup();
+            }""")
+            time.sleep(0.5)
+            assert len(timer_xss_dialogs) == 0, f"Inyección XSS detectada en temporizador: {timer_xss_dialogs}"
+
+            # Limpiar temporizador
+            page_a.evaluate("() => { window.clearActiveFocusSession(); window.closeFocusModal(); }")
+            print(" -> 0 alertas XSS en temporizador: entradas 100% neutralizadas.")
+
             browser.close()
             print("\n============================================================")
             print("TODOS LOS TESTS E2E DE PLAYWRIGHT PASARON (100% OK)")

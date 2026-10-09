@@ -2343,9 +2343,10 @@
     subjects = loadSubjects();
     topics = loadTopics();
 
-    // Restaurar si ya existe sesión activa
+    // Restaurar si ya existe sesión activa de esta misma pestaña
     const stored = loadActiveFocusSession();
-    if (stored && (stored.status === 'running' || stored.status === 'paused' || stored.status === 'break')) {
+    if (stored && (!stored.tabId || stored.tabId === TAB_ID) && (stored.status === 'running' || stored.status === 'paused' || stored.status === 'break')) {
+      stored.tabId = TAB_ID;
       activeFocusTimer = stored;
     }
 
@@ -2367,8 +2368,8 @@
       if (goalInput) goalInput.value = presetData.goal;
     }
 
-    renderFocusTimerUI();
     overlay.classList.add('open');
+    renderFocusTimerUI();
   }
 
   function closeFocusModal() {
@@ -2628,7 +2629,8 @@
     focusIntervalHandle = setInterval(() => {
       if (!activeFocusTimer) {
         const stored = loadActiveFocusSession();
-        if (stored && (stored.status === 'running' || stored.status === 'paused' || stored.status === 'break')) {
+        if (stored && (!stored.tabId || stored.tabId === TAB_ID) && (stored.status === 'running' || stored.status === 'paused' || stored.status === 'break')) {
+          stored.tabId = TAB_ID;
           activeFocusTimer = stored;
         }
       }
@@ -4295,7 +4297,10 @@ SIEMPRE devuelve un JSON válido.
       handleSaveManualTime,
       loadActiveFocusSession,
       saveActiveFocusSession,
-      clearActiveFocusSession
+      loadActiveFocusSession,
+      saveActiveFocusSession,
+      clearActiveFocusSession,
+      startFocusSessionFromSetup
     };
     window.syncWithBackend = syncWithBackend;
     window.renderDashboard = renderDashboard;
@@ -4324,6 +4329,7 @@ SIEMPRE devuelve un JSON válido.
     window.loadActiveFocusSession = loadActiveFocusSession;
     window.saveActiveFocusSession = saveActiveFocusSession;
     window.clearActiveFocusSession = clearActiveFocusSession;
+    window.startFocusSessionFromSetup = startFocusSessionFromSetup;
   }
 
   // ── Boot ──
