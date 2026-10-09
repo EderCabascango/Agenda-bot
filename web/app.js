@@ -3463,6 +3463,7 @@ ${note.next_step_text ? `##  Próximo paso\n${note.next_step_text}\n` : ''}
     }
     timer.tabId = TAB_ID;
     timer.last_heartbeat = Date.now();
+    activeFocusTimer = timer;
     safeStorageSet(ACTIVE_FOCUS_SESSION_KEY, timer);
     updateFocusUIBadges();
   }
@@ -3810,9 +3811,12 @@ ${note.next_step_text ? `##  Próximo paso\n${note.next_step_text}\n` : ''}
     if (saveNotes) {
       const learnedText = $('#summary-learned-text')?.value?.trim() || '';
       const questionsText = $('#summary-questions-text')?.value?.trim() || '';
+      const resourcesText = $('#summary-resources-text')?.value?.trim() || '';
       const nextStep = $('#summary-next-step')?.value?.trim() || '';
+      const comprehensionLevel = Number($('#summary-comprehension-level')?.value) || 3;
+      const focusLevel = Number($('#summary-focus-level')?.value) || 3;
 
-      if (learnedText || questionsText || nextStep) {
+      if (learnedText || questionsText || resourcesText || nextStep) {
         learningNotes = loadLearningNotes();
         const noteRecord = {
           id: uid(),
@@ -3822,8 +3826,10 @@ ${note.next_step_text ? `##  Próximo paso\n${note.next_step_text}\n` : ''}
           topic_ids: record.topic_ids || [],
           learned_text: learnedText,
           questions_text: questionsText,
-          resources_text: '',
+          resources_text: resourcesText,
           next_step_text: nextStep,
+          comprehension_level: comprehensionLevel,
+          focus_level: focusLevel,
           version: 1,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
