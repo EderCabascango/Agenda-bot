@@ -1133,51 +1133,155 @@ def test_parameterized_create_if_absent_returns_existing_in_changes(coll_name):
 
 def test_timer_core_session_record_contract_validation():
     """(Fase C1) Verifica que las sesiones generadas por TimerCore cumplen estrictamente el esquema del servidor."""
-    session_payload = {
-        "id": "foc-contract-test-1",
-        "subject_id": "sub-test-contract",
-        "activity_id": None,
+    # 1. Sesión normal con pausas
+    normal_payload = {
+        "id": "foc-contract-normal",
+        "subject_id": "sub-contract-1",
         "topic_ids": ["top-contract-1", "top-contract-2"],
+        "activity_id": None,
         "method": "pomodoro",
-        "goal": "Prueba de contrato con validación de backend",
+        "goal": "Prueba de contrato Pomodoro",
         "started_at": "2026-10-10T10:00:00.000000Z",
         "ended_at": "2026-10-10T10:30:00.000000Z",
         "focus_intervals": [
-            ["2026-10-10T10:00:00.000000Z", "2026-10-10T10:25:00.000000Z"]
+            ["2026-10-10T10:00:00.000000Z", "2026-10-10T10:15:00.000000Z"],
+            ["2026-10-10T10:18:00.000000Z", "2026-10-10T10:30:00.000000Z"]
         ],
-        "effective_seconds": 1500,
-        "break_seconds": 300,
+        "effective_seconds": 1620,
+        "break_seconds": 180,
         "cycles_completed": 1,
         "distractions_count": 2,
         "status": "completed",
         "source": "timer",
         "iana_timezone": "America/Bogota",
-        "version": 1,
         "op": "create_if_absent",
         "created_at": "2026-10-10T10:00:00.000000Z",
         "updated_at": "2026-10-10T10:30:00.000000Z",
         "deleted_at": None
     }
 
-    # 1. Validar directamente contra el esquema del backend
-    sanitized, err, unknowns = db.validate_and_sanitize_item("focus_sessions", session_payload)
-    assert err is None, f"El payload de TimerCore falló la validación del esquema: {err}"
-    assert sanitized is not None
+    # 2. Cruce de medianoche
+    midnight_payload = {
+        "id": "foc-contract-midnight",
+        "subject_id": "sub-contract-1",
+        "topic_ids": [],
+        "method": "flowtime",
+        "goal": "Estudio nocturno cruzando medianoche",
+        "started_at": "2026-10-09T23:45:00.000000Z",
+        "ended_at": "2026-10-10T00:30:00.000000Z",
+        "focus_intervals": [
+            ["2026-10-09T23:45:00.000000Z", "2026-10-10T00:30:00.000000Z"]
+        ],
+        "effective_seconds": 2700,
+        "break_seconds": 0,
+        "cycles_completed": 1,
+        "distractions_count": 0,
+        "status": "completed",
+        "source": "timer",
+        "iana_timezone": "Europe/Madrid",
+        "op": "create_if_absent",
+        "created_at": "2026-10-09T23:45:00.000000Z",
+        "updated_at": "2026-10-10T00:30:00.000000Z",
+        "deleted_at": None
+    }
 
-    # 2. Sincronizar exitosamente con el servidor
-    user = "user_timer_contract"
-    res = db.sync_collection(user, "focus_sessions", changes=[session_payload])
-    assert res["applied"] == 1
+    # 3. Sesión manual
+    manual_payload = {
+        "id": "foc-contract-manual",
+        "subject_id": "sub-contract-1",
+        "topic_ids": ["top-contract-1"],
+        "method": "manual",
+        "goal": "Registro manual de lectura",
+        "started_at": "2026-10-10T14:00:00.000000Z",
+        "ended_at": "2026-10-10T15:30:00.000000Z",
+        "focus_intervals": [
+            ["2026-10-10T14:00:00.000000Z", "2026-10-10T15:30:00.000000Z"]
+        ],
+        "effective_seconds": 5400,
+        "break_seconds": 0,
+        "cycles_completed": 1,
+        "distractions_count": 0,
+        "status": "completed",
+        "source": "manual",
+        "iana_timezone": "UTC",
+        "op": "create_if_absent",
+        "created_at": "2026-10-10T15:30:00.000000Z",
+        "updated_at": "2026-10-10T15:30:00.000000Z",
+        "deleted_at": None
+    }
+
+    # 4. Sesión abandonada
+    abandoned_payload = {
+        "id": "foc-contract-abandoned",
+        "subject_id": None,
+        "topic_ids": [],
+        "method": "pomodoro",
+        "goal": "Sesión interrumpida",
+        "started_at": "2026-10-10T16:00:00.000000Z",
+        "ended_at": "2026-10-10T16:10:00.000000Z",
+        "focus_intervals": [
+            ["2026-10-10T16:00:00.000000Z", "2026-10-10T16:10:00.000000Z"]
+        ],
+        "effective_seconds": 600,
+        "break_seconds": 0,
+        "cycles_completed": 0,
+        "distractions_count": 1,
+        "status": "abandoned",
+        "source": "timer",
+        "iana_timezone": "UTC",
+        "op": "create_if_absent",
+        "created_at": "2026-10-10T16:00:00.000000Z",
+        "updated_at": "2026-10-10T16:10:00.000000Z",
+        "deleted_at": None
+    }
+
+    # 5. Sesión corta (<60s)
+    short_payload = {
+        "id": "foc-contract-short",
+        "subject_id": None,
+        "topic_ids": [],
+        "method": "stopwatch",
+        "goal": "Micro-sesión rápida",
+        "started_at": "2026-10-10T17:00:00.000000Z",
+        "ended_at": "2026-10-10T17:00:45.000000Z",
+        "focus_intervals": [
+            ["2026-10-10T17:00:00.000000Z", "2026-10-10T17:00:45.000000Z"]
+        ],
+        "effective_seconds": 45,
+        "break_seconds": 0,
+        "cycles_completed": 0,
+        "distractions_count": 0,
+        "status": "completed",
+        "source": "timer",
+        "iana_timezone": "UTC",
+        "op": "create_if_absent",
+        "created_at": "2026-10-10T17:00:45.000000Z",
+        "updated_at": "2026-10-10T17:00:45.000000Z",
+        "deleted_at": None
+    }
+
+    test_payloads = [normal_payload, midnight_payload, manual_payload, abandoned_payload, short_payload]
+
+    # Validar y sincronizar todas las sesiones
+    user = "user_timer_contract_all"
+    for p in test_payloads:
+        sanitized, err, unknowns = db.validate_and_sanitize_item("focus_sessions", p)
+        assert err is None, f"Payload {p['id']} falló validación: {err}"
+        assert len(unknowns) == 0, f"Payload {p['id']} contiene unknown_fields: {unknowns}"
+        assert sanitized is not None
+
+    res = db.sync_collection(user, "focus_sessions", changes=test_payloads)
+    assert res["applied"] == len(test_payloads)
     assert len(res["conflicts"]) == 0
     assert len(res["rejected"]) == 0
 
-    # 3. Recuperar y verificar deserialización de focus_intervals y topic_ids
-    saved = db.get_collection_item(user, "focus_sessions", "foc-contract-test-1")
+    # Recuperar y verificar deserialización de focus_intervals y topic_ids
+    saved = db.get_collection_item(user, "focus_sessions", "foc-contract-normal")
     assert saved is not None
-    assert saved["effective_seconds"] == 1500
-    assert saved["break_seconds"] == 300
+    assert saved["effective_seconds"] == 1620
+    assert saved["break_seconds"] == 180
     assert saved["source"] == "timer"
-    assert len(saved["focus_intervals"]) == 1
+    assert len(saved["focus_intervals"]) == 2
     assert saved["focus_intervals"][0][0] == "2026-10-10T10:00:00.000000Z"
     assert saved["topic_ids"] == ["top-contract-1", "top-contract-2"]
 

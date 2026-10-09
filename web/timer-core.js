@@ -14,7 +14,23 @@
   'use strict';
 
   // ============================================================================
-  // 1. CONFIGURACIONES DE MÉTODOS DE ENFOQUE
+  // 1. CONSTANTES NOMBRADAS Y POLÍTICA DE HUECOS (GAPS)
+  // ============================================================================
+
+  // Latido vivo: brecha <= 2 minutos (las fases de método fijo avanzan solas con aviso)
+  const GAP_ALIVE_MAX_MS = 2 * 60 * 1000;          // 120 segundos
+
+  // Brecha de espera en métodos fijos: > 2 minutos -> pasa a 'waiting' (fase completada, esperando usuario)
+  const GAP_WAITING_THRESHOLD_MS = 2 * 60 * 1000;  // 120 segundos
+
+  // Ausencia en métodos abiertos (Flowtime, Cronómetro, Deep Work, Countdown): > 30 minutos -> pide confirmación de hora real
+  const GAP_FLOWTIME_STALE_MS = 30 * 60 * 1000;    // 1800 segundos
+
+  // Umbral mínimo de sesión para completar sin preguntar descarte: 60 segundos
+  const MIN_SESSION_SAVE_SECONDS = 60;
+
+  // ============================================================================
+  // 2. CONFIGURACIONES DE MÉTODOS DE ENFOQUE
   // ============================================================================
 
   const METHODS_CONFIG = {
@@ -24,7 +40,8 @@
       breakDurationSec: 5 * 60,
       longBreakDurationSec: 15 * 60,
       cyclesBeforeLongBreak: 4,
-      isCountdown: true
+      isCountdown: true,
+      allowPause: true
     },
     pomodoro_50: {
       name: 'Pomodoro Extendido (50/10)',
@@ -32,7 +49,8 @@
       breakDurationSec: 10 * 60,
       longBreakDurationSec: 20 * 60,
       cyclesBeforeLongBreak: 3,
-      isCountdown: true
+      isCountdown: true,
+      allowPause: true
     },
     '52_17': {
       name: 'Regla 52/17 (DeskTime)',
@@ -40,7 +58,8 @@
       breakDurationSec: 17 * 60,
       longBreakDurationSec: 17 * 60,
       cyclesBeforeLongBreak: 3,
-      isCountdown: true
+      isCountdown: true,
+      allowPause: true
     },
     ultradian: {
       name: 'Ritmo Ultradiano (90/20)',
@@ -48,7 +67,8 @@
       breakDurationSec: 20 * 60,
       longBreakDurationSec: 30 * 60,
       cyclesBeforeLongBreak: 2,
-      isCountdown: true
+      isCountdown: true,
+      allowPause: true
     },
     flowtime: {
       name: 'Flowtime (Flujo Libre)',
@@ -56,7 +76,8 @@
       breakDurationSec: 0,
       longBreakDurationSec: 0,
       cyclesBeforeLongBreak: 1,
-      isCountdown: false
+      isCountdown: false,
+      allowPause: true
     },
     deep_work: {
       name: 'Deep Work (Bloque Profundo)',
@@ -64,7 +85,8 @@
       breakDurationSec: 0,
       longBreakDurationSec: 0,
       cyclesBeforeLongBreak: 1,
-      isCountdown: true
+      isCountdown: true,
+      allowPause: false // Deep Work no permite pausas
     },
     custom: {
       name: 'Cuenta Regresiva Personalizada',
@@ -72,7 +94,8 @@
       breakDurationSec: 5 * 60,
       longBreakDurationSec: 15 * 60,
       cyclesBeforeLongBreak: 4,
-      isCountdown: true
+      isCountdown: true,
+      allowPause: true
     },
     stopwatch: {
       name: 'Cronómetro Libre',
@@ -80,7 +103,8 @@
       breakDurationSec: 0,
       longBreakDurationSec: 0,
       cyclesBeforeLongBreak: 1,
-      isCountdown: false
+      isCountdown: false,
+      allowPause: true
     }
   };
 
@@ -96,7 +120,7 @@
   }
 
   // ============================================================================
-  // 2. CREACIÓN Y REINICIO DE ESTADO DEL TEMPORIZADOR
+  // 3. CREACIÓN Y REINICIO DE ESTADO DEL TEMPORIZADOR
   // ============================================================================
 
   function createTimer(options = {}, nowFn = defaultNow) {
@@ -122,7 +146,8 @@
         breakDurationSec: baseConfig.breakDurationSec,
         longBreakDurationSec: baseConfig.longBreakDurationSec,
         cyclesBeforeLongBreak: baseConfig.cyclesBeforeLongBreak,
-        isCountdown: baseConfig.isCountdown
+        isCountdown: baseConfig.isCountdown,
+        allowPause: baseConfig.allowPause !== false
       },
       cycles_completed: 0,
       current_interval_start: null, // timestamp ms
@@ -134,13 +159,13 @@
       last_heartbeat: null,         // timestamp ms
       started_at: null,             // ISO string del inicio inicial
       ended_at: null,               // ISO string del final
-      waiting_reason: null,         // 'fixed_gap' | 'flowtime_gap'
+      waiting_reason: null,         // 'fixed_gap' | 'flowtime_gap' | 'phase_finished'
       gap_detected_ms: 0
     };
   }
 
   // ============================================================================
-  // 3. TRANSICIONES DE ESTADO Y CONTROL DE TIEMPO
+  // 4. TRANSICIONES DE ESTADO Y CONTROL DE TIEMPO
   // ============================================================================
 
   function start(timer, nowFn = defaultNow) {
@@ -164,6 +189,11 @@
 
   function pause(timer, nowFn = defaultNow) {
     if (!timer) return timer;
+    // Deep Work no permite pausas
+    if (timer.config && timer.config.allowPause === false) {
+      return timer;
+    }
+
     const now = nowFn();
 
     if (timer.status === 'running' && timer.current_interval_start) {
@@ -265,6 +295,10 @@
     return timer;
   }
 
+  function skipBreak(timer, nowFn = defaultNow) {
+    return endBreak(timer, nowFn);
+  }
+
   function logDistraction(timer, note = '', nowFn = defaultNow) {
     if (!timer) return timer;
     const now = nowFn();
@@ -276,44 +310,91 @@
     return timer;
   }
 
-  // ============================================================================
-  // 4. HEARTBEAT Y POLÍTICA DE GAPS (AUSENCIAS)
-  // ============================================================================
+  function addDistraction(timer, note = '', nowFn = defaultNow) {
+    return logDistraction(timer, note, nowFn);
+  }
 
-  const GAP_THRESHOLD_FIXED_MS = 2 * 60 * 1000;    // >2 min de ausencia en fases fijas
-  const GAP_THRESHOLD_FLOWTIME_MS = 30 * 60 * 1000; // >30 min de ausencia en Flowtime
+  // ============================================================================
+  // 5. HEARTBEAT Y POLÍTICA DE GAPS (AUSENCIAS) CON TICK REACTIVO
+  // ============================================================================
 
   function tick(timer, nowFn = defaultNow) {
-    if (!timer) return timer;
+    if (!timer) return { state: timer, events: [] };
     const now = nowFn();
+    const events = [];
 
     if (timer.status !== 'running' && timer.status !== 'break') {
       timer.last_heartbeat = now;
-      return timer;
+      return { state: timer, events };
     }
 
     const last = timer.last_heartbeat || now;
     const diff = now - last;
 
-    // Detección de ausencia / suspensión
-    if (timer.method === 'flowtime' || timer.method === 'stopwatch') {
-      if (diff > GAP_THRESHOLD_FLOWTIME_MS) {
+    // Métodos abiertos (Flowtime, Cronómetro, Deep Work)
+    if (timer.method === 'flowtime' || timer.method === 'stopwatch' || !timer.config.isCountdown) {
+      if (diff > GAP_FLOWTIME_STALE_MS) {
         timer.status = 'waiting';
         timer.waiting_reason = 'flowtime_gap';
         timer.gap_detected_ms = diff;
-        return timer;
+        events.push({ type: 'gap_detected', reason: 'flowtime_gap', gap_ms: diff });
+        return { state: timer, events };
       }
     } else {
-      if (diff > GAP_THRESHOLD_FIXED_MS) {
-        timer.status = 'waiting';
-        timer.waiting_reason = 'fixed_gap';
-        timer.gap_detected_ms = diff;
-        return timer;
+      // Métodos fijos de cuenta regresiva (Pomodoro, 52/17, Ultradiano, Custom)
+      const targetSec = timer.phase === 'focus'
+        ? timer.config.focusDurationSec
+        : (timer.phase === 'long_break' ? timer.config.longBreakDurationSec : timer.config.breakDurationSec);
+
+      const elapsedMs = timer.status === 'running'
+        ? (now - (timer.current_interval_start || now))
+        : (now - (timer.current_break_start || now));
+      const elapsedSec = Math.floor(elapsedMs / 1000);
+
+      // Si el tiempo de la fase ya expiró
+      if (targetSec > 0 && elapsedSec >= targetSec) {
+        if (diff > GAP_WAITING_THRESHOLD_MS) {
+          // Guardar estado previo antes de mutar a waiting
+          const wasRunning = timer.status === 'running';
+          const wasBreak = timer.status === 'break';
+
+          timer.status = 'waiting';
+          timer.waiting_reason = 'fixed_gap';
+          timer.gap_detected_ms = diff;
+
+          // Limitar tramo a la duración de la fase
+          if (wasRunning && timer.current_interval_start) {
+            const startMs = timer.current_interval_start;
+            const endMs = startMs + (targetSec * 1000);
+            timer.focus_intervals.push([new Date(startMs).toISOString(), new Date(endMs).toISOString()]);
+            timer.effective_seconds += targetSec;
+            timer.current_interval_start = null;
+            timer.cycles_completed += 1;
+          } else if (wasBreak && timer.current_break_start) {
+            const bStartMs = timer.current_break_start;
+            const bEndMs = bStartMs + (targetSec * 1000);
+            timer.break_seconds += targetSec;
+            timer.current_break_start = null;
+          }
+
+          events.push({ type: 'phase_finished_waiting', phase: timer.phase, targetSec });
+          return { state: timer, events };
+        } else {
+          // Latido vivo (<= 2 min): completar fase y avanzar de forma limpia
+          if (timer.status === 'running') {
+            events.push({ type: 'phase_completed', phase: timer.phase });
+            startBreak(timer, false, nowFn);
+          } else {
+            events.push({ type: 'break_completed', phase: timer.phase });
+            endBreak(timer, nowFn);
+          }
+          return { state: timer, events };
+        }
       }
     }
 
     timer.last_heartbeat = now;
-    return timer;
+    return { state: timer, events };
   }
 
   function resolveGap(timer, keepElapsedTime = true, customEndIso = null, nowFn = defaultNow) {
@@ -321,13 +402,13 @@
     const now = nowFn();
 
     if (keepElapsedTime) {
-      // Usuario continuó estudiando: actualiza heartbeat a ahora
+      // Usuario confirma que estuvo presente todo el tiempo
       timer.last_heartbeat = now;
       timer.status = timer.phase === 'focus' ? 'running' : 'break';
       timer.waiting_reason = null;
       timer.gap_detected_ms = 0;
     } else {
-      // Usuario se detuvo en el último heartbeat o en hora manual
+      // Usuario se detuvo en el último latido o en hora manual
       let cutoffMs = timer.last_heartbeat || (now - timer.gap_detected_ms);
       if (customEndIso) {
         const parsed = new Date(customEndIso).getTime();
@@ -354,7 +435,74 @@
   }
 
   // ============================================================================
-  // 5. CÁLCULO DE TIEMPO TRANSCURRIDO Y RESTANTE
+  // 6. FINALIZACIÓN Y ABANDONO
+  // ============================================================================
+
+  function finish(timer, nowFn = defaultNow) {
+    if (!timer) return { action: 'none', timer: null };
+    const now = nowFn();
+
+    // Calcular segundos efectivos totales acumulados + intervalo activo
+    let activeSec = 0;
+    if (timer.status === 'running' && timer.current_interval_start) {
+      activeSec = Math.floor((now - timer.current_interval_start) / 1000);
+    }
+    const totalEffective = (timer.effective_seconds || 0) + activeSec;
+
+    if (totalEffective < MIN_SESSION_SAVE_SECONDS) {
+      return {
+        action: 'ask_discard',
+        totalEffectiveSeconds: totalEffective,
+        timer: timer
+      };
+    }
+
+    // Cerrar intervalo en curso
+    if (timer.status === 'running' && timer.current_interval_start) {
+      const startMs = timer.current_interval_start;
+      const endMs = Math.max(startMs, now);
+      timer.focus_intervals.push([new Date(startMs).toISOString(), new Date(endMs).toISOString()]);
+      timer.effective_seconds += Math.floor((endMs - startMs) / 1000);
+      timer.current_interval_start = null;
+      if (timer.phase === 'focus') timer.cycles_completed += 1;
+    } else if (timer.status === 'break' && timer.current_break_start) {
+      const bStartMs = timer.current_break_start;
+      const bEndMs = Math.max(bStartMs, now);
+      timer.break_seconds += Math.floor((bEndMs - bStartMs) / 1000);
+      timer.current_break_start = null;
+    }
+
+    timer.status = 'completed';
+    timer.ended_at = new Date(now).toISOString();
+    timer.last_heartbeat = now;
+
+    return {
+      action: 'completed',
+      totalEffectiveSeconds: timer.effective_seconds,
+      timer: timer
+    };
+  }
+
+  function abandon(timer, nowFn = defaultNow) {
+    if (!timer) return timer;
+    const now = nowFn();
+
+    if (timer.status === 'running' && timer.current_interval_start) {
+      const startMs = timer.current_interval_start;
+      const endMs = Math.max(startMs, now);
+      timer.focus_intervals.push([new Date(startMs).toISOString(), new Date(endMs).toISOString()]);
+      timer.effective_seconds += Math.floor((endMs - startMs) / 1000);
+      timer.current_interval_start = null;
+    }
+
+    timer.status = 'abandoned';
+    timer.ended_at = new Date(now).toISOString();
+    timer.last_heartbeat = now;
+    return timer;
+  }
+
+  // ============================================================================
+  // 7. CÁLCULO DE TIEMPO TRANSCURRIDO Y RESTANTE
   // ============================================================================
 
   function getElapsedAndRemaining(timer, nowFn = defaultNow) {
@@ -405,7 +553,7 @@
   }
 
   // ============================================================================
-  // 6. GENERACIÓN DEL REGISTRO DE SESIÓN PARA SINCRONIZACIÓN (focus_sessions)
+  // 8. GENERACIÓN DEL REGISTRO DE SESIÓN PARA SINCRONIZACIÓN (focus_sessions)
   // ============================================================================
 
   function buildSessionRecord(timer, meta = {}, nowFn = defaultNow) {
@@ -447,6 +595,7 @@
     const topicIds = meta.topic_ids !== undefined ? meta.topic_ids : (timer.topic_ids || []);
     const goal = meta.goal !== undefined ? meta.goal : (timer.goal || '');
 
+    // Construcción de registro conforme al esquema del servidor (sin campo version hardcodeado)
     const record = {
       id: timer.id || generateUUID(),
       subject_id: subjectId,
@@ -464,7 +613,6 @@
       status: (meta.status === 'abandoned' || timer.status === 'abandoned') ? 'abandoned' : 'completed',
       source: meta.source || 'timer',
       iana_timezone: timeZone,
-      version: 1,
       op: meta.op || 'create_if_absent',
       created_at: startedAt,
       updated_at: nowIso,
@@ -474,7 +622,66 @@
     return record;
   }
 
+  function buildManualSession(options = {}, nowFn = defaultNow) {
+    const now = nowFn();
+    const nowIso = new Date(now).toISOString();
+
+    const durationMinutes = Number(options.durationMinutes) || 0;
+    const effectiveSec = Math.max(0, Math.round(durationMinutes * 60));
+
+    let startedAt = options.started_at;
+    let endedAt = options.ended_at;
+
+    if (!startedAt) {
+      if (endedAt) {
+        const endMs = new Date(endedAt).getTime();
+        startedAt = new Date(endMs - (effectiveSec * 1000)).toISOString();
+      } else {
+        startedAt = new Date(now - (effectiveSec * 1000)).toISOString();
+        endedAt = nowIso;
+      }
+    }
+    if (!endedAt) {
+      const startMs = new Date(startedAt).getTime();
+      endedAt = new Date(startMs + (effectiveSec * 1000)).toISOString();
+    }
+
+    let timeZone = 'UTC';
+    try {
+      if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+        timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      }
+    } catch (e) {}
+
+    return {
+      id: options.id || generateUUID(),
+      subject_id: options.subject_id || null,
+      activity_id: options.activity_id || null,
+      topic_ids: Array.isArray(options.topic_ids) ? options.topic_ids : [],
+      method: options.method || 'manual',
+      goal: (options.goal || '').slice(0, 500),
+      started_at: startedAt,
+      ended_at: endedAt,
+      focus_intervals: [[startedAt, endedAt]],
+      effective_seconds: effectiveSec,
+      break_seconds: 0,
+      cycles_completed: 1,
+      distractions_count: 0,
+      status: 'completed',
+      source: 'manual',
+      iana_timezone: timeZone,
+      op: 'create_if_absent',
+      created_at: nowIso,
+      updated_at: nowIso,
+      deleted_at: null
+    };
+  }
+
   return {
+    GAP_ALIVE_MAX_MS,
+    GAP_WAITING_THRESHOLD_MS,
+    GAP_FLOWTIME_STALE_MS,
+    MIN_SESSION_SAVE_SECONDS,
     METHODS_CONFIG,
     createTimer,
     start,
@@ -482,11 +689,16 @@
     resume,
     startBreak,
     endBreak,
+    skipBreak,
     logDistraction,
+    addDistraction,
     tick,
     resolveGap,
+    finish,
+    abandon,
     getElapsedAndRemaining,
     calculateFlowtimeBreak,
-    buildSessionRecord
+    buildSessionRecord,
+    buildManualSession
   };
 });
