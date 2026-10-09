@@ -1288,10 +1288,25 @@
           const oldest = keys.shift();
           localStorage.removeItem(oldest);
         }
-        localStorage.setItem('diary_backup_pre_import_' + Date.now(), JSON.stringify(currentStores, null, 2));
+        const jsonPayload = JSON.stringify(currentStores, null, 2);
+        try {
+          localStorage.setItem('diary_backup_pre_import_' + Date.now(), jsonPayload);
+        } catch (setErr) {
+          if (setErr.name === 'QuotaExceededError' || setErr.code === 22) {
+            // Si hay un snapshot anterior, purgarlo para garantizar espacio al nuevo
+            if (keys.length > 0) {
+              localStorage.removeItem(keys.shift());
+              localStorage.setItem('diary_backup_pre_import_' + Date.now(), jsonPayload);
+            } else {
+              showToast('Almacenamiento local lleno: no se pudo guardar el snapshot pre-importación', 'warning', 'var(--accent-amber)');
+            }
+          } else {
+            throw setErr;
+          }
+        }
       } catch (err) {
         if (err.name === 'QuotaExceededError' || err.code === 22) {
-          showToast('Almacenamiento lleno para snapshots automáticos', 'warning', 'var(--accent-amber)');
+          showToast('Almacenamiento local lleno: no se pudo guardar el snapshot pre-importación', 'warning', 'var(--accent-amber)');
         } else {
           console.warn('Error guardando snapshot pre-import:', err);
         }

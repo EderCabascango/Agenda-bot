@@ -514,14 +514,61 @@ def test_playwright_e2e_full_sync():
             assert multi_b["hasTop"] is True, "Contexto B debió recibir el tema top-e2e-1"
             assert multi_b["hasFoc"] is True, "Contexto B debió recibir la sesión foc-e2e-1"
             assert multi_b["hasNot"] is True, "Contexto B debió recibir la nota not-e2e-1"
-            print(" -> Multi-colección inicial sincronizada exitosamente entre A y B.")
+            print(" -> Multi-colección inicial sincronizada exitosamente entre A y B (Sesión de A visible en B).")
 
-            # 8.3 Archivar materia en Contexto A y propagar a Contexto B
+            # 8.3 Edición concurrente de la misma materia en A y B con resolución de conflicto por UI
+            print(" -> Probando edición concurrente de la misma materia en A y B...")
+            page_a.evaluate("""async () => {
+                let subs = JSON.parse(localStorage.getItem('diary_subjects') || '[]');
+                let sub = subs.find(s => s.id === 'sub-e2e-1');
+                sub.name = 'Arquitectura de Software (Editada por A)';
+                sub.base_version = sub.version || 1;
+                let queue = JSON.parse(localStorage.getItem('diary_sync_queue') || '[]');
+                queue.push({ ...sub, collection: 'subjects' });
+                localStorage.setItem('diary_sync_queue', JSON.stringify(queue));
+                localStorage.setItem('diary_subjects', JSON.stringify(subs));
+                await window.syncWithBackend();
+            }""")
+
+            # B intenta enviar su propia edición con base_version desactualizada (conflicto)
+            page_b.evaluate("""async () => {
+                let subs = JSON.parse(localStorage.getItem('diary_subjects') || '[]');
+                let sub = subs.find(s => s.id === 'sub-e2e-1');
+                sub.name = 'Arquitectura de Software (Editada por B)';
+                sub.base_version = 1;
+                let queue = JSON.parse(localStorage.getItem('diary_sync_queue') || '[]');
+                queue.push({ ...sub, collection: 'subjects' });
+                localStorage.setItem('diary_sync_queue', JSON.stringify(queue));
+                localStorage.setItem('diary_subjects', JSON.stringify(subs));
+                await window.syncWithBackend();
+            }""")
+
+            # Verificar que B detectó conflicto en 'sub-e2e-1'
+            conflicts_b = page_b.evaluate("() => JSON.parse(localStorage.getItem('diary_conflicts') || '{}')")
+            assert 'sub-e2e-1' in conflicts_b, "B debió registrar conflicto en la materia 'sub-e2e-1'"
+
+            # B abre modal de conflictos y resuelve haciendo rebase
+            page_b.click("#btn-conflicts")
+            page_b.wait_for_selector("#conflicts-overlay.open", timeout=3000)
+            page_b.click("[data-resolve='rebase'][data-id='sub-e2e-1']")
+            time.sleep(0.5)
+
+            # A sincroniza y recibe la versión resuelta de B
+            page_a.evaluate("async () => { await window.syncWithBackend(); }")
+            name_in_a = page_a.evaluate("""() => {
+                const subs = JSON.parse(localStorage.getItem('diary_subjects') || '[]');
+                const s = subs.find(x => x.id === 'sub-e2e-1');
+                return s ? s.name : null;
+            }""")
+            assert name_in_a == 'Arquitectura de Software (Editada por B)', f"A debió recibir la materia rebasada, obtenido: {name_in_a}"
+            print(" -> Conflicto de materia resuelto exitosamente vía UI y propagado a A.")
+
+            # 8.4 Archivar materia en Contexto A y propagar a Contexto B
             page_a.evaluate("""async () => {
                 let subs = JSON.parse(localStorage.getItem('diary_subjects') || '[]');
                 let sub = subs.find(s => s.id === 'sub-e2e-1');
                 sub.archived = true;
-                sub.base_version = sub.version || 1;
+                sub.base_version = sub.version || 2;
                 let queue = JSON.parse(localStorage.getItem('diary_sync_queue') || '[]');
                 queue.push({ ...sub, collection: 'subjects' });
                 localStorage.setItem('diary_sync_queue', JSON.stringify(queue));
@@ -537,6 +584,63 @@ def test_playwright_e2e_full_sync():
             }""")
             assert archived_in_b is True, "El estado archivado (archived=1) debió propagarse a Contexto B"
             print(" -> Materia archivada (archived=1) propagada exitosamente a Contexto B.")
+
+            # 8.5 Cambios offline en varias colecciones que suben en una sola transacción al reconectar
+            print(" -> Probando lote offline multi-colección y subida atómica al reconectar...")
+            page_a.route("**/sync*", offline_handler)
+
+            page_a.evaluate("""async () => {
+                const subOff = { id: 'sub-off-1', name: 'Materia Offline' };
+                const focOff = { id: 'foc-off-1', subject_id: 'sub-off-1', source: 'manual', effective_seconds: 2400 };
+                const notOff = { id: 'not-off-1', subject_id: 'sub-off-1', learned_text: 'Nota tomada offline' };
+
+                let queue = JSON.parse(localStorage.getItem('diary_sync_queue') || '[]');
+                queue.push(
+                    { ...subOff, collection: 'subjects' },
+                    { ...focOff, collection: 'focus_sessions' },
+                    { ...notOff, collection: 'learning_notes' }
+                );
+                localStorage.setItem('diary_sync_queue', JSON.stringify(queue));
+
+                let subs = JSON.parse(localStorage.getItem('diary_subjects') || '[]');
+                subs.push(subOff);
+                localStorage.setItem('diary_subjects', JSON.stringify(subs));
+
+                let focs = JSON.parse(localStorage.getItem('diary_focus_sessions') || '[]');
+                focs.push(focOff);
+                localStorage.setItem('diary_focus_sessions', JSON.stringify(focs));
+
+                let nots = JSON.parse(localStorage.getItem('diary_learning_notes') || '[]');
+                nots.push(notOff);
+                localStorage.setItem('diary_learning_notes', JSON.stringify(nots));
+
+                try { await window.syncWithBackend(); } catch(e) {}
+            }""")
+
+            queue_multi_len = page_a.evaluate("() => JSON.parse(localStorage.getItem('diary_sync_queue') || '[]').length")
+            assert queue_multi_len >= 3, f"La cola multi-colección debió retenerse offline, longitud: {queue_multi_len}"
+
+            # Restaurar red y sincronizar A
+            page_a.unroute("**/sync*", offline_handler)
+            sync_ok_multi = page_a.evaluate("async () => { return await window.syncWithBackend(); }")
+            assert sync_ok_multi, "Sincronización multi-colección debió ser exitosa al reconectar"
+
+            # Contexto B sincroniza y verifica recepción de las 3 entidades offline
+            page_b.evaluate("async () => { await window.syncWithBackend(); }")
+            b_received_offline = page_b.evaluate("""() => {
+                const subs = JSON.parse(localStorage.getItem('diary_subjects') || '[]');
+                const focs = JSON.parse(localStorage.getItem('diary_focus_sessions') || '[]');
+                const nots = JSON.parse(localStorage.getItem('diary_learning_notes') || '[]');
+                return {
+                    hasSub: subs.some(s => s.id === 'sub-off-1'),
+                    hasFoc: focs.some(f => f.id === 'foc-off-1'),
+                    hasNot: nots.some(n => n.id === 'not-off-1')
+                };
+            }""")
+            assert b_received_offline["hasSub"] is True
+            assert b_received_offline["hasFoc"] is True
+            assert b_received_offline["hasNot"] is True
+            print(" -> Lote multi-colección offline subido y sincronizado atómicamente a B.")
 
             browser.close()
             print("\n============================================================")

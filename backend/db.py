@@ -450,6 +450,24 @@ def validate_and_sanitize_item(collection_name: str, item: dict) -> tuple[dict |
             if abs(total_interval_seconds - eff_sec) > 1:
                 return None, f"effective_seconds ({eff_sec}s) no coincide con la suma de los tramos ({total_interval_seconds}s) para source='{src}'", []
 
+        tz = sanitized.get("iana_timezone")
+        if tz:
+            try:
+                import zoneinfo
+                if tz not in zoneinfo.available_timezones() and tz != "UTC":
+                    return None, f"Zona horaria IANA inválida: '{tz}'", []
+            except Exception:
+                pass
+
+        topic_ids = sanitized.get("topic_ids")
+        if topic_ids and isinstance(topic_ids, list) and len(topic_ids) > 50:
+            return None, "El campo 'topic_ids' no puede contener más de 50 temas", []
+
+    if collection_name == "learning_notes":
+        topic_ids = sanitized.get("topic_ids")
+        if topic_ids and isinstance(topic_ids, list) and len(topic_ids) > 50:
+            return None, "El campo 'topic_ids' no puede contener más de 50 temas", []
+
     return sanitized, None, unknown_fields
 
 

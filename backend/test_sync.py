@@ -887,3 +887,141 @@ def test_multi_collection_sync_endpoint_full():
         assert len(col_res["rejected"]) == 0
 
 
+@pytest.mark.parametrize("coll_name", ["activities", "subjects", "topics", "focus_sessions", "learning_notes"])
+def test_parameterized_collection_conflict_stale_base_version(coll_name):
+    """(Fase A2.1) Valida detección de conflictos por base_version obsoleta o faltante en las 5 colecciones."""
+    user = f"user_conflict_{coll_name}"
+    item = dict(SAMPLE_ITEMS_FOR_COLLECTIONS[coll_name])
+
+    # 1. Crear item en servidor -> versión 1
+    res1 = db.sync_collection(user, coll_name, changes=[item])
+    assert res1["applied"] == 1
+
+    # 2. Modificar en servidor -> versión 2
+    item_v2 = dict(item)
+    item_v2["base_version"] = 1
+    res2 = db.sync_collection(user, coll_name, changes=[item_v2])
+    assert res2["applied"] == 1
+
+    # 3. Cliente intenta enviar cambio con base_version=1 (obsoleta) -> Conflicto
+    stale_item = dict(item)
+    stale_item["base_version"] = 1
+    res_stale = db.sync_collection(user, coll_name, changes=[stale_item])
+    assert res_stale["applied"] == 0
+    assert len(res_stale["conflicts"]) == 1
+    assert res_stale["conflicts"][0]["reason"] == "version_stale"
+    assert res_stale["conflicts"][0]["server_version"] == 2
+
+
+@pytest.mark.parametrize("coll_name", ["activities", "subjects", "topics", "focus_sessions", "learning_notes"])
+def test_parameterized_collection_resync_required_with_pending(coll_name):
+    """(Fase A2.1) Valida comportamiento ante resync_required=true en las 5 colecciones."""
+    user = f"user_resync_{coll_name}"
+    item = dict(SAMPLE_ITEMS_FOR_COLLECTIONS[coll_name])
+
+    # Crear item
+    db.sync_collection(user, coll_name, changes=[item])
+
+    # Pull con cursor muy antiguo (ej. año 2020) que excede el tiempo de purge -> resync_required=True
+    old_cursor = "2020-01-01T00:00:00.000000Z"
+    pull = db.sync_collection(user, coll_name, changes=[], since=old_cursor, purge_days=30)
+    assert pull["resync_required"] is True
+    assert len(pull["changes"]) == 1
+    assert pull["changes"][0]["id"] == item["id"]
+
+
+@pytest.mark.parametrize("coll_name", ["activities", "subjects", "topics", "focus_sessions", "learning_notes"])
+def test_parameterized_collection_unknown_fields_reported(coll_name):
+    """(Fase A2.1) Valida que campos desconocidos se reportan en unknown_fields sin rechazar el ítem válido."""
+    user = f"user_unknowns_{coll_name}"
+    item = dict(SAMPLE_ITEMS_FOR_COLLECTIONS[coll_name])
+    item["extra_custom_metadata"] = "campo_experimental_futuro"
+
+    res = db.sync_collection(user, coll_name, changes=[item])
+    assert res["applied"] == 1
+    assert len(res["unknown_fields"]) == 1
+    assert res["unknown_fields"][0]["id"] == item["id"]
+    assert "extra_custom_metadata" in res["unknown_fields"][0]["fields"]
+
+
+def test_parameterized_collection_enum_and_range_validations():
+    """(Fase A2.1) Valida enums, rangos y límites para cada colección."""
+    user = "user_enum_ranges"
+
+    # 1. subjects: weekly_goal_minutes < 0 -> rechazado
+    res_sub = db.sync_collection(user, "subjects", changes=[{"id": "sub_neg", "name": "Mat", "weekly_goal_minutes": -10}])
+    assert len(res_sub["rejected"]) == 1
+    assert "debe ser >= 0" in res_sub["rejected"][0]["reason"]
+
+    # 2. topics: status inválido -> rechazado
+    res_top = db.sync_collection(user, "topics", changes=[{"id": "top_bad_st", "name": "T1", "status": "invalid_status"}])
+    assert len(res_top["rejected"]) == 1
+    assert "Permitidos" in res_top["rejected"][0]["reason"]
+
+    # 3. learning_notes: comprehension_level fuera de 1-5 -> rechazado
+    res_not_bad = db.sync_collection(user, "learning_notes", changes=[{"id": "not_bad_lvl", "comprehension_level": 7}])
+    assert len(res_not_bad["rejected"]) == 1
+    assert "debe ser <= 5" in res_not_bad["rejected"][0]["reason"]
+
+    # 4. learning_notes: topic_ids > 50 -> rechazado
+    res_not_many_topics = db.sync_collection(user, "learning_notes", changes=[{"id": "not_many_top", "topic_ids": [f"t_{i}" for i in range(51)]}])
+    assert len(res_not_many_topics["rejected"]) == 1
+    assert "no puede contener más de 50 temas" in res_not_many_topics["rejected"][0]["reason"]
+
+    # 5. focus_sessions: status inválido -> rechazado
+    res_foc_st = db.sync_collection(user, "focus_sessions", changes=[{"id": "foc_bad_st", "status": "invalid_st"}])
+    assert len(res_foc_st["rejected"]) == 1
+    assert "Permitidos" in res_foc_st["rejected"][0]["reason"]
+
+    # 6. focus_sessions: source inválido -> rechazado
+    res_foc_src = db.sync_collection(user, "focus_sessions", changes=[{"id": "foc_bad_src", "source": "invalid_src"}])
+    assert len(res_foc_src["rejected"]) == 1
+    assert "Permitidos" in res_foc_src["rejected"][0]["reason"]
+
+    # 7. focus_sessions: iana_timezone inválida -> rechazado
+    res_foc_tz = db.sync_collection(user, "focus_sessions", changes=[{"id": "foc_bad_tz", "iana_timezone": "Invalid/Fake_Zone"}])
+    assert len(res_foc_tz["rejected"]) == 1
+    assert "Zona horaria IANA inválida" in res_foc_tz["rejected"][0]["reason"]
+
+
+def test_invalid_collection_rejected():
+    """(Fase A2.1) Valida que intentar sincronizar una colección no permitida lance ValueError o HTTP 400."""
+    with pytest.raises(ValueError, match="Colección no permitida"):
+        db.sync_collection("user_bad_coll", "forbidden_collection_xyz", changes=[])
+
+
+def test_migration_creates_new_tables_and_preserves_pre_migration_backup():
+    """(Fase A2.1) Verifica que migrar una DB antigua crea las 4 tablas nuevas, conserva filas y deja pre_migration_*.db."""
+    import tempfile, shutil
+    with tempfile.TemporaryDirectory() as td:
+        legacy_db_path = os.path.join(td, "legacy.db")
+        # Crear base de datos sólo con tabla activities antigua y datos
+        raw_conn = sqlite3.connect(legacy_db_path)
+        raw_conn.execute("CREATE TABLE activities (user_id TEXT, id TEXT, title TEXT, date TEXT, PRIMARY KEY(user_id, id))")
+        raw_conn.execute("INSERT INTO activities VALUES ('u1', 'act_legacy_1', 'Actividad Antigua', '2026-05-01')")
+        raw_conn.commit()
+        raw_conn.close()
+
+        # Abrir a través de db._conn para disparar _migrate_schema_if_needed
+        migrated_conn = db._conn(custom_path=legacy_db_path)
+        try:
+            tables = {r["name"] for r in migrated_conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            assert {"activities", "subjects", "topics", "focus_sessions", "learning_notes"}.issubset(tables)
+
+            # Filas conservadas
+            row = migrated_conn.execute("SELECT * FROM activities WHERE id='act_legacy_1'").fetchone()
+            assert row is not None
+            assert row["title"] == "Actividad Antigua"
+            assert row["version"] == 1
+            assert row["deleted_at"] is None
+            assert row["updated_at"] is not None and row["updated_at"] != ""
+
+            # Verificar que se creó pre_migration_*.db
+            backups_dir = os.path.join(os.path.dirname(legacy_db_path), "backups")
+            pre_migration_files = [f for f in os.listdir(backups_dir) if f.startswith("pre_migration_")]
+            assert len(pre_migration_files) >= 1
+        finally:
+            migrated_conn.close()
+
+
+
