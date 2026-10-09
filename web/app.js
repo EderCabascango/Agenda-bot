@@ -2305,7 +2305,7 @@ ${note.next_step_text ? `##  Próximo paso\n${note.next_step_text}\n` : ''}
       `;
     }).join('') : '';
 
-    // Barras de 7 días
+    // Barras de 7 y 30 días
     const bars7d = report.daily_bars_7d;
     const maxBarMins = Math.max(60, (bars7d && bars7d.max_minutes) || 60);
     const bars7dHtml = (bars7d && bars7d.series) ? bars7d.series.map(b => {
@@ -2316,6 +2316,20 @@ ${note.next_step_text ? `##  Próximo paso\n${note.next_step_text}\n` : ''}
             <div class="daily-bar-fill" style="height: ${heightPct}%; background: ${b.is_today ? 'var(--accent-teal)' : 'var(--accent-primary)'};"></div>
           </div>
           <span class="daily-bar-label ${b.is_today ? 'is-today' : ''}">${escHTML(b.day_name)}<br/><b>${b.day_number}</b></span>
+        </div>
+      `;
+    }).join('') : '';
+
+    const bars30d = report.daily_bars_30d;
+    const maxBarMins30 = Math.max(60, (bars30d && bars30d.max_minutes) || 60);
+    const bars30dHtml = (bars30d && bars30d.series) ? bars30d.series.map(b => {
+      const heightPct = Math.min(100, Math.round((b.minutes / maxBarMins30) * 100));
+      return `
+        <div class="daily-bar-col" style="min-width: 14px;" title="${b.label}: ${b.minutes} min (${b.hours}h)">
+          <div class="daily-bar-track" style="max-width: 12px;">
+            <div class="daily-bar-fill" style="height: ${heightPct}%; background: ${b.is_today ? 'var(--accent-teal)' : 'var(--accent-primary)'};"></div>
+          </div>
+          <span class="daily-bar-label ${b.is_today ? 'is-today' : ''}" style="font-size:0.6rem;"><b>${b.day_number}</b></span>
         </div>
       `;
     }).join('') : '';
@@ -2430,18 +2444,34 @@ ${note.next_step_text ? `##  Próximo paso\n${note.next_step_text}\n` : ''}
       <!-- ROW 2: Barras Diarias (7d) y Calendario Ciclo (15->14) -->
       <div class="stats-section-row">
         <div class="stats-panel-card">
-          <h3>
-            <span class="material-icons-round" style="color:var(--accent-teal);">bar_chart</span>
-            <span>Actividad Diaria (Últimos 7 días)</span>
-          </h3>
-          <div class="daily-bars-wrap">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h3 style="margin-bottom:0;">
+              <span class="material-icons-round" style="color:var(--accent-teal);">bar_chart</span>
+              <span>Actividad Diaria</span>
+            </h3>
+            <div class="stats-bars-toggle" style="display:flex; gap:4px; background:var(--bg-primary); padding:3px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+              <button type="button" class="btn-subtab active" id="btn-bars-7d" onclick="document.getElementById('bars-7d-wrap').style.display='flex'; document.getElementById('bars-30d-wrap').style.display='none'; this.classList.add('active'); document.getElementById('btn-bars-30d').classList.remove('active');" style="padding:3px 8px; font-size:0.75rem;">7 Días</button>
+              <button type="button" class="btn-subtab" id="btn-bars-30d" onclick="document.getElementById('bars-7d-wrap').style.display='none'; document.getElementById('bars-30d-wrap').style.display='flex'; this.classList.add('active'); document.getElementById('btn-bars-7d').classList.remove('active');" style="padding:3px 8px; font-size:0.75rem;">30 Días</button>
+            </div>
+          </div>
+          <div class="daily-bars-wrap" id="bars-7d-wrap">
             ${bars7dHtml}
+          </div>
+          <div class="daily-bars-wrap" id="bars-30d-wrap" style="display:none; gap:4px;">
+            ${bars30dHtml}
           </div>
           <table class="sr-only">
             <caption>Actividad de estudio diaria de los últimos 7 días</caption>
             <thead><tr><th>Fecha</th><th>Minutos</th><th>Horas</th></tr></thead>
             <tbody>
               ${(bars7d && bars7d.series) ? bars7d.series.map(b => `<tr><td>${b.date}</td><td>${b.minutes}</td><td>${b.hours}</td></tr>`).join('') : ''}
+            </tbody>
+          </table>
+          <table class="sr-only">
+            <caption>Actividad de estudio diaria de los últimos 30 días</caption>
+            <thead><tr><th>Fecha</th><th>Minutos</th><th>Horas</th></tr></thead>
+            <tbody>
+              ${(bars30d && bars30d.series) ? bars30d.series.map(b => `<tr><td>${b.date}</td><td>${b.minutes}</td><td>${b.hours}</td></tr>`).join('') : ''}
             </tbody>
           </table>
         </div>
