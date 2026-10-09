@@ -172,11 +172,78 @@ function mergeRemoteChanges(localActivities, remoteChanges, options = {}) {
 }
 
 /**
+ * Escapes HTML entities securely for both text content and HTML attributes.
+ */
+function escHTML(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
  * Filtra únicamente las actividades activas (excluye tombstones).
  */
 function filterActiveActivities(activities) {
   if (!Array.isArray(activities)) return [];
   return activities.filter(a => a && !a.deleted_at);
+}
+
+/**
+ * Obtiene las actividades activas para una fecha dada (Dashboard y Línea de Tiempo).
+ */
+function getActiveDashboardActivities(activities, dateStr) {
+  const active = filterActiveActivities(activities);
+  if (!dateStr) return active;
+  return active.filter(a => a.date === dateStr);
+}
+
+/**
+ * Obtiene las actividades activas para una fecha en el Calendario.
+ */
+function getCalendarDayActivities(activities, dateStr) {
+  return getActiveDashboardActivities(activities, dateStr);
+}
+
+/**
+ * Busca actividades activas por texto en título, descripción o tags, excluyendo tombstones.
+ */
+function searchActivities(activities, query) {
+  const active = filterActiveActivities(activities);
+  const q = (query || '').toLowerCase().trim();
+  if (!q) return [];
+  return active.filter(a => {
+    const titleMatch = (a.title || '').toLowerCase().includes(q);
+    const descMatch = (a.description || '').toLowerCase().includes(q);
+    const tagMatch = Array.isArray(a.tags) && a.tags.some(t => String(t).toLowerCase().includes(q));
+    return titleMatch || descMatch || tagMatch;
+  });
+}
+
+/**
+ * Calcula estadísticas de desglose por prioridad excluyendo tombstones.
+ */
+function getPriorityStats(activities) {
+  const active = filterActiveActivities(activities);
+  const counts = { high: 0, medium: 0, low: 0 };
+  active.forEach(a => {
+    if (counts[a.priority] !== undefined) counts[a.priority]++;
+  });
+  return {
+    ...counts,
+    total: active.length
+  };
+}
+
+/**
+ * Obtiene las actividades candidatas para programación de alarmas web (activas, de hoy y no completadas).
+ */
+function getAlarmEligibleActivities(activities, todayStr) {
+  const active = filterActiveActivities(activities);
+  return active.filter(a => a.date === todayStr && !a.completed);
 }
 
 /**
@@ -306,6 +373,7 @@ function prepareImportChanges(importedList, currentList, generateUUIDFn, options
 // Exportación compatible con Node.js y Navegadores
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    escHTML,
     enqueueChange,
     dequeueCommitted,
     purgeCommittedAndConflicted,
@@ -314,12 +382,18 @@ if (typeof module !== 'undefined' && module.exports) {
     discardConflictChange,
     mergeRemoteChanges,
     filterActiveActivities,
+    getActiveDashboardActivities,
+    getCalendarDayActivities,
+    searchActivities,
+    getPriorityStats,
+    getAlarmEligibleActivities,
     validateImportPayload,
     prepareImportChanges
   };
 }
 if (typeof window !== 'undefined') {
   window.SyncCore = {
+    escHTML,
     enqueueChange,
     dequeueCommitted,
     purgeCommittedAndConflicted,
@@ -328,6 +402,11 @@ if (typeof window !== 'undefined') {
     discardConflictChange,
     mergeRemoteChanges,
     filterActiveActivities,
+    getActiveDashboardActivities,
+    getCalendarDayActivities,
+    searchActivities,
+    getPriorityStats,
+    getAlarmEligibleActivities,
     validateImportPayload,
     prepareImportChanges
   };

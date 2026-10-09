@@ -100,13 +100,13 @@ def test_playwright_e2e_full_sync():
             # Context A & Page A
             context_a = browser.new_context()
             page_a = context_a.new_page()
-            page_a.goto(server.url)
+            page_a.goto(f"{server.url}/?e2e=1")
             page_a.wait_for_load_state("networkidle")
 
             # Context B & Page B
             context_b = browser.new_context()
             page_b = context_b.new_page()
-            page_b.goto(server.url)
+            page_b.goto(f"{server.url}/?e2e=1")
             page_b.wait_for_load_state("networkidle")
 
             # Clear any initial seeded data on both contexts to test with clean state
@@ -364,7 +364,58 @@ def test_playwright_e2e_full_sync():
 
             assert agent_act is not None, "La actividad creada por el agente debe existir en A"
             assert user_act is not None and user_act.get("title") == "Tarea Offline 1 Modificada por Usuario", "La edición del usuario debe preservarse"
-            print(" -> Concurrencia Agente/Usuario verificada: ambas actividades conservadas íntegramente.")
+            # ----------------------------------------------------
+            # 6. Verificación DOM de exclusión de Tombstones (1.9.1)
+            # ----------------------------------------------------
+            print("\n[E2E 6] Probando exclusión total de tombstones en DOM y contadores...")
+            dom_check = page_a.evaluate("""() => {
+                const dt = new Date();
+                const today = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+                const testActs = [
+                    {
+                        id: 'act-live-dom-test',
+                        title: 'Actividad Viva en Pantalla',
+                        date: today,
+                        startTime: '09:00',
+                        endTime: '10:00',
+                        priority: 'high',
+                        completed: false
+                    },
+                    {
+                        id: 'act-tombstone-dom-test',
+                        title: 'Actividad Fantasma Borrada',
+                        date: today,
+                        startTime: '11:00',
+                        endTime: '12:00',
+                        priority: 'high',
+                        completed: false,
+                        deleted_at: new Date().toISOString()
+                    }
+                ];
+                if (window.__AppAgendaTest && window.__AppAgendaTest.saveActivities) {
+                    window.__AppAgendaTest.saveActivities(testActs);
+                } else {
+                    localStorage.setItem('diary_activities', JSON.stringify(testActs));
+                }
+                if (window.renderDashboard) window.renderDashboard();
+                if (window.renderActivityList) window.renderActivityList();
+
+                const bodyHtml = document.body.innerHTML;
+                const statPending = document.getElementById('stat-pending')?.innerText;
+                const statCompleted = document.getElementById('stat-completed')?.innerText;
+
+                return {
+                    hasLive: bodyHtml.includes('Actividad Viva en Pantalla'),
+                    hasTombstone: bodyHtml.includes('Actividad Fantasma Borrada'),
+                    statPending: statPending,
+                    statCompleted: statCompleted
+                };
+            }""")
+
+            assert dom_check["hasLive"] is True, "La actividad viva debe renderizarse en el DOM"
+            assert dom_check["hasTombstone"] is False, "La actividad con deleted_at (tombstone) NUNCA debe aparecer en el DOM"
+            assert dom_check["statPending"] == "1", f"El contador de pendientes debe ser 1, obtenido: {dom_check['statPending']}"
+            print(" -> Verificación DOM exitosa: Tombstones 100% invisibles en DOM y excluidos de contadores.")
 
             browser.close()
             print("\n============================================================")

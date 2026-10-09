@@ -1,6 +1,7 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  escHTML,
   enqueueChange,
   dequeueCommitted,
   purgeCommittedAndConflicted,
@@ -9,6 +10,11 @@ const {
   discardConflictChange,
   mergeRemoteChanges,
   filterActiveActivities,
+  getActiveDashboardActivities,
+  getCalendarDayActivities,
+  searchActivities,
+  getPriorityStats,
+  getAlarmEligibleActivities,
   validateImportPayload,
   prepareImportChanges
 } = require('./sync-core.js');
@@ -262,6 +268,83 @@ describe('SyncCore - Complete Client Sync Logic Test Suite (Fase 1, 1.5, 1.6)', 
     assert.equal(changesToEnqueue.length, 2);
     assert.equal(changesToEnqueue[0].base_version, 2, 'Debe asignar base_version para registros existentes');
     assert.equal(changesToEnqueue[1].base_version, undefined, 'Registros nuevos no tienen base_version previa');
+  });
+
+  describe('1.8.3 Tombstone Exclusion Across All Features', () => {
+    const rawLocalArray = [
+      { id: 'act-live-1', title: 'Reunión Activa', date: '2026-10-15', startTime: '09:00', endTime: '10:00', priority: 'high', completed: false, description: 'Estrategia de equipo' },
+      { id: 'act-live-2', title: 'Calistenia', date: '2026-10-15', startTime: '07:00', endTime: '08:00', priority: 'medium', completed: true, description: 'Ejercicio' },
+      { id: 'act-tombstone-1', title: 'Reunión Cancelada', date: '2026-10-15', startTime: '11:00', endTime: '12:00', priority: 'high', completed: false, deleted_at: '2026-10-15T08:00:00Z', description: 'Reunión cancelada' },
+      { id: 'act-tombstone-2', title: 'Almuerzo Borrado', date: '2026-10-15', startTime: '13:00', endTime: '14:00', priority: 'low', completed: true, deleted_at: '2026-10-15T08:30:00Z', description: 'Almuerzo' }
+    ];
+
+    test('(1.8.3.a) filterActiveActivities strips all records with deleted_at', () => {
+      const active = filterActiveActivities(rawLocalArray);
+      assert.equal(active.length, 2);
+      assert.ok(active.every(a => !a.deleted_at));
+      assert.ok(!active.some(a => a.id.startsWith('act-tombstone')));
+    });
+
+    test('(1.8.3.b) Dashboard metrics & lists exclude tombstones', () => {
+      const todayActs = getActiveDashboardActivities(rawLocalArray, '2026-10-15');
+      const completed = todayActs.filter(a => a.completed).length;
+      const pending = todayActs.filter(a => !a.completed).length;
+
+      assert.equal(todayActs.length, 2, 'No debe contar tombstones en el total del dashboard');
+      assert.equal(completed, 1, 'Solo 1 actividad completada activa');
+      assert.equal(pending, 1, 'Solo 1 actividad pendiente activa');
+    });
+
+    test('(1.8.3.c) Calendar day dots and details exclude tombstones', () => {
+      const dayDetailActs = getCalendarDayActivities(rawLocalArray, '2026-10-15');
+      const hasActsForDate = dayDetailActs.length > 0;
+
+      assert.equal(hasActsForDate, true);
+      assert.equal(dayDetailActs.length, 2);
+      assert.ok(!dayDetailActs.some(a => a.deleted_at));
+    });
+
+    test('(1.8.3.d) Search query matching excludes tombstones even if search query matches', () => {
+      const searchResults = searchActivities(rawLocalArray, 'reunión');
+
+      assert.equal(searchResults.length, 1, 'Solo debe coincidir la Reunión Activa, no la Cancelada');
+      assert.equal(searchResults[0].id, 'act-live-1');
+    });
+
+    test('(1.8.3.e) Priority breakdown and productivity chart exclude tombstones', () => {
+      const stats = getPriorityStats(rawLocalArray);
+
+      assert.equal(stats.high, 1, 'Solo 1 actividad alta activa (la otra es tombstone)');
+      assert.equal(stats.medium, 1);
+      assert.equal(stats.low, 0, 'La actividad baja era un tombstone y no debe contarse');
+      assert.equal(stats.total, 2);
+    });
+
+    test('(1.8.3.f) Alarm scheduling excludes tombstones', () => {
+      const alarmEligible = getAlarmEligibleActivities(rawLocalArray, '2026-10-15');
+
+      assert.equal(alarmEligible.length, 1);
+      assert.equal(alarmEligible[0].id, 'act-live-1');
+    });
+  });
+
+  describe('1.9.5 XSS Prevention & HTML Escaping', () => {
+    test('(1.9.5.a) escHTML escapes dangerous script, img, svg tags', () => {
+      assert.equal(escHTML('<script>alert("xss")</script>'), '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
+      assert.equal(escHTML('<img src=x onerror=alert(1)>'), '&lt;img src=x onerror=alert(1)&gt;');
+      assert.equal(escHTML('"><svg onload=alert(1)>'), '&quot;&gt;&lt;svg onload=alert(1)&gt;');
+    });
+
+    test('(1.9.5.b) escHTML escapes both double and single quotes for attributes', () => {
+      assert.equal(escHTML('foo"bar\'baz'), 'foo&quot;bar&#39;baz');
+      assert.equal(escHTML("' onclick='alert(1)"), '&#39; onclick=&#39;alert(1)');
+    });
+
+    test('(1.9.5.c) escHTML handles null, undefined, numbers safely', () => {
+      assert.equal(escHTML(null), '');
+      assert.equal(escHTML(undefined), '');
+      assert.equal(escHTML(123), '123');
+    });
   });
 
 });

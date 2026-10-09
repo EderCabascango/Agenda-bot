@@ -51,6 +51,7 @@
     catch { return []; }
   }
   function saveActivities(list) {
+    activities = list;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
   }
   function loadSettings() {
@@ -141,7 +142,9 @@
   // ── Dashboard Rendering ──
   function renderDashboard() {
     const today = todayStr();
-    const todayActs = activities.filter(a => a.date === today);
+    const todayActs = (typeof SyncCore !== 'undefined' && SyncCore.getActiveDashboardActivities)
+      ? SyncCore.getActiveDashboardActivities(activities, today)
+      : activities.filter(a => a && !a.deleted_at && a.date === today);
     const completed = todayActs.filter(a => a.completed).length;
     const pending   = todayActs.filter(a => !a.completed).length;
     const high      = todayActs.filter(a => a.priority === 'high' && !a.completed).length;
@@ -471,7 +474,9 @@
   // Lightweight stats-only refresh (no full re-render loop)
   function renderDashboard_stats() {
     const today = todayStr();
-    const todayActs = activities.filter(a => a.date === today);
+    const todayActs = (typeof SyncCore !== 'undefined' && SyncCore.getActiveDashboardActivities)
+      ? SyncCore.getActiveDashboardActivities(activities, today)
+      : activities.filter(a => a && !a.deleted_at && a.date === today);
     const completed = todayActs.filter(a => a.completed).length;
     const pending   = todayActs.filter(a => !a.completed).length;
     const high      = todayActs.filter(a => a.priority === 'high' && !a.completed).length;
@@ -591,8 +596,10 @@
         : formatted;
     }
 
-    // Filter to selected date
-    let filtered = activities.filter(a => a.date === activitiesSelectedDate);
+    // Filter to selected date (excluding tombstones)
+    let filtered = (typeof SyncCore !== 'undefined' && SyncCore.getActiveDashboardActivities)
+      ? SyncCore.getActiveDashboardActivities(activities, activitiesSelectedDate)
+      : activities.filter(a => a && !a.deleted_at && a.date === activitiesSelectedDate);
     if (currentFilter === 'pending') filtered = filtered.filter(a => !a.completed);
     if (currentFilter === 'completed') filtered = filtered.filter(a => a.completed);
 
@@ -645,7 +652,9 @@
       const dateStr = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
       const isToday = dateStr === today;
       const isSelected = dateStr === calSelectedDate;
-      const hasActs = activities.some(a => a.date === dateStr);
+      const hasActs = (typeof SyncCore !== 'undefined' && SyncCore.getCalendarDayActivities)
+        ? SyncCore.getCalendarDayActivities(activities, dateStr).length > 0
+        : activities.some(a => a && !a.deleted_at && a.date === dateStr);
       html += `<div class="cal-day ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}" data-date="${dateStr}">
         ${d}
         ${hasActs ? '<span class="cal-dot"></span>' : ''}
@@ -673,7 +682,9 @@
     if (!detailTitle) return;
     const d = new Date(calSelectedDate + 'T12:00:00');
     detailTitle.textContent = formatDate(d);
-    const dayActs = activities.filter(a => a.date === calSelectedDate);
+    const dayActs = (typeof SyncCore !== 'undefined' && SyncCore.getCalendarDayActivities)
+      ? SyncCore.getCalendarDayActivities(activities, calSelectedDate)
+      : activities.filter(a => a && !a.deleted_at && a.date === calSelectedDate);
     const list = $('#cal-detail-list');
     if (!list) return;
     if (dayActs.length === 0) {
@@ -725,13 +736,18 @@
   function renderPriorityBreakdown() {
     const container = $('#priority-breakdown');
     if (!container) return;
-    const counts = { high: 0, medium: 0, low: 0 };
-    activities.forEach(a => { if (counts[a.priority] !== undefined) counts[a.priority]++; });
-    const total = Math.max(activities.length, 1);
+    const priorityStats = (typeof SyncCore !== 'undefined' && SyncCore.getPriorityStats)
+      ? SyncCore.getPriorityStats(activities)
+      : (() => {
+          const c = { high: 0, medium: 0, low: 0 };
+          (activities || []).filter(a => a && !a.deleted_at).forEach(a => { if (c[a.priority] !== undefined) c[a.priority]++; });
+          return { ...c, total: (activities || []).filter(a => a && !a.deleted_at).length };
+        })();
+    const total = Math.max(priorityStats.total, 1);
     const data = [
-      { key: 'high', label: 'Alta', color: 'var(--priority-high)', count: counts.high },
-      { key: 'medium', label: 'Media', color: 'var(--priority-medium)', count: counts.medium },
-      { key: 'low', label: 'Baja', color: 'var(--priority-low)', count: counts.low },
+      { key: 'high', label: 'Alta', color: 'var(--priority-high)', count: priorityStats.high },
+      { key: 'medium', label: 'Media', color: 'var(--priority-medium)', count: priorityStats.medium },
+      { key: 'low', label: 'Baja', color: 'var(--priority-low)', count: priorityStats.low },
     ];
     container.innerHTML = data.map(d => `
       <div class="priority-row">
@@ -893,11 +909,15 @@
   function handleSearch(query) {
     const q = query.toLowerCase().trim();
     if (!q) { $('#search-results').innerHTML = ''; return; }
-    const results = activities.filter(a =>
-      a.title.toLowerCase().includes(q) ||
-      (a.description||'').toLowerCase().includes(q) ||
-      (a.tags||[]).some(t => t.toLowerCase().includes(q))
-    );
+    const results = (typeof SyncCore !== 'undefined' && SyncCore.searchActivities)
+      ? SyncCore.searchActivities(activities, q)
+      : activities.filter(a =>
+          a && !a.deleted_at && (
+            a.title.toLowerCase().includes(q) ||
+            (a.description || '').toLowerCase().includes(q) ||
+            (a.tags || []).some(t => t.toLowerCase().includes(q))
+          )
+        );
     const container = $('#search-results');
     if (results.length === 0) {
       container.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px;">Sin resultados</p>';
@@ -959,7 +979,9 @@
 
     const advance = parseInt(settings.alarmAdvance || '5', 10);
     const now = new Date();
-    const todayActivities = activities.filter(a => a.date === todayStr() && !a.completed && a.startTime && a.alarm !== false);
+    const todayActivities = (typeof SyncCore !== 'undefined' && SyncCore.getAlarmEligibleActivities)
+      ? SyncCore.getAlarmEligibleActivities(activities, todayStr()).filter(a => a.startTime && a.alarm !== false)
+      : activities.filter(a => a && !a.deleted_at && a.date === todayStr() && !a.completed && a.startTime && a.alarm !== false);
 
     todayActivities.forEach(act => {
       const [h, m] = act.startTime.split(':').map(Number);
@@ -1270,12 +1292,18 @@
     }
   }
 
-  // ── HTML Escaping ──
+  // ── HTML Escaping (XSS Prevention) ──
   function escHTML(str) {
-    if (typeof str !== 'string') return '';
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    if (typeof window !== 'undefined' && window.SyncCore && typeof window.SyncCore.escHTML === 'function') {
+      return window.SyncCore.escHTML(str);
+    }
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   // ── Excel Routine Template Downloader ──
@@ -1655,6 +1683,8 @@
   }
 
   // ── AI Callers (Groq / n8n) ──
+  let groqChatHistory = [];
+
   async function callGroq(userText, apiKey, relevantActs) {
     const url = 'https://api.groq.com/openai/v1/chat/completions';
     const now = new Date();
@@ -1677,16 +1707,15 @@ Si el usuario pide cancelar, cambiar horas, completar o añadir actividades, tra
 SIEMPRE devuelve un JSON válido.
 `;
 
-    if (!window.chatHistory) window.chatHistory = [];
-    window.chatHistory.push({ role: 'user', content: userText });
+    groqChatHistory.push({ role: 'user', content: userText });
     
-    if (window.chatHistory.length > 6) {
-      window.chatHistory = window.chatHistory.slice(-6);
+    if (groqChatHistory.length > 6) {
+      groqChatHistory = groqChatHistory.slice(-6);
     }
 
     const messages = [
       { role: 'system', content: systemPrompt },
-      ...window.chatHistory
+      ...groqChatHistory
     ];
 
     try {
@@ -1726,7 +1755,7 @@ SIEMPRE devuelve un JSON válido.
       const content = resData.choices[0].message.content;
       const parsed = JSON.parse(content);
       
-      window.chatHistory.push({ role: 'assistant', content: content });
+      groqChatHistory.push({ role: 'assistant', content: content });
 
       addAgentMessage(parsed.reply);
 
@@ -2600,14 +2629,33 @@ SIEMPRE devuelve un JSON válido.
     renderDashboard();
   }
 
-  // ── Window Exports for Tests & Integrations ──
-  window.syncWithBackend = syncWithBackend;
-  window.renderDashboard = renderDashboard;
-  window.renderCalendar = renderCalendar;
-  window.renderActivityList = renderActivityList;
-  window.openConflictsModal = openConflictsModal;
-  window.closeConflictsModal = closeConflictsModal;
-  window.updateConflictsBadge = updateConflictsBadge;
+  // ── Window Exports for Tests & Integrations (Guarded by Test Mode) ──
+  const isTestMode = typeof window !== 'undefined' && (
+    (window.location && window.location.search && (window.location.search.includes('e2e=1') || window.location.search.includes('test=1'))) ||
+    (typeof localStorage !== 'undefined' && localStorage.getItem('diary_test_mode') === '1') ||
+    (typeof window.location !== 'undefined' && (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'))
+  );
+
+  if (isTestMode) {
+    window.__AppAgendaTest = {
+      syncWithBackend,
+      renderDashboard,
+      renderCalendar,
+      renderActivityList,
+      openConflictsModal,
+      closeConflictsModal,
+      updateConflictsBadge,
+      loadActivities,
+      saveActivities
+    };
+    window.syncWithBackend = syncWithBackend;
+    window.renderDashboard = renderDashboard;
+    window.renderCalendar = renderCalendar;
+    window.renderActivityList = renderActivityList;
+    window.openConflictsModal = openConflictsModal;
+    window.closeConflictsModal = closeConflictsModal;
+    window.updateConflictsBadge = updateConflictsBadge;
+  }
 
   // ── Boot ──
   if (document.readyState === 'loading') {

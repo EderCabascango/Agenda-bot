@@ -12,6 +12,9 @@ backend/backups/
 *.db_*
 *.sqlite
 *.sqlite3
+.env
+**/.env
 backend/.env
 __pycache__/
 .pytest_cache/
+

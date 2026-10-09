@@ -316,3 +316,73 @@ def test_schema_initialization_per_db_path():
     assert count2 == 0
     conn1.close()
     conn2.close()
+
+
+def test_tombstone_purge_with_simulated_clock():
+    """(1.8.5) Test de purga de tombstones con avance simulado de reloj."""
+    from unittest.mock import patch
+
+    sim_user = "user_purge_sim"
+    now_base = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    # 1. Crear y borrar actividad en tiempo T0
+    with patch("db.datetime") as mock_dt:
+        mock_dt.now.return_value = now_base
+        mock_dt.fromisoformat = datetime.fromisoformat
+        mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+        act = db.upsert_activity(sim_user, {
+            "id": "act_sim_purge",
+            "title": "Actividad a ser purgada",
+            "date": "2026-01-01"
+        })
+        db.delete_activity(sim_user, "act_sim_purge")
+
+        # Inmediatamente (T0): purga con cutoff 30 días no debe borrarla (tiene 0 días)
+        purged_immediate = db.purge_tombstones(sim_user, days=30)
+        assert purged_immediate == 0
+        assert db.get_activity(sim_user, "act_sim_purge", include_deleted=True) is not None
+
+    # 2. Simular reloj avanzando 15 días (T0 + 15d): todavía no debe purgarse
+    with patch("db.datetime") as mock_dt:
+        mock_dt.now.return_value = now_base + timedelta(days=15)
+        mock_dt.fromisoformat = datetime.fromisoformat
+        mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+        purged_15d = db.purge_tombstones(sim_user, days=30)
+        assert purged_15d == 0
+        assert db.get_activity(sim_user, "act_sim_purge", include_deleted=True) is not None
+
+    # 3. Simular reloj avanzando 31 días (T0 + 31d): debe purgarse físicamente
+    with patch("db.datetime") as mock_dt:
+        mock_dt.now.return_value = now_base + timedelta(days=31)
+        mock_dt.fromisoformat = datetime.fromisoformat
+        mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+        purged_31d = db.purge_tombstones(sim_user, days=30)
+        assert purged_31d == 1
+        assert db.get_activity(sim_user, "act_sim_purge", include_deleted=True) is None
+
+
+def test_sync_changes_batch_atomicity_rollback_on_failure():
+    """(1.9.4) Atomicidad: si un lote de cambios falla en el ítem N, ningún ítem del lote se persiste."""
+    atom_user = "user_atomicity_test"
+    valid_item = {
+        "id": "act_atom_1",
+        "title": "Actividad Válida 1",
+        "date": "2026-10-10",
+        "startTime": "08:00",
+        "endTime": "09:00"
+    }
+    # Ítem inválido que causa ValueError durante la iteración del lote
+    invalid_item = {
+        "id": None,
+        "title": "Actividad Sin ID Inválida"
+    }
+
+    with pytest.raises(ValueError, match="Cada cambio debe contener un 'id' válido"):
+        db.sync_changes(atom_user, [valid_item, invalid_item])
+
+    # Verificar que el ítem válido NUNCA fue commiteado (rollback total / atomicidad de lote)
+    persisted = db.get_activity(atom_user, "act_atom_1", include_deleted=True)
+    assert persisted is None, "El lote debió revertirse completamente (0 escrituras parciales)"
