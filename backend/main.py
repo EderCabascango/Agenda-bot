@@ -84,14 +84,39 @@ def health():
 
 
 
+class SyncRequest(BaseModel):
+    changes: list[dict] = []
+    since: str | None = None
+
+
 @app.get("/activities")
-def get_activities(user: str = Depends(auth)):
-    return db.list_activities(user)
+def get_activities(
+    since: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    include_deleted: bool = False,
+    user: str = Depends(auth)
+):
+    return db.list_activities(user, start=start, end=end, since=since, include_deleted=include_deleted)
+
+
+@app.post("/activities/sync")
+def sync_activities_endpoint(body: SyncRequest, user: str = Depends(auth)):
+    try:
+        return db.sync_changes(user, body.changes, since=body.since)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.put("/activities")
-def sync_activities(acts: list[dict], user: str = Depends(auth)):
-    return {"saved": db.replace_all(user, acts)}
+def legacy_put_activities(acts: list[dict], user: str = Depends(auth)):
+    """Compatibilidad retroactiva: realiza upsert no destructivo dentro de una transacción."""
+    try:
+        res = db.sync_changes(user, acts)
+        return {"saved": res["applied"], "conflicts": res["conflicts"]}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
 
 
 @app.post("/agent/chat")

@@ -10,7 +10,15 @@
   // ── Utility Helpers ──
   const $ = (sel, ctx = document) => ctx.querySelector(sel);
   const $$ = (sel, ctx = document) => [...ctx.querySelectorAll(sel)];
-  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const generateUUID = () => {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c =>
+      (+c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> (+c / 4))).toString(16)
+    );
+  };
+  const uid = () => generateUUID();
 
   const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
   const DAYS_ES = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
@@ -32,9 +40,11 @@
     return 'Buenas noches';
   }
 
-  // ── Data Layer (LocalStorage) ──
+  // ── Data Layer (LocalStorage & Sync Queue) ──
   const STORAGE_KEY = 'diary_activities';
   const SETTINGS_KEY = 'diary_settings';
+  const SYNC_QUEUE_KEY = 'diary_sync_queue';
+  const LAST_SYNC_KEY = 'diary_last_sync';
 
   function loadActivities() {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
@@ -51,6 +61,31 @@
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
   }
 
+  function getSyncQueue() {
+    try { return JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY)) || []; }
+    catch { return []; }
+  }
+  function saveSyncQueue(q) {
+    localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(q));
+  }
+  function getLastSync() {
+    return localStorage.getItem(LAST_SYNC_KEY) || null;
+  }
+  function setLastSync(ts) {
+    if (ts) localStorage.setItem(LAST_SYNC_KEY, ts);
+  }
+
+  function enqueueChange(change) {
+    const q = getSyncQueue();
+    const existingIdx = q.findIndex(item => item.id === change.id);
+    if (existingIdx !== -1) {
+      q[existingIdx] = { ...q[existingIdx], ...change };
+    } else {
+      q.push(change);
+    }
+    saveSyncQueue(q);
+  }
+
   let activities = loadActivities();
   let settings = loadSettings();
   let currentFilter = 'all';
@@ -58,6 +93,7 @@
   let calYear = new Date().getFullYear();
   let calSelectedDate = todayStr();
   let activitiesSelectedDate = todayStr();
+
   let editingId = null;
   let deletingId = null;
 
@@ -522,12 +558,16 @@
     const act = activities.find(a => a.id === id);
     if (!act) return;
     act.completed = !act.completed;
+    act.updated_at = new Date().toISOString();
+    act.version = (act.version || 1) + 1;
     saveActivities(activities);
+    enqueueChange(act);
     renderDashboard();
     renderActivityList();
     renderDiarioGrid();
     showToast(act.completed ? 'Actividad completada ✓' : 'Actividad pendiente');
   }
+
 
   // ── Activity List Rendering ──
   function renderActivityList() {
@@ -762,6 +802,7 @@
     const title = $('#form-title').value.trim();
     if (!title) return;
 
+    const nowIso = new Date().toISOString();
     const data = {
       id: editingId || uid(),
       title,
@@ -772,17 +813,22 @@
       priority: $('#form-priority').value,
       tags: $('#form-tags').value.split(',').map(t => t.trim()).filter(Boolean),
       completed: false,
+      updated_at: nowIso,
+      version: 1
     };
 
     if (editingId) {
       const idx = activities.findIndex(a => a.id === editingId);
       if (idx !== -1) {
         data.completed = activities[idx].completed;
+        data.version = (activities[idx].version || 1) + 1;
         activities[idx] = data;
       }
+      enqueueChange(data);
       showToast('Actividad actualizada');
     } else {
       activities.push(data);
+      enqueueChange(data);
       showToast('Actividad creada');
     }
 
@@ -805,6 +851,16 @@
   }
   function executeDelete() {
     if (!deletingId) return;
+    const target = activities.find(a => a.id === deletingId);
+    if (target) {
+      const tombstone = {
+        ...target,
+        deleted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        version: (target.version || 1) + 1
+      };
+      enqueueChange(tombstone);
+    }
     activities = activities.filter(a => a.id !== deletingId);
     saveActivities(activities);
     closeDeleteModal();
@@ -813,6 +869,7 @@
     renderCalendar();
     showToast('Actividad eliminada', 'delete', 'var(--accent-red)');
   }
+
 
   // ── Search ──
   function openSearch() {
@@ -1631,16 +1688,62 @@ SIEMPRE devuelve un JSON válido.
     return res.json();
   }
 
-  async function pullActivitiesFromBackend() {
+  async function syncWithBackend() {
     const base = getBackendBaseUrl();
-    const res = await fetch(base + '/activities', { headers: backendHeaders() });
-    if (!res.ok) return;
-    activities = await res.json();
-    saveActivities(activities);
-    renderDashboard();
-    renderActivityList();
-    renderCalendar();
-    scheduleWebAlarms();
+    const queue = getSyncQueue();
+    const lastSync = getLastSync();
+
+    try {
+      const res = await fetch(base + '/activities/sync', {
+        method: 'POST',
+        headers: backendHeaders(),
+        body: JSON.stringify({ changes: queue, since: lastSync })
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+
+      // Limpia los cambios locales que ya se aplicaron en el servidor
+      saveSyncQueue([]);
+      if (data.server_time) {
+        setLastSync(data.server_time);
+      }
+
+      // Mezclar cambios remotos de forma no destructiva
+      if (Array.isArray(data.changes) && data.changes.length > 0) {
+        let modified = false;
+        data.changes.forEach(remote => {
+          const idx = activities.findIndex(a => a.id === remote.id);
+          if (remote.deleted_at) {
+            if (idx !== -1) {
+              activities.splice(idx, 1);
+              modified = true;
+            }
+          } else {
+            if (idx !== -1) {
+              const localVer = activities[idx].version || 1;
+              if ((remote.version || 1) >= localVer) {
+                activities[idx] = { ...activities[idx], ...remote };
+                modified = true;
+              }
+            } else {
+              activities.push(remote);
+              modified = true;
+            }
+          }
+        });
+        if (modified) {
+          saveActivities(activities);
+          renderDashboard();
+          renderActivityList();
+          renderCalendar();
+          scheduleWebAlarms();
+        }
+      }
+      return true;
+    } catch (err) {
+      console.warn('Sync backend en espera:', err);
+      return false;
+    }
   }
 
   function addConfirmPrompt(pending, onDecision) {
@@ -1710,7 +1813,7 @@ SIEMPRE devuelve un JSON válido.
           const next = await backendPost('/agent/confirm', { thread_id: 'web', approved });
           removeTypingIndicator();
           await handleBackendResult(next);
-          await pullActivitiesFromBackend();
+          await syncWithBackend();
         } catch (e) {
           removeTypingIndicator();
           addAgentMessage(`⚠️ Error en confirmación: ${e.message}`);
@@ -1721,15 +1824,17 @@ SIEMPRE devuelve un JSON válido.
 
   async function callBackendAgent(userText) {
     try {
-      const base = getBackendBaseUrl();
-      // Sube el estado local para que el backend tenga las actividades más recientes
-      const sync = await fetch(base + '/activities', { method: 'PUT', headers: backendHeaders(), body: JSON.stringify(activities) });
-      if (!sync.ok) throw new Error(`No se pudo sincronizar (${sync.status})`);
+      // 1. Sincroniza cambios locales pendientes antes de consultar al agente
+      await syncWithBackend();
+
+      // 2. Ejecuta turno del agente
       const data = await backendPost('/agent/chat', { message: userText, thread_id: 'web' });
       removeTypingIndicator();
       await handleBackendResult(data);
+
+      // 3. Sincroniza cambios generados por el agente
       if (!data.pending) {
-        await pullActivitiesFromBackend();
+        await syncWithBackend();
       }
     } catch (err) {
       console.error(err);
@@ -1737,6 +1842,7 @@ SIEMPRE devuelve un JSON válido.
       addAgentMessage(`⚠️ Backend: ${err.message}`);
     }
   }
+
 
 
   async function callN8n(userText, relevantActs) {
@@ -2088,6 +2194,12 @@ SIEMPRE devuelve un JSON válido.
 
     // Schedule web alarms for today
     scheduleWebAlarms();
+
+    // Sincronización inicial no bloqueante con el backend
+    const isLocal = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
+    if (settings.backendUrl || isLocal) {
+      syncWithBackend();
+    }
 
     // Auto-refresh the active view every 30 seconds to update missed status
     setInterval(refreshActiveView, 30000);

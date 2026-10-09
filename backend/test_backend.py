@@ -29,5 +29,6 @@ def test_tools_flow():
 
 
 def test_sync_roundtrip():
-    db.replace_all("u2", [{"id": "x", "title": "Leer", "date": "2026-10-16", "tags": ["a"], "completed": True}])
+    db.sync_changes("u2", [{"id": "x", "title": "Leer", "date": "2026-10-16", "tags": ["a"], "completed": True}])
     assert db.list_activities("u2")[0]["tags"] == ["a"]
+
