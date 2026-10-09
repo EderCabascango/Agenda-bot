@@ -9,9 +9,15 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 
-DB_PATH = os.getenv("AGENDA_DB", os.path.join(os.path.dirname(__file__), "agenda.db"))
+DB_PATH = os.getenv("AGENDA_DB", os.getenv("DATABASE_PATH", os.path.join(os.path.dirname(__file__), "agenda.db")))
 PURGE_DAYS_DEFAULT = 30
-_SCHEMA_INITIALIZED = False
+_INITIALIZED_DBS: set[str] = set()
+
+
+def init_db(db_path: str | None = None):
+    """Inicializa y migra la base de datos indicada."""
+    conn = _conn(db_path)
+    conn.close()
 
 
 def utc_now_iso() -> str:
@@ -116,16 +122,17 @@ def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_activities_user_date ON activities (user_id, date)")
 
 
-def _conn() -> sqlite3.Connection:
-    global _SCHEMA_INITIALIZED
-    db_path = os.getenv("AGENDA_DB", DB_PATH)
-    conn = sqlite3.connect(db_path, timeout=15.0)
+def _conn(custom_path: str | None = None) -> sqlite3.Connection:
+    global _INITIALIZED_DBS
+    raw_path = custom_path or os.getenv("AGENDA_DB") or os.getenv("DATABASE_PATH") or DB_PATH
+    abs_path = os.path.abspath(raw_path)
+    conn = sqlite3.connect(abs_path, timeout=15.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 10000")
 
-    if not _SCHEMA_INITIALIZED:
-        _migrate_schema_if_needed(conn, db_path)
-        _SCHEMA_INITIALIZED = True
+    if abs_path not in _INITIALIZED_DBS:
+        _migrate_schema_if_needed(conn, abs_path)
+        _INITIALIZED_DBS.add(abs_path)
     return conn
 
 
@@ -228,7 +235,9 @@ def upsert_activity(user_id: str, a: dict, conn: sqlite3.Connection | None = Non
     if conn is not None:
         return _exec(conn)
     with _conn() as c:
-        return _exec(c)
+        res = _exec(c)
+        c.commit()
+        return res
 
 
 def delete_activity(user_id: str, act_id: str, conn: sqlite3.Connection | None = None) -> bool:
@@ -244,7 +253,9 @@ def delete_activity(user_id: str, act_id: str, conn: sqlite3.Connection | None =
     if conn is not None:
         return _exec(conn)
     with _conn() as c:
-        return _exec(c)
+        res = _exec(c)
+        c.commit()
+        return res
 
 
 def purge_tombstones(user_id: str | None = None, days: int = PURGE_DAYS_DEFAULT) -> int:
@@ -339,6 +350,8 @@ def sync_changes(user_id: str, changes: list[dict], since: str | None = None, pu
                 ),
             )
             applied += 1
+
+        conn.commit()
 
         if resync_required:
             remote_changes = list_activities(user_id, include_deleted=False, conn=conn)

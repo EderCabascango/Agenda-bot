@@ -564,6 +564,7 @@
     if (!act) return;
     act.completed = !act.completed;
     act.updated_at = new Date().toISOString();
+    act.base_version = act.version || 1;
     act.version = (act.version || 1) + 1;
     saveActivities(activities);
     enqueueChange(act);
@@ -826,6 +827,7 @@
       const idx = activities.findIndex(a => a.id === editingId);
       if (idx !== -1) {
         data.completed = activities[idx].completed;
+        data.base_version = activities[idx].version || 1;
         data.version = (activities[idx].version || 1) + 1;
         activities[idx] = data;
       }
@@ -862,6 +864,7 @@
         ...target,
         deleted_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        base_version: target.version || 1,
         version: (target.version || 1) + 1
       };
       enqueueChange(tombstone);
@@ -1739,6 +1742,7 @@ SIEMPRE devuelve un JSON válido.
 
   // ── Backend LangGraph agent ──
   function getBackendBaseUrl() {
+    settings = loadSettings();
     if (settings.backendUrl) return settings.backendUrl.replace(/\/+$/, '');
     if (window.location.protocol.startsWith('http') && (window.location.port === '8000' || window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost')) {
       return window.location.origin;
@@ -1747,6 +1751,7 @@ SIEMPRE devuelve un JSON válido.
   }
 
   function backendHeaders() {
+    settings = loadSettings();
     const h = { 'Content-Type': 'application/json' };
     if (settings.backendToken) h['X-App-Token'] = settings.backendToken;
     return h;
@@ -1764,6 +1769,7 @@ SIEMPRE devuelve un JSON válido.
   }
 
   async function syncWithBackend() {
+    activities = loadActivities();
     const base = getBackendBaseUrl();
     const queue = getSyncQueue();
     const lastSync = getLastSync();
@@ -1851,7 +1857,123 @@ SIEMPRE devuelve un JSON válido.
     } catch (err) {
       console.warn('Sync backend en espera:', err);
       return false;
+    } finally {
+      updateConflictsBadge();
     }
+  }
+
+  // ── Conflicts Resolution UI ──
+  function getConflictsStore() {
+    try { return JSON.parse(localStorage.getItem('diary_conflicts')) || {}; }
+    catch { return {}; }
+  }
+  function saveConflictsStore(store) {
+    localStorage.setItem('diary_conflicts', JSON.stringify(store));
+    updateConflictsBadge();
+  }
+
+  function updateConflictsBadge() {
+    const store = getConflictsStore();
+    const count = Object.keys(store).length;
+    const btn = $('#btn-conflicts');
+    const badge = $('#conflicts-badge');
+    if (!btn) return;
+    if (count > 0) {
+      btn.style.display = 'inline-flex';
+      if (badge) badge.textContent = count;
+    } else {
+      btn.style.display = 'none';
+      const overlay = $('#conflicts-overlay');
+      if (overlay) overlay.classList.remove('open');
+    }
+  }
+
+  function openConflictsModal() {
+    const overlay = $('#conflicts-overlay');
+    if (!overlay) return;
+    renderConflictsList();
+    overlay.classList.add('open');
+  }
+
+  function closeConflictsModal() {
+    const overlay = $('#conflicts-overlay');
+    if (overlay) overlay.classList.remove('open');
+  }
+
+  function renderConflictsList() {
+    const container = $('#conflicts-list');
+    if (!container) return;
+    const store = getConflictsStore();
+    const ids = Object.keys(store);
+
+    if (ids.length === 0) {
+      container.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:15px;">No hay conflictos pendientes ✓</p>';
+      return;
+    }
+
+    container.innerHTML = ids.map(id => {
+      const conf = store[id];
+      const local = conf.localChange || {};
+      const server = conf.serverItem || {};
+      const title = local.title || server.title || id;
+      const date = local.date || server.date || '';
+
+      return `
+        <div class="conflict-card" style="border:1px solid var(--border-medium); border-radius:var(--radius-md); padding:12px; background:var(--bg-card); margin-bottom:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+            <div>
+              <div style="font-weight:600; font-size:0.95rem; color:var(--text-primary);">${escHTML(title)}</div>
+              <div style="font-size:0.8rem; color:var(--text-muted);">${date}</div>
+            </div>
+            <span style="font-size:0.75rem; background:rgba(255,171,0,0.15); color:var(--accent-amber); padding:2px 8px; border-radius:12px; font-weight:600;">
+              Servidor v${conf.serverVersion || 2}
+            </span>
+          </div>
+          <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:12px;">
+            Tu cambio local: <em>"${escHTML(local.title || title)}"</em> (${local.startTime || '--'}-${local.endTime || '--'})
+          </p>
+          <div style="display:flex; gap:8px;">
+            <button class="btn-secondary" style="flex:1; padding:6px 10px; font-size:0.8rem;" data-resolve="discard" data-id="${id}">
+              Usar la del servidor
+            </button>
+            <button class="btn-primary" style="flex:1; padding:6px 10px; font-size:0.8rem;" data-resolve="rebase" data-id="${id}" data-version="${conf.serverVersion || 2}">
+              Re-aplicar la mía
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    container.querySelectorAll('[data-resolve]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const action = btn.dataset.resolve;
+        const id = btn.dataset.id;
+        const currentStore = getConflictsStore();
+
+        if (action === 'discard') {
+          if (typeof SyncCore !== 'undefined' && SyncCore.discardConflictChange) {
+            const res = SyncCore.discardConflictChange(currentStore, id);
+            saveConflictsStore(res.conflictsStore);
+          } else {
+            delete currentStore[id];
+            saveConflictsStore(currentStore);
+          }
+          showToast('Versión del servidor adoptada ✓');
+          renderConflictsList();
+        } else if (action === 'rebase') {
+          const version = parseInt(btn.dataset.version || '2', 10);
+          const queue = getSyncQueue();
+          if (typeof SyncCore !== 'undefined' && SyncCore.rebaseConflictChange) {
+            const res = SyncCore.rebaseConflictChange(currentStore, queue, id, version);
+            saveConflictsStore(res.conflictsStore);
+            saveSyncQueue(res.queue);
+          }
+          showToast('Re-aplicando cambio sobre la versión del servidor...');
+          renderConflictsList();
+          await syncWithBackend();
+        }
+      });
+    });
   }
 
   function addConfirmPrompt(pending, onDecision) {
@@ -2082,8 +2204,15 @@ SIEMPRE devuelve un JSON válido.
     $('#btn-search')?.addEventListener('click', openSearch);
     $('#search-close')?.addEventListener('click', closeSearch);
     $('#search-input')?.addEventListener('input', (e) => handleSearch(e.target.value));
+
+    // Conflicts modal
+    $('#btn-conflicts')?.addEventListener('click', openConflictsModal);
+    $('#conflicts-close')?.addEventListener('click', closeConflictsModal);
+    $('#conflicts-done-btn')?.addEventListener('click', closeConflictsModal);
+    $('#conflicts-overlay')?.addEventListener('click', (e) => { if (e.target === e.currentTarget) closeConflictsModal(); });
+
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { closeSearch(); closeModal(); closeDeleteModal(); $('#routine-overlay')?.classList.remove('open'); }
+      if (e.key === 'Escape') { closeSearch(); closeModal(); closeDeleteModal(); closeConflictsModal(); $('#routine-overlay')?.classList.remove('open'); }
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); openSearch(); }
     });
 
@@ -2303,6 +2432,9 @@ SIEMPRE devuelve un JSON válido.
     // Schedule web alarms for today
     scheduleWebAlarms();
 
+    // Actualiza badge de conflictos pendientes
+    updateConflictsBadge();
+
     // Sincronización inicial no bloqueante con el backend
     const isLocal = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
     if (settings.backendUrl || isLocal) {
@@ -2467,6 +2599,15 @@ SIEMPRE devuelve un JSON válido.
     saveActivities(activities);
     renderDashboard();
   }
+
+  // ── Window Exports for Tests & Integrations ──
+  window.syncWithBackend = syncWithBackend;
+  window.renderDashboard = renderDashboard;
+  window.renderCalendar = renderCalendar;
+  window.renderActivityList = renderActivityList;
+  window.openConflictsModal = openConflictsModal;
+  window.closeConflictsModal = closeConflictsModal;
+  window.updateConflictsBadge = updateConflictsBadge;
 
   // ── Boot ──
   if (document.readyState === 'loading') {

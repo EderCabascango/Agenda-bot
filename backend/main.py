@@ -12,8 +12,22 @@ from langchain_core.messages import AIMessage, HumanMessage  # noqa: E402
 from langgraph.types import Command  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
+import asyncio
 from contextlib import asynccontextmanager
 import db
+
+async def _periodic_purge_tombstones_task():
+    try:
+        while True:
+            await asyncio.sleep(24 * 3600)
+            try:
+                purged = db.purge_tombstones(days=30)
+                if purged:
+                    print(f"[INFO] Purga periódica (24h) completada: {purged} tombstones eliminados.")
+            except Exception as e:
+                print(f"[WARN] Error en purga periódica de tombstones: {e}")
+    except asyncio.CancelledError:
+        pass
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -24,7 +38,12 @@ async def lifespan(app: FastAPI):
             print(f"[INFO] Tombstones purgados en startup: {purged}")
     except Exception as e:
         print(f"[WARN] Error al purgar tombstones en startup: {e}")
-    yield
+
+    task = asyncio.create_task(_periodic_purge_tombstones_task())
+    try:
+        yield
+    finally:
+        task.cancel()
 
 app = FastAPI(title="Mi Diario - Agente", lifespan=lifespan)
 app.add_middleware(

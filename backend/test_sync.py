@@ -289,3 +289,30 @@ def test_pre_migration_backup_and_auto_backup_rotation():
     assert len(auto_backups) <= 5
     # pre_migration debe seguir existiendo intacto
     assert len(pre_mig_backups) >= 1
+
+
+def test_schema_initialization_per_db_path():
+    """(1.7.2) Dos DBs temporales distintas en el mismo proceso se inicializan y migran ambas de forma independiente."""
+    db1_path = os.path.join(temp_dir, "db1.db")
+    db2_path = os.path.join(temp_dir, "db2.db")
+
+    conn1 = db._conn(db1_path)
+    conn2 = db._conn(db2_path)
+
+    cols1 = {r["name"] for r in conn1.execute("PRAGMA table_info(activities)").fetchall()}
+    cols2 = {r["name"] for r in conn2.execute("PRAGMA table_info(activities)").fetchall()}
+
+    assert {"updated_at", "deleted_at", "version"}.issubset(cols1)
+    assert {"updated_at", "deleted_at", "version"}.issubset(cols2)
+
+    # Insertar en DB1 no afecta a DB2
+    conn1.execute("INSERT INTO activities (user_id, id, title, date) VALUES ('u1', 'id1', 'Titulo DB1', '2026-10-10')")
+    conn1.commit()
+
+    count1 = conn1.execute("SELECT COUNT(*) FROM activities").fetchone()[0]
+    count2 = conn2.execute("SELECT COUNT(*) FROM activities").fetchone()[0]
+
+    assert count1 == 1
+    assert count2 == 0
+    conn1.close()
+    conn2.close()

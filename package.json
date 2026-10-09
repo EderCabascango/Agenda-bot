@@ -8,7 +8,12 @@
     "android": "npx cap add android && npx cap sync android && npx cap open android",
     "cap-sync": "npx cap sync",
     "cap-open": "npx cap open",
-    "build": "echo Building placeholder"
+    "build": "echo Building placeholder",
+    "test:sync": "node --test web/test_sync_core.js",
+    "test:backend": "backend\\.venv\\Scripts\\pytest backend/",
+    "test:integration": "backend\\.venv\\Scripts\\python scripts/test_integration.py",
+    "test:e2e": "backend\\.venv\\Scripts\\python scripts/test_e2e_playwright.py",
+    "test": "node --test web/test_sync_core.js && backend\\.venv\\Scripts\\pytest backend/ && backend\\.venv\\Scripts\\python scripts/test_integration.py && backend\\.venv\\Scripts\\python scripts/test_e2e_playwright.py"
   },
   "dependencies": {
     "@capacitor/core": "^8.4.0",

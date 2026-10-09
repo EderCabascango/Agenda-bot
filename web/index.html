@@ -55,6 +55,10 @@
         <button class="menu-toggle material-icons-round" id="menu-toggle">menu</button>
         <div class="topbar-date" id="topbar-date"></div>
         <div class="topbar-actions">
+          <button class="topbar-btn" id="btn-conflicts" title="Conflictos de sincronización" style="display:none; color:var(--accent-amber); position:relative;">
+            <span class="material-icons-round">sync_problem</span>
+            <span class="notif-dot" id="conflicts-dot" style="display:block; background:var(--accent-amber);"></span>
+          </button>
           <button class="topbar-btn" id="btn-search" title="Buscar (Ctrl+K)">
             <span class="material-icons-round">search</span>
           </button>
@@ -579,6 +583,28 @@
       </div>
       <div class="modal-actions">
         <button class="btn-secondary" id="routine-cancel">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de Resolución de Conflictos de Sincronización -->
+  <div class="modal-overlay" id="conflicts-overlay">
+    <div class="modal-card" style="max-width: 580px;">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="material-icons-round" style="color:var(--accent-amber);">sync_problem</span>
+          <h3 class="modal-title">Conflictos de Sincronización</h3>
+        </div>
+        <button class="modal-close material-icons-round" id="conflicts-close">close</button>
+      </div>
+      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">
+        Se detectaron modificaciones concurrentes en el servidor. Elige qué versión deseas conservar para cada actividad:
+      </p>
+      <div id="conflicts-list" style="display:flex; flex-direction:column; gap:12px; max-height:360px; overflow-y:auto;">
+        <!-- Render dinámico -->
+      </div>
+      <div class="modal-actions" style="margin-top:20px;">
+        <button class="btn-secondary" id="conflicts-done-btn">Cerrar</button>
       </div>
     </div>
   </div>
