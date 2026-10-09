@@ -478,26 +478,34 @@
         const now = new Date();
         const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
-        const sorted = [...todayActs].sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
-        timeline.innerHTML = sorted.map(a => {
+        // Categorize activities: overdue vs active/upcoming/completed
+        const overdueActs = [];
+        const mainStreamActs = [];
+
+        todayActs.forEach(a => {
+          let isOverdue = false;
+          if (a.endTime && !a.completed) {
+            const [eh, em] = a.endTime.split(':').map(Number);
+            const endMin = eh * 60 + em;
+            if (nowMinutes > endMin) isOverdue = true;
+          }
+          if (isOverdue) overdueActs.push(a);
+          else mainStreamActs.push(a);
+        });
+
+        // Helper renderer for a single agenda item
+        const renderItemHTML = (a, isOverdue = false) => {
           const timeSlot = a.startTime ? (a.endTime ? `${a.startTime} - ${a.endTime}` : a.startTime) : 'Horario no definido';
           const tag = (a.tags && a.tags[0]) ? a.tags[0] : 'General';
           const isDone = a.completed;
 
-          let isOverdue = false;
           let inProgress = false;
-
-          if (a.endTime) {
-            const [eh, em] = a.endTime.split(':').map(Number);
-            const endMin = eh * 60 + em;
-            if (nowMinutes > endMin && !isDone) isOverdue = true;
-          }
-          if (a.startTime && a.endTime) {
+          if (a.startTime && a.endTime && !isDone && !isOverdue) {
             const [sh, sm] = a.startTime.split(':').map(Number);
             const [eh, em] = a.endTime.split(':').map(Number);
             const startMin = sh * 60 + sm;
             const endMin = eh * 60 + em;
-            if (nowMinutes >= startMin && nowMinutes <= endMin && !isDone) inProgress = true;
+            if (nowMinutes >= startMin && nowMinutes <= endMin) inProgress = true;
           }
 
           let statusLabel = 'Programado';
@@ -510,7 +518,7 @@
             statusLabel = 'En curso';
             statusClass = 'agenda-item--active';
           } else if (isOverdue) {
-            statusLabel = 'No registrada / Vencida';
+            statusLabel = 'Vencida';
             statusClass = 'agenda-item--overdue';
           }
 
@@ -533,9 +541,77 @@
               </div>
             </div>
           `;
-        }).join('');
+        };
 
-        // Attach interactive event listeners
+        let html = '';
+
+        // Render Collapsible Overdue Banner if overdue tasks exist
+        if (overdueActs.length > 0) {
+          html += `
+            <div class="overdue-banner" id="btn-toggle-overdue">
+              <div style="display:flex; align-items:center; gap:6px; flex:1; min-width:0;">
+                <span class="material-icons-round" style="color:var(--accent-red); font-size:18px;">history_toggle_off</span>
+                <span style="font-size:0.78rem; font-weight:700; color:var(--text-primary);">
+                  ${overdueActs.length} pasadas sin registrar
+                </span>
+              </div>
+              <button class="btn-text" id="btn-reschedule-overdue" style="font-size:0.75rem; font-weight:700; color:var(--accent-amber); padding:4px 8px; border-radius:var(--radius-pill); background:var(--accent-amber-soft);">
+                Mover a mañana
+              </button>
+              <span class="material-icons-round overdue-chevron" id="overdue-chevron" style="font-size:18px; color:var(--text-muted); cursor:pointer; margin-left:4px;">expand_more</span>
+            </div>
+            <div class="overdue-list-container" id="overdue-list-container" style="display:none; margin-bottom:16px;">
+              ${overdueActs.sort((a,b) => (a.startTime||'').localeCompare(b.startTime||'')).map(a => renderItemHTML(a, true)).join('')}
+            </div>
+          `;
+        }
+
+        // Render Main Stream (Current, Upcoming, Completed)
+        const sortedMain = [...mainStreamActs].sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+        if (sortedMain.length === 0 && overdueActs.length > 0) {
+          html += `<p style="font-size:0.82rem; color:var(--text-muted); text-align:center; padding:12px 0;">No quedan tareas pendientes para el resto del día.</p>`;
+        } else {
+          html += sortedMain.map(a => renderItemHTML(a, false)).join('');
+        }
+
+        timeline.innerHTML = html;
+
+        // Overdue toggle listener
+        const overdueToggleBtn = $('#btn-toggle-overdue');
+        const overdueList = $('#overdue-list-container');
+        const overdueChevron = $('#overdue-chevron');
+        if (overdueToggleBtn && overdueList) {
+          overdueToggleBtn.addEventListener('click', (e) => {
+            if (e.target.id === 'btn-reschedule-overdue') return;
+            const isHidden = overdueList.style.display === 'none';
+            overdueList.style.display = isHidden ? 'block' : 'none';
+            if (overdueChevron) overdueChevron.textContent = isHidden ? 'expand_less' : 'expand_more';
+          });
+        }
+
+        // 1-Click "Mover a mañana" handler
+        const rescheduleBtn = $('#btn-reschedule-overdue');
+        if (rescheduleBtn) {
+          rescheduleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const tomorrowStr = toDateStr(tomorrow);
+
+            overdueActs.forEach(a => {
+              a.date = tomorrowStr;
+              a.updated_at = new Date().toISOString();
+              a.base_version = a.version || 1;
+              a.version = (a.version || 1) + 1;
+              enqueueChange(a);
+            });
+            saveActivities(activities);
+            renderDashboard();
+            showToast(`${overdueActs.length} tareas movidas a mañana ✓`, 'schedule', 'var(--accent-amber)');
+          });
+        }
+
+        // Attach interactive check & focus listeners
         timeline.querySelectorAll('[data-agenda-toggle]').forEach(btn => {
           btn.addEventListener('click', (e) => {
             e.stopPropagation();

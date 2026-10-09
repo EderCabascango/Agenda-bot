@@ -763,6 +763,22 @@ input:focus, select:focus, textarea:focus {
 .btn-agenda-focus:hover {
   transform: scale(1.1);
 }
+
+.overdue-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.overdue-banner:hover {
+  background: rgba(239, 68, 68, 0.12);
+}
 .db-panel--wide { min-width: 0; }
 .db-panel-header {
   display: flex; align-items: center; gap: 10px; margin-bottom: 18px;
