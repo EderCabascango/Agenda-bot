@@ -334,7 +334,7 @@ def _row(r) -> dict:
 
 
 STANDARD_METADATA_FIELDS = {
-    "id", "base_version", "deleted_at", "version", "updated_at", "created_at", "user_id"
+    "id", "base_version", "deleted_at", "version", "updated_at", "created_at", "user_id", "op"
 }
 
 
@@ -361,6 +361,7 @@ def validate_and_sanitize_item(collection_name: str, item: dict) -> tuple[dict |
         "base_version": item.get("base_version"),
         "deleted_at": item.get("deleted_at"),
         "version": item.get("version"),
+        "op": item.get("op"),
     }
 
     for field_name, field_spec in schema["columns"].items():
@@ -697,9 +698,11 @@ def sync_collection(
 
     applied = 0
     conflicts = []
+    skipped = []
     rejected = []
     unknown_fields_report = []
     resync_required = False
+    forced_changes = []
 
     # 1. Validación de esquema PRE-TRANSACCIÓN (sin bloquear el lote completo)
     valid_items = []
@@ -735,8 +738,19 @@ def sync_collection(
             item_id = item["id"]
             existing = get_collection_item(user_id, collection_name, item_id, include_deleted=True, conn=c)
             base_version = item.get("base_version")
+            op = item.get("op")
 
             if existing:
+                if op == "create_if_absent":
+                    skipped.append({
+                        "id": item_id,
+                        "collection": collection_name,
+                        "reason": "already_exists",
+                        "server_item": existing
+                    })
+                    forced_changes.append(existing)
+                    continue
+
                 if base_version is None:
                     conflicts.append({
                         "id": item_id,
@@ -798,6 +812,12 @@ def sync_collection(
         else:
             remote_changes = []
 
+        if forced_changes:
+            existing_ids = {r["id"] for r in remote_changes}
+            for fc in forced_changes:
+                if fc["id"] not in existing_ids:
+                    remote_changes.append(fc)
+
         return remote_changes
 
     if conn is not None:
@@ -811,6 +831,7 @@ def sync_collection(
     return {
         "applied": applied,
         "conflicts": conflicts,
+        "skipped": skipped,
         "rejected": rejected,
         "unknown_fields": unknown_fields_report,
         "server_time": now or monotonic_utc_now_iso(),

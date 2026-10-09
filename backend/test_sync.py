@@ -1024,4 +1024,112 @@ def test_migration_creates_new_tables_and_preserves_pre_migration_backup():
             migrated_conn.close()
 
 
+@pytest.mark.parametrize("coll_name", ["activities", "subjects", "topics", "focus_sessions", "learning_notes"])
+def test_parameterized_create_if_absent_inserts_when_absent(coll_name):
+    """(Fase B0) Verifica que create_if_absent inserta el registro normalmente si no existe en el servidor."""
+    user = f"user_cia_absent_{coll_name}"
+    item = dict(SAMPLE_ITEMS_FOR_COLLECTIONS[coll_name])
+    item["op"] = "create_if_absent"
+
+    res = db.sync_collection(user, coll_name, changes=[item])
+    assert res["applied"] == 1
+    assert len(res["conflicts"]) == 0
+    assert len(res["skipped"]) == 0
+    assert len(res["rejected"]) == 0
+
+    saved = db.get_collection_item(user, coll_name, item["id"])
+    assert saved is not None
+    assert saved["id"] == item["id"]
+    assert saved["version"] == 1
+
+
+@pytest.mark.parametrize("coll_name", ["activities", "subjects", "topics", "focus_sessions", "learning_notes"])
+def test_parameterized_create_if_absent_skips_when_exists(coll_name):
+    """(Fase B0) Verifica que create_if_absent no genera conflicto ni sobrescribe cuando el registro ya existe."""
+    user = f"user_cia_exists_{coll_name}"
+    item = dict(SAMPLE_ITEMS_FOR_COLLECTIONS[coll_name])
+
+    # 1. Crear el registro previamente con versión 1
+    db.sync_collection(user, coll_name, changes=[item])
+
+    # 2. Modificarlo en el servidor para avanzar a versión 2 y cambiar un campo
+    item_v2 = dict(item)
+    item_v2["base_version"] = 1
+    if "name" in item_v2:
+        item_v2["name"] = "Nombre Servidor Modificado"
+    elif "title" in item_v2:
+        item_v2["title"] = "Título Servidor Modificado"
+    elif "learned_text" in item_v2:
+        item_v2["learned_text"] = "Texto Servidor Modificado"
+    elif "goal" in item_v2:
+        item_v2["goal"] = "Meta Servidor Modificada"
+    db.sync_collection(user, coll_name, changes=[item_v2])
+
+    # 3. Intentar crear con create_if_absent usando payload inicial
+    cia_item = dict(item)
+    cia_item["op"] = "create_if_absent"
+    res = db.sync_collection(user, coll_name, changes=[cia_item])
+
+    assert res["applied"] == 0
+    assert len(res["conflicts"]) == 0  # CERO conflictos generados
+    assert len(res["skipped"]) == 1
+    assert res["skipped"][0]["reason"] == "already_exists"
+    assert res["skipped"][0]["id"] == item["id"]
+    assert res["skipped"][0]["server_item"]["version"] == 2
+
+    # Verificar que el registro en servidor mantiene su valor modificado y versión 2
+    saved = db.get_collection_item(user, coll_name, item["id"])
+    assert saved["version"] == 2
+    if "name" in saved:
+        assert saved["name"] == "Nombre Servidor Modificado"
+
+
+@pytest.mark.parametrize("coll_name", ["activities", "subjects", "topics", "focus_sessions", "learning_notes"])
+def test_parameterized_create_if_absent_skips_when_tombstone(coll_name):
+    """(Fase B0) Verifica que create_if_absent no resucita un tombstone existente ni genera conflicto."""
+    user = f"user_cia_tomb_{coll_name}"
+    item = dict(SAMPLE_ITEMS_FOR_COLLECTIONS[coll_name])
+
+    # 1. Crear y luego borrar (tombstone)
+    db.sync_collection(user, coll_name, changes=[item])
+    del_item = {"id": item["id"], "base_version": 1, "deleted_at": "2026-10-10T12:00:00.000000Z"}
+    db.sync_collection(user, coll_name, changes=[del_item])
+
+    # 2. Intentar crear con create_if_absent
+    cia_item = dict(item)
+    cia_item["op"] = "create_if_absent"
+    res = db.sync_collection(user, coll_name, changes=[cia_item])
+
+    assert res["applied"] == 0
+    assert len(res["conflicts"]) == 0
+    assert len(res["skipped"]) == 1
+    assert res["skipped"][0]["reason"] == "already_exists"
+
+    # Verificar que el registro sigue borrado
+    tombstone = db.get_collection_item(user, coll_name, item["id"], include_deleted=True)
+    assert tombstone["deleted_at"] is not None
+    assert tombstone["version"] == 2
+
+
+@pytest.mark.parametrize("coll_name", ["activities", "subjects", "topics", "focus_sessions", "learning_notes"])
+def test_parameterized_create_if_absent_returns_existing_in_changes(coll_name):
+    """(Fase B0) Verifica que el servidor devuelve el item existente en changes para que el cliente lo adopte."""
+    user = f"user_cia_changes_{coll_name}"
+    item = dict(SAMPLE_ITEMS_FOR_COLLECTIONS[coll_name])
+
+    # 1. Crear en servidor
+    res1 = db.sync_collection(user, coll_name, changes=[item])
+    t1 = res1["server_time"]
+
+    # 2. Cliente con cursor t1 envía create_if_absent
+    cia_item = dict(item)
+    cia_item["op"] = "create_if_absent"
+    res2 = db.sync_collection(user, coll_name, changes=[cia_item], since=t1)
+
+    assert res2["applied"] == 0
+    assert len(res2["changes"]) == 1
+    assert res2["changes"][0]["id"] == item["id"]
+
+
+
 
