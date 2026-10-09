@@ -43,6 +43,11 @@ const steps = [
     args: ['--test', path.join(ROOT_DIR, 'web/test_timer_core.js')]
   },
   {
+    name: '1.d Tests Unitarios Frontend (StatsCore)',
+    cmd: process.execPath,
+    args: ['--test', path.join(ROOT_DIR, 'web/test_stats_core.js')]
+  },
+  {
     name: '2. Tests Unitarios e Integración Backend (Pytest)',
     cmd: PYTEST,
     args: [path.join(ROOT_DIR, 'backend')]
