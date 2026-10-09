@@ -770,6 +770,66 @@ def test_playwright_e2e_full_sync():
             title_text = page_a.inner_text("#detail-subject-title")
             assert "<script>" in title_text or "alert" in title_text, "El texto crudo debe mostrarse sin interpretar tags HTML"
             print(" -> Verificación de seguridad y huérfanos exitosa: 0 alertas XSS, render tolerante a huérfanos.")
+            page_a.keyboard.press("Escape")
+
+            # ============================================================
+            # [E2E 12] Creación de Materias Semilla Offline y Sincronización al Reconectar
+            # ============================================================
+            print("\n[E2E 12] Probando creación de semillas sugeridas offline y posterior sincronización...")
+            page_a.route("**/sync*", offline_handler)
+            page_a.evaluate("""async () => {
+                window.handleSeedSubjects();
+                try { await window.syncWithBackend(); } catch(e) {}
+            }""")
+
+            # Verificar que las semillas existen localmente mientras está offline
+            local_subs_off = page_a.evaluate("() => JSON.parse(localStorage.getItem('diary_subjects') || '[]').filter(s => s && s.id.startsWith('subject-seed-') && !s.deleted_at).length")
+            assert local_subs_off == 4, f"Contexto A debió crear las 4 materias offline, tiene: {local_subs_off}"
+
+            # Reconectar y sincronizar
+            page_a.unroute("**/sync*", offline_handler)
+            sync_res = page_a.evaluate("async () => { return await window.syncWithBackend(); }")
+            assert sync_res, "Sincronización de semillas tras reconexión debió ser exitosa"
+            print(" -> Semillas creadas offline sincronizadas exitosamente al reconectar.")
+
+            # ============================================================
+            # [E2E 13] Accesibilidad y Navegación por Teclado (Tab, Enter, Escape)
+            # ============================================================
+            print("\n[E2E 13] Probando navegación por teclado (Tab, Enter, Escape) en modales de estudio...")
+            page_a.click(".nav-item[data-view='study']")
+            page_a.wait_for_selector("#view-study.active", timeout=3000)
+
+            # Abrir modal de materia por UI
+            page_a.click("#btn-add-subject")
+            page_a.wait_for_selector("#subject-modal-overlay.open", timeout=3000)
+
+            # Escribir nombre usando teclado
+            page_a.focus("#subject-name-input")
+            page_a.keyboard.type("Teclado Accesible")
+            page_a.keyboard.press("Tab") # Color
+            page_a.keyboard.press("Tab") # Meta semanal
+            page_a.keyboard.type("180")
+
+            # Cerrar con Escape
+            page_a.keyboard.press("Escape")
+            page_a.wait_for_selector("#subject-modal-overlay", state="hidden", timeout=3000)
+            print(" -> Tecla Escape cerró correctamente el modal de materia.")
+
+            # ============================================================
+            # [E2E 14] Capturas de Pantalla de la Vista de Estudio y Modales
+            # ============================================================
+            print("\n[E2E 14] Generando capturas de pantalla de la Vista de Estudio y Detalle...")
+            os.makedirs("screenshots", exist_ok=True)
+            page_a.set_viewport_size({"width": 1280, "height": 800})
+            page_a.screenshot(path="screenshots/study_view.png")
+
+            # Abrir detalle de materia y tomar screenshot
+            page_a.click(".subject-card[data-id='subject-seed-ingles'] [data-action='detail']")
+            page_a.wait_for_selector("#subject-detail-overlay.open", timeout=3000)
+            page_a.screenshot(path="screenshots/subject_detail.png")
+            page_a.keyboard.press("Escape")
+            page_a.wait_for_selector("#subject-detail-overlay", state="hidden", timeout=3000)
+            print(" -> Capturas guardadas en screenshots/study_view.png y screenshots/subject_detail.png.")
 
             browser.close()
             print("\n============================================================")

@@ -96,8 +96,31 @@
     subjects = list;
     safeStorageSet(SUBJECTS_KEY, list);
   }
+  function migrateLegacyTopicStatuses(list) {
+    if (!Array.isArray(list)) return [];
+    let changed = false;
+    const migrated = list.map(t => {
+      if (!t || typeof t !== 'object') return t;
+      let newStatus = t.status;
+      if (t.status === 'not_started') newStatus = 'pending';
+      else if (t.status === 'completed' || t.status === 'review_needed') newStatus = 'mastered';
+      else if (!['pending', 'in_progress', 'mastered'].includes(t.status)) newStatus = 'pending';
+
+      if (newStatus !== t.status) {
+        changed = true;
+        return { ...t, status: newStatus };
+      }
+      return t;
+    });
+    if (changed) {
+      safeStorageSet(TOPICS_KEY, migrated);
+    }
+    return migrated;
+  }
+
   function loadTopics() {
-    return safeStorageGet(TOPICS_KEY, []);
+    const raw = safeStorageGet(TOPICS_KEY, []);
+    return migrateLegacyTopicStatuses(raw);
   }
   function saveTopics(list) {
     topics = list;
@@ -1816,15 +1839,14 @@
         topicsList.innerHTML = '<p style="font-size:0.85rem; color:var(--text-muted); text-align:center; padding:16px;">No hay temas agregados en esta materia.</p>';
       } else {
         const STATUS_LABELS = {
-          not_started: 'No iniciado',
+          pending: 'Pendiente',
           in_progress: 'En progreso',
-          completed: 'Completado',
-          review_needed: 'Repasar'
+          mastered: 'Dominado'
         };
 
         topicsList.innerHTML = childTopics.map(t => {
           const tStat = summary.topic_stats[t.id] || { hours: 0 };
-          const status = t.status || 'not_started';
+          const status = t.status || 'pending';
           return `
             <div class="topic-item" data-id="${escHTML(t.id)}">
               <div>
@@ -1879,13 +1901,13 @@
         if (titleEl) titleEl.textContent = 'Editar Tema';
         if (idInput) idInput.value = top.id;
         if (nameInput) nameInput.value = top.name || '';
-        if (statusInput) statusInput.value = top.status || 'not_started';
+        if (statusInput) statusInput.value = top.status || 'pending';
       }
     } else {
       if (titleEl) titleEl.textContent = 'Nuevo Tema';
       if (idInput) idInput.value = '';
       if (nameInput) nameInput.value = '';
-      if (statusInput) statusInput.value = 'not_started';
+      if (statusInput) statusInput.value = 'pending';
     }
 
     overlay.classList.add('open');
@@ -1906,7 +1928,7 @@
     const topicId = idInput?.value ? idInput.value : null;
     const subjectId = subIdInput?.value || selectedSubjectIdForDetail;
     const name = nameInput ? nameInput.value.trim() : '';
-    const status = statusInput ? statusInput.value : 'not_started';
+    const status = statusInput ? statusInput.value : 'pending';
 
     const data = {
       subject_id: subjectId,

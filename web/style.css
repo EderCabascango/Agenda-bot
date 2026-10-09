@@ -1369,6 +1369,7 @@ input:focus, select:focus, textarea:focus {
   align-items: center;
 }
 
+.topic-status-badge.pending,
 .topic-status-badge.not_started {
   background: rgba(148, 163, 184, 0.15);
   color: var(--text-secondary);
@@ -1379,6 +1380,7 @@ input:focus, select:focus, textarea:focus {
   color: #3B82F6;
 }
 
+.topic-status-badge.mastered,
 .topic-status-badge.completed {
   background: rgba(16, 185, 129, 0.15);
   color: #10B981;

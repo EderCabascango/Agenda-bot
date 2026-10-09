@@ -57,52 +57,52 @@
         id: 'topic-seed-ingles-vocabulario',
         subject_id: 'subject-seed-ingles',
         name: 'Vocabulario y Speaking',
-        status: 'not_started'
+        status: 'pending'
       },
       {
         id: 'topic-seed-ingles-gramatica',
         subject_id: 'subject-seed-ingles',
         name: 'Gramática y Listening',
-        status: 'not_started'
+        status: 'pending'
       },
       // GenAI
       {
         id: 'topic-seed-genai-prompting',
         subject_id: 'subject-seed-genai',
         name: 'Prompt Engineering & RAG',
-        status: 'not_started'
+        status: 'pending'
       },
       {
         id: 'topic-seed-genai-fine-tuning',
         subject_id: 'subject-seed-genai',
         name: 'Fine-tuning & Evaluación',
-        status: 'not_started'
+        status: 'pending'
       },
       // MLOps
       {
         id: 'topic-seed-mlops-ci-cd',
         subject_id: 'subject-seed-mlops',
         name: 'CI/CD para Machine Learning',
-        status: 'not_started'
+        status: 'pending'
       },
       {
         id: 'topic-seed-mlops-docker',
         subject_id: 'subject-seed-mlops',
         name: 'Docker & Despliegues',
-        status: 'not_started'
+        status: 'pending'
       },
       // Spark
       {
         id: 'topic-seed-spark-dataframes',
         subject_id: 'subject-seed-spark',
         name: 'PySpark DataFrames & SQL',
-        status: 'not_started'
+        status: 'pending'
       },
       {
         id: 'topic-seed-spark-streaming',
         subject_id: 'subject-seed-spark',
         name: 'Structured Streaming & Optimización',
-        status: 'not_started'
+        status: 'pending'
       }
     ]
   };
@@ -249,7 +249,7 @@
       topicStats[t.id] = {
         topic_id: t.id,
         name: t.name,
-        status: t.status || 'not_started',
+        status: t.status || 'pending',
         seconds: 0,
         minutes: 0,
         hours: 0,
@@ -382,7 +382,7 @@
     }
 
     if (data.status) {
-      const allowedStatuses = ['not_started', 'in_progress', 'completed', 'review_needed'];
+      const allowedStatuses = ['pending', 'in_progress', 'mastered'];
       if (!allowedStatuses.includes(data.status)) {
         errors.push(`Estado inválido: ${data.status}`);
       }

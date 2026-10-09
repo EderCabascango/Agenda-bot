@@ -32,7 +32,7 @@ test('FocusCore - Suite de Lógica Pura de Materias y Temas (Fase B1)', async (t
       assert.equal(top.op, 'create_if_absent');
       assert.ok(top.subject_id.startsWith('subject-seed-'));
       assert.ok(top.name);
-      assert.equal(top.status, 'not_started');
+      assert.equal(top.status, 'pending');
     });
   });
 
@@ -100,8 +100,8 @@ test('FocusCore - Suite de Lógica Pura de Materias y Temas (Fase B1)', async (t
     };
     const topics = [
       { id: 'top_js', subject_id: 'sub_prog', name: 'JavaScript', status: 'in_progress' },
-      { id: 'top_py', subject_id: 'sub_prog', name: 'Python', status: 'completed' },
-      { id: 'top_rust', subject_id: 'sub_prog', name: 'Rust', status: 'not_started' }
+      { id: 'top_py', subject_id: 'sub_prog', name: 'Python', status: 'mastered' },
+      { id: 'top_rust', subject_id: 'sub_prog', name: 'Rust', status: 'pending' }
     ];
     const sessions = [
       // Sesión 1: 3600 segundos (60 min) divididos entre JS y Python (1800s c/u = 30 min c/u)
@@ -165,7 +165,56 @@ test('FocusCore - Suite de Lógica Pura de Materias y Temas (Fase B1)', async (t
     assert.equal(summary.topic_stats['top_rust'].percentage, 0);
   });
 
-  await t.test('6. validateSubjectForm valida longitud, unicidad case-insensitive, color y meta', () => {
+  await t.test('6. summarizeSubject con sesiones que referencian subtemas inexistentes, de otra materia o con tombstone acumula segundos a la materia sin error', () => {
+    const subject = {
+      id: 'sub_main',
+      name: 'Arquitectura',
+      weekly_goal_minutes: 60
+    };
+    const topics = [
+      { id: 'top_valid', subject_id: 'sub_main', name: 'Microservicios', status: 'in_progress' },
+      { id: 'top_deleted', subject_id: 'sub_main', name: 'Monolito', status: 'pending', deleted_at: '2026-10-09T00:00:00Z' },
+      { id: 'top_other_sub', subject_id: 'sub_other', name: 'Química', status: 'pending' }
+    ];
+    const sessions = [
+      // Sesión con topic inexistente ('top_non_existent') y topic de otra materia ('top_other_sub')
+      {
+        id: 'sess_orphan',
+        subject_id: 'sub_main',
+        topic_ids: ['top_non_existent', 'top_other_sub'],
+        effective_seconds: 1200, // 20 min
+        deleted_at: null
+      },
+      // Sesión con topic borrado ('top_deleted') y topic válido ('top_valid')
+      {
+        id: 'sess_mixed',
+        subject_id: 'sub_main',
+        topic_ids: ['top_deleted', 'top_valid'],
+        effective_seconds: 2400, // 40 min -> Solo 'top_valid' es válido, se le asigna 2400s
+        deleted_at: null
+      }
+    ];
+
+    const summary = FocusCore.summarizeSubject(subject, topics, sessions);
+
+    // Total segundos para la materia: 1200 + 2400 = 3600 segundos (60 minutos = 1.0 hora)
+    assert.equal(summary.total_seconds, 3600);
+    assert.equal(summary.total_minutes, 60);
+    assert.equal(summary.total_hours, 1);
+    assert.equal(summary.session_count, 2);
+    assert.equal(summary.goal_progress_percent, 100);
+
+    // Topic válido se lleva los 2400s de la sesión mixed
+    assert.equal(summary.topic_stats['top_valid'].seconds, 2400);
+    assert.equal(summary.topic_stats['top_valid'].minutes, 40);
+
+    // El topic borrado NO debe estar en topic_stats
+    assert.equal(summary.topic_stats['top_deleted'], undefined);
+    // El topic de otra materia NO debe estar en topic_stats
+    assert.equal(summary.topic_stats['top_other_sub'], undefined);
+  });
+
+  await t.test('7. validateSubjectForm valida longitud, unicidad case-insensitive, color y meta', () => {
     const existing = [
       { id: 'sub_1', name: 'Física Clásica' },
       { id: 'sub_2', name: 'Química Orgánica', deleted_at: '2026-10-01T00:00:00Z' }
@@ -208,7 +257,7 @@ test('FocusCore - Suite de Lógica Pura de Materias y Temas (Fase B1)', async (t
     assert.equal(valid.errors.length, 0);
   });
 
-  await t.test('7. validateTopicForm valida materia asociada, longitud y unicidad por materia', () => {
+  await t.test('8. validateTopicForm valida materia asociada, longitud, unicidad por materia y los 3 estados permitidos (pending, in_progress, mastered)', () => {
     const existing = [
       { id: 'top_1', subject_id: 'sub_1', name: 'Cinemática' },
       { id: 'top_2', subject_id: 'sub_2', name: 'Cinemática' } // Mismo nombre pero en otra materia
@@ -226,14 +275,17 @@ test('FocusCore - Suite de Lógica Pura de Materias y Temas (Fase B1)', async (t
     const diffSub = FocusCore.validateTopicForm({ subject_id: 'sub_3', name: 'Cinemática' }, existing);
     assert.equal(diffSub.valid, true);
 
-    // Status inválido
-    const badSt = FocusCore.validateTopicForm({ subject_id: 'sub_1', name: 'Dinámica', status: 'xyz' }, existing);
+    // Status inválido (ej. 'not_started' legacy o 'xyz')
+    const badSt = FocusCore.validateTopicForm({ subject_id: 'sub_1', name: 'Dinámica', status: 'not_started' }, existing);
     assert.equal(badSt.valid, false);
     assert.ok(badSt.errors[0].includes('Estado inválido'));
 
-    // Válido
-    const ok = FocusCore.validateTopicForm({ subject_id: 'sub_1', name: 'Dinámica', status: 'in_progress' }, existing);
-    assert.equal(ok.valid, true);
+    // Todos los 3 estados permitidos son válidos
+    const allowed = ['pending', 'in_progress', 'mastered'];
+    allowed.forEach(status => {
+      const res = FocusCore.validateTopicForm({ subject_id: 'sub_1', name: `Dinámica ${status}`, status }, existing);
+      assert.equal(res.valid, true, `Estado ${status} debe ser válido`);
+    });
   });
 
 });
