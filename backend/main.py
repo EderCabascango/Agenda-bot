@@ -187,8 +187,13 @@ def confirm(body: Confirm, user: str = Depends(auth)):
     return _result(res)
 
 
+DESIGN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "design"))
+if os.path.isdir(DESIGN_DIR):
+    app.mount("/design", StaticFiles(directory=DESIGN_DIR, html=True), name="design")
+
 # Monta el frontend web para servir todo en una sola URL
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
 if os.path.isdir(WEB_DIR):
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+
 

@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Maqueta de diseño - Mi Diario (Taskly Style)</title>
+<style>
+/* ============ TOKENS "TASKLY" ============ */
+:root {
+  --canvas: #F6F7FB;
+  --tinta: #111111;
+  --amarillo: #F5B82E;
+  --amarillo-suave: #FFF7DF;
+  --amarillo-hover: #EEA81B;
+  --negro-pill: #111111;
+  --card-bg: #FFFFFF;
+  --border-subtle: #EBECEF;
+  --shadow-subtle: 0 10px 30px rgba(0, 0, 0, 0.04);
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.03);
+  
+  --texto: #111111;
+  --texto-2: #52525B;
+  --texto-3: #71717A;
+  
+  --lienzo: var(--canvas);
+  --superficie: #FFFFFF;
+  --sidebar-bg: #FFFFFF;
+  --sidebar-border: #EBECEF;
+  --sidebar-texto: #111111;
+  
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 20px;
+  --r-xl: 24px;
+  --r-pill: 999px;
+  
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px; --s-6: 32px;
+  --f-display: "Outfit", "Plus Jakarta Sans", "Segoe UI Semibold", system-ui, sans-serif;
+  --f-body: "Plus Jakarta Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+[data-theme="dark"] {
+  --canvas: #121214;
+  --texto: #F4F4F5;
+  --texto-2: #A1A1AA;
+  --texto-3: #71717A;
+  --superficie: #1C1C1E;
+  --sidebar-bg: #18181B;
+  --sidebar-border: #27272A;
+  --sidebar-texto: #F4F4F5;
+  --card-bg: #1C1C1E;
+  --border-subtle: #27272A;
+  --shadow-subtle: 0 10px 30px rgba(0, 0, 0, 0.2);
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.2);
+  --amarillo-suave: #2A2415;
+}
+
+* { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; }
+body { background: var(--lienzo); color: var(--texto); font-family: var(--f-body); font-size: 14px; line-height: 1.5; overflow-x: hidden; }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 700; letter-spacing: -0.02em; color: var(--texto); }
+button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+:focus-visible { outline: 3px solid var(--amarillo); outline-offset: 2px; }
+
+/* ============ LAYOUT SHELL ============ */
+.app { display: grid; grid-template-columns: 240px 1fr; gap: var(--s-5); padding: var(--s-4); min-height: 100vh; max-width: 1440px; margin: 0 auto; }
+
+/* ============ SIDEBAR ============ */
+.sidebar { background: var(--sidebar-bg); border: 1px solid var(--sidebar-border); border-radius: var(--r-xl); padding: var(--s-5) var(--s-4); display: flex; flex-direction: column; gap: var(--s-4); position: sticky; top: var(--s-4); height: calc(100vh - 32px); box-shadow: var(--shadow-card); }
+.brand { display: flex; align-items: center; gap: var(--s-3); font-family: var(--f-display); font-size: 1.2rem; font-weight: 800; padding: 0 var(--s-2); }
+.brand-mark { width: 34px; height: 34px; border-radius: 10px; background: var(--tinta); color: #FFF; display: grid; place-items: center; font-weight: 800; font-size: 1rem; }
+[data-theme="dark"] .brand-mark { background: var(--amarillo); color: #111; }
+
+.nav-title { font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; color: var(--texto-3); padding: var(--s-3) var(--s-3) var(--s-1); font-weight: 700; }
+.nav-item { display: flex; align-items: center; gap: var(--s-3); min-height: 44px; padding: 0 var(--s-4); border-radius: var(--r-md); color: var(--texto-2); font-weight: 600; text-decoration: none; transition: all 0.15s ease; }
+.nav-item:hover { background: rgba(0,0,0,0.03); color: var(--texto); }
+.nav-item.active { background: var(--negro-pill); color: #FFFFFF; font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+[data-theme="dark"] .nav-item.active { background: #FFFFFF; color: #111111; }
+
+.sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: var(--s-2); border-top: 1px solid var(--border-subtle); padding-top: var(--s-4); }
+
+/* ============ MAIN AREA ============ */
+.main { min-width: 0; display: flex; flex-direction: column; gap: var(--s-5); padding: var(--s-2) var(--s-2) var(--s-6); }
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: var(--s-4); flex-wrap: wrap; }
+
+.user-profile { display: flex; align-items: center; gap: var(--s-3); padding: 4px var(--s-3); border-radius: var(--r-pill); background: var(--card-bg); border: 1px solid var(--border-subtle); box-shadow: var(--shadow-card); }
+.avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--amarillo); color: #111; display: grid; place-items: center; font-weight: 700; font-size: 0.9rem; }
+.user-info { display: flex; flex-direction: column; line-height: 1.2; }
+.user-name { font-weight: 700; font-size: 0.88rem; }
+.user-role { font-size: 0.75rem; color: var(--texto-3); }
+
+.search { flex: 1; max-width: 380px; min-width: 200px; display: flex; align-items: center; gap: var(--s-3); min-height: 44px; padding: 0 var(--s-4); border-radius: var(--r-pill); background: var(--card-bg); border: 1px solid var(--border-subtle); color: var(--texto-3); box-shadow: var(--shadow-card); }
+
+.time-tracker-widget { display: flex; align-items: center; gap: var(--s-4); padding: 10px var(--s-4); border-radius: var(--r-lg); background: var(--card-bg); border: 1px solid var(--border-subtle); box-shadow: var(--shadow-subtle); }
+.play-btn { width: 40px; height: 40px; border-radius: 50%; background: var(--amarillo); color: #111; display: grid; place-items: center; transition: transform 0.15s ease; box-shadow: 0 4px 12px rgba(245, 184, 46, 0.4); }
+.play-btn:hover { transform: scale(1.05); }
+
+/* ============ GREETING & HERO ============ */
+.hero { display: flex; flex-direction: column; gap: var(--s-1); }
+.hero h1 { font-size: 1.8rem; font-weight: 800; line-height: 1.2; }
+.hero p { color: var(--texto-2); font-size: 0.95rem; }
+
+/* ============ DASHBOARD LAYOUT ============ */
+.g-dash { display: grid; grid-template-columns: 1.6fr 1fr; gap: var(--s-5); }
+.col-left { display: flex; flex-direction: column; gap: var(--s-5); }
+.col-right { display: flex; flex-direction: column; gap: var(--s-5); }
+
+/* ============ CARDS "TASKLY" ============ */
+.card-taskly { background: var(--card-bg); border-radius: var(--r-lg); border: 1px solid var(--border-subtle); padding: var(--s-5); box-shadow: var(--shadow-subtle); display: flex; flex-direction: column; gap: var(--s-3); position: relative; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.card-taskly:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(0,0,0,0.06); }
+.card-taskly.highlight { background: var(--amarillo); border-color: var(--amarillo-hover); color: #111; }
+.card-taskly.highlight h3, .card-taskly.highlight p { color: #111; }
+
+.card-taskly.dark-card { background: var(--tinta); color: #FFFFFF; border-color: var(--tinta); }
+.card-taskly.dark-card h3, .card-taskly.dark-card p { color: #FFFFFF; }
+
+.card-header { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.chip-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 12px; border-radius: var(--r-pill); font-size: 0.75rem; font-weight: 700; background: var(--amarillo-suave); color: #9A6A00; }
+.chip-pill.dark { background: var(--tinta); color: #FFF; }
+.chip-pill.white { background: #FFFFFF; color: #111; }
+
+.progress-bar { height: 8px; border-radius: 8px; background: rgba(0,0,0,0.06); overflow: hidden; width: 100%; }
+.progress-fill { height: 100%; border-radius: 8px; background: var(--amarillo); }
+.card-taskly.highlight .progress-bar { background: rgba(0,0,0,0.15); }
+.card-taskly.highlight .progress-fill { background: #111; }
+.card-taskly.dark-card .progress-bar { background: rgba(255,255,255,0.15); }
+.card-taskly.dark-card .progress-fill { background: var(--amarillo); }
+
+/* ============ TIMELINE & SCHEDULE ============ */
+.schedule-container { background: var(--card-bg); border-radius: var(--r-lg); border: 1px solid var(--border-subtle); padding: var(--s-5); box-shadow: var(--shadow-subtle); display: flex; flex-direction: column; gap: var(--s-4); }
+
+.days-bar { display: flex; align-items: center; justify-content: space-between; gap: 4px; padding-bottom: var(--s-3); border-bottom: 1px solid var(--border-subtle); overflow-x: auto; }
+.day-item { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 42px; padding: 8px 6px; border-radius: var(--r-md); transition: all 0.15s ease; cursor: pointer; }
+.day-item.active { background: var(--amarillo); color: #111; font-weight: 800; box-shadow: 0 4px 12px rgba(245, 184, 46, 0.3); }
+.day-name { font-size: 0.72rem; text-transform: uppercase; color: var(--texto-3); font-weight: 700; }
+.day-item.active .day-name { color: #111; }
+.day-num { font-size: 0.95rem; font-weight: 700; }
+
+.timeline-list { display: flex; flex-direction: column; gap: var(--s-4); position: relative; padding-left: 24px; }
+.timeline-list::before { content: ""; position: absolute; left: 8px; top: 10px; bottom: 10px; width: 2px; background: var(--border-subtle); }
+
+.timeline-item { display: flex; flex-direction: column; gap: 6px; position: relative; }
+.timeline-dot { position: absolute; left: -24px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background: var(--amarillo); border: 2px solid var(--card-bg); }
+.timeline-item.completed .timeline-dot { background: #111; }
+
+.time-label { font-size: 0.78rem; font-weight: 700; color: var(--texto-3); }
+.task-card-mini { padding: var(--s-3) var(--s-4); border-radius: var(--r-md); background: var(--canvas); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.task-card-mini.active-task { background: var(--amarillo-suave); border-color: var(--amarillo); }
+
+/* ============ BUTTONS & TOGGLES ============ */
+.btn-pill { display: inline-flex; align-items: center; justify-content: center; gap: var(--s-2); min-height: 44px; padding: 0 var(--s-5); border-radius: var(--r-pill); font-weight: 700; font-size: 0.88rem; background: var(--amarillo); color: #111; transition: all 0.15s ease; box-shadow: 0 4px 14px rgba(245, 184, 46, 0.35); }
+.btn-pill:hover { background: var(--amarillo-hover); transform: translateY(-1px); }
+.btn-pill.black { background: var(--negro-pill); color: #FFF; box-shadow: 0 4px 14px rgba(0,0,0,0.2); }
+[data-theme="dark"] .btn-pill.black { background: #FFFFFF; color: #111; }
+
+/* ============ RESPONSIVE ============ */
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; padding: 12px; width: 100%; max-width: 100%; }
+  .sidebar { display: none; }
+  .g-dash { grid-template-columns: 1fr; }
+  .topbar { flex-direction: column; align-items: stretch; }
+  .search { max-width: 100%; }
+}
+</style>
+</head>
+<body>
+
+<div class="app" id="appRoot">
+  <!-- SIDEBAR estilo TASKLY -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">t.</div>
+      <span>Mi Diario</span>
+    </div>
+    
+    <nav style="display: flex; flex-direction: column; gap: 4px;">
+      <div class="nav-title">General</div>
+      <a href="?screen=dashboard" class="nav-item active" id="navDash">
+        <svg viewBox="0 0 24 24"><path d="M4 4h6v8H4zM14 4h6v4h-6zM4 16h6v4H4zM14 14h6v6h-6z"/></svg>
+        <span>Dashboard</span>
+      </a>
+      <a href="?screen=week" class="nav-item" id="navWeek">
+        <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <span>Calendario</span>
+      </a>
+      <a href="?screen=subject" class="nav-item" id="navSubject">
+        <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        <span>Estudio</span>
+      </a>
+
+      <div class="nav-title">Herramientas</div>
+      <a href="#" class="nav-item">
+        <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span>Estadísticas</span>
+      </a>
+      <a href="#" class="nav-item">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>Ajustes</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-foot">
+      <button class="btn-pill black" onclick="toggleTheme()" style="min-height: 38px; width: 100%;">
+        <span id="themeLabel">Modo Oscuro</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- CONTENIDO PRINCIPAL -->
+  <main class="main">
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <div class="hero">
+        <h1>¡Hola, Wladimir! 👋</h1>
+        <p>Tienes <strong>4 materias</strong> y <strong>171 min</strong> de estudio registrados esta semana 📝</p>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <div class="search">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span>Buscar materia o tema...</span>
+        </div>
+
+        <div class="time-tracker-widget">
+          <div style="display: flex; flex-direction: column;">
+            <span style="font-size: 0.72rem; font-weight: 700; color: var(--texto-3); text-transform: uppercase;">Timer activo</span>
+            <span style="font-weight: 800; font-size: 0.95rem;">Pomodoro (25 min)</span>
+          </div>
+          <button class="play-btn" title="Iniciar temporizador">
+            <svg viewBox="0 0 24 24" style="fill: currentColor; width: 16px; height: 16px;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          </button>
+        </div>
+
+        <div class="user-profile">
+          <div class="avatar">WC</div>
+          <div class="user-info">
+            <span class="user-name">Wladimir C.</span>
+            <span class="user-role">Estudiante</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- DASHBOARD (Estilo Taskly) -->
+    <div class="g-dash">
+      <div class="col-left">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <h2>Mis Materias</h2>
+          <button class="btn-pill" style="min-height: 38px; padding: 0 16px;">+ Nueva Materia</button>
+        </div>
+
+        <!-- TARJETA DESTACADA 1 (AMARILLO ÁMBAR TASKLY) -->
+        <div class="card-taskly highlight">
+          <div class="card-header">
+            <span class="chip-pill dark">Matemáticas</span>
+            <span style="font-size: 0.8rem; font-weight: 700;">Meta: 5.0h / sem</span>
+          </div>
+          <h3 style="font-size: 1.3rem;">Álgebra Lineal y Matrices</h3>
+          <p style="font-size: 0.88rem;">Subtemas: Espacios vectoriales, Transf. Lineales, Valores Propios.</p>
+          
+          <div style="margin-top: 8px;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 800; margin-bottom: 4px;">
+              <span>Progreso Semanal</span>
+              <span>4.75 h (95%)</span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width: 95%;"></div></div>
+          </div>
+        </div>
+
+        <!-- TARJETA 2 (BLANCA CON ACENTO TASKLY) -->
+        <div class="card-taskly">
+          <div class="card-header">
+            <span class="chip-pill">Machine Learning</span>
+            <span style="font-size: 0.8rem; font-weight: 700; color: var(--texto-3);">Meta: 4.0h / sem</span>
+          </div>
+          <h3 style="font-size: 1.2rem;">Modelos Supervisados & Redes</h3>
+          <p style="font-size: 0.88rem; color: var(--texto-2);">Subtemas: Regresión Logística, Arboles, PyTorch Base.</p>
+          
+          <div style="margin-top: 8px;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 700; margin-bottom: 4px; color: var(--texto-2);">
+              <span>Progreso Semanal</span>
+              <span>2.5 h (62%)</span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width: 62%;"></div></div>
+          </div>
+        </div>
+
+        <!-- TARJETA 3 (OSCURA TASKLY) -->
+        <div class="card-taskly dark-card">
+          <div class="card-header">
+            <span class="chip-pill white">Bases de Datos</span>
+            <span style="font-size: 0.8rem; font-weight: 700;">Meta: 3.0h / sem</span>
+          </div>
+          <h3 style="font-size: 1.2rem;">Optimización SQL & Índices B-Tree</h3>
+          <p style="font-size: 0.88rem; opacity: 0.85;">Subtemas: Transacciones ACID, WAL, Locks SQLite.</p>
+          
+          <div style="margin-top: 8px;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 700; margin-bottom: 4px;">
+              <span>Progreso Semanal</span>
+              <span>3.0 h (100%)</span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width: 100%;"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- COLUMNA DERECHA: CRONOGRAMA & TIMELINE -->
+      <div class="col-right">
+        <div class="schedule-container">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <h3>Agenda de Hoy</h3>
+            <span style="font-size: 0.82rem; font-weight: 700; color: var(--texto-3);">Viernes, 9 Oct</span>
+          </div>
+
+          <!-- BARRA HORIZONTA L DE DÍAS DE LA SEMANA -->
+          <div class="days-bar">
+            <div class="day-item"><span class="day-name">Lun</span><span class="day-num">5</span></div>
+            <div class="day-item"><span class="day-name">Mar</span><span class="day-num">6</span></div>
+            <div class="day-item"><span class="day-name">Mié</span><span class="day-num">7</span></div>
+            <div class="day-item"><span class="day-name">Jue</span><span class="day-num">8</span></div>
+            <div class="day-item active"><span class="day-name">Vie</span><span class="day-num">9</span></div>
+            <div class="day-item"><span class="day-name">Sáb</span><span class="day-num">10</span></div>
+            <div class="day-item"><span class="day-name">Dom</span><span class="day-num">11</span></div>
+          </div>
+
+          <!-- TIMELINE CON CONEXIÓN DE NODOS -->
+          <div class="timeline-list">
+            <div class="timeline-item completed">
+              <div class="timeline-dot"></div>
+              <span class="time-label">08:00 AM - 08:45 AM</span>
+              <div class="task-card-mini">
+                <div>
+                  <strong style="display: block; font-size: 0.88rem;">Repaso de Matrices</strong>
+                  <span style="font-size: 0.78rem; color: var(--texto-3);">Matemáticas • 45 min</span>
+                </div>
+                <svg viewBox="0 0 24 24" style="stroke: #111;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              </div>
+            </div>
+
+            <div class="timeline-item">
+              <div class="timeline-dot"></div>
+              <span class="time-label">10:30 AM - 11:20 AM</span>
+              <div class="task-card-mini active-task">
+                <div>
+                  <strong style="display: block; font-size: 0.88rem;">Práctica PyTorch & Tensors</strong>
+                  <span style="font-size: 0.78rem; color: #9A6A00; font-weight: 700;">Machine Learning • En curso</span>
+                </div>
+                <span class="chip-pill" style="padding: 2px 8px; font-size: 0.7rem;">50 min</span>
+              </div>
+            </div>
+
+            <div class="timeline-item">
+              <div class="timeline-dot" style="background: var(--border-subtle);"></div>
+              <span class="time-label">03:00 PM - 04:00 PM</span>
+              <div class="task-card-mini">
+                <div>
+                  <strong style="display: block; font-size: 0.88rem;">Lectura SQLite WAL & Locks</strong>
+                  <span style="font-size: 0.78rem; color: var(--texto-3);">Bases de Datos • Programado</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button class="btn-pill black" style="width: 100%; margin-top: 8px;">+ Registrar Sesión Manual</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+function toggleTheme() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  document.documentElement.setAttribute('data-theme', isDark ? 'light' : 'dark');
+  document.getElementById('themeLabel').innerText = isDark ? 'Modo Oscuro' : 'Modo Claro';
+}
+
+// URL query handler for automated screenshots
+const params = new URLSearchParams(window.location.search);
+if (params.get('theme') === 'dark') {
+  document.documentElement.setAttribute('data-theme', 'dark');
+  document.getElementById('themeLabel').innerText = 'Modo Claro';
+}
+</script>
+</body>
+</html>
