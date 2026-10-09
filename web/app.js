@@ -1553,11 +1553,10 @@
       minStreakMinutes: streakThresholdMins
     });
 
-    const deltaClass = report.comparison.delta_percent > 0 ? 'positive' : (report.comparison.delta_percent < 0 ? 'negative' : 'neutral');
-    const deltaSign = report.comparison.delta_percent > 0 ? '+' : '';
-    const deltaText = `${deltaSign}${report.comparison.delta_percent}% vs 7d previos`;
+    const deltaClass = report.comparison.status || 'neutral';
+    const deltaText = report.comparison.formatted_text || '';
 
-    // SVG Heatmap generator
+    // SVG Heatmap generator (Matriz Semanal 7 días x 24 horas)
     const daysLabels = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
     const heatmap = report.heatmap;
     let maxCellSec = 1;
@@ -1601,6 +1600,40 @@
     const svgWidth = labelWidth + 24 * (cellSize + cellGap);
     const svgHeight = topHeaderHeight + 7 * (cellSize + cellGap);
 
+    // Ciclo 15->14 Calendar Heatmap
+    const cycleHeat = report.cycle_heatmap;
+    const cycleDaysHtml = (cycleHeat && cycleHeat.days) ? cycleHeat.days.map(d => {
+      const levelColors = [
+        'var(--bg-primary)',
+        'rgba(20, 184, 166, 0.35)',
+        'rgba(20, 184, 166, 0.65)',
+        'rgba(20, 184, 166, 0.85)',
+        'var(--accent-teal)'
+      ];
+      const fill = levelColors[d.level] || levelColors[0];
+      const isTodayBorder = d.is_today ? 'border: 2px solid var(--accent-primary);' : 'border: 1px solid var(--border-color);';
+      return `
+        <div class="cycle-heat-cell" style="background:${fill}; ${isTodayBorder}" title="${d.date}: ${d.minutes} min (${(d.minutes/60).toFixed(1)}h)">
+          <span class="cycle-heat-day-num">${d.day_of_month}</span>
+        </div>
+      `;
+    }).join('') : '';
+
+    // Barras de 7 días
+    const bars7d = report.daily_bars_7d;
+    const maxBarMins = Math.max(60, (bars7d && bars7d.max_minutes) || 60);
+    const bars7dHtml = (bars7d && bars7d.series) ? bars7d.series.map(b => {
+      const heightPct = Math.min(100, Math.round((b.minutes / maxBarMins) * 100));
+      return `
+        <div class="daily-bar-col" title="${b.label}: ${b.minutes} min (${b.hours}h)">
+          <div class="daily-bar-track">
+            <div class="daily-bar-fill" style="height: ${heightPct}%; background: ${b.is_today ? 'var(--accent-teal)' : 'var(--accent-primary)'};"></div>
+          </div>
+          <span class="daily-bar-label ${b.is_today ? 'is-today' : ''}">${escHTML(b.day_name)}<br/><b>${b.day_number}</b></span>
+        </div>
+      `;
+    }).join('') : '';
+
     container.innerHTML = `
       <!-- KPI CARDS -->
       <div class="stats-kpi-grid">
@@ -1610,9 +1643,9 @@
             <span class="material-icons-round" style="color:var(--accent-teal);">today</span>
           </div>
           <div class="stats-kpi-val" id="stats-val-today">${report.periods.today_hours}h</div>
-          <div class="stats-kpi-sub">
+          <div class="stats-kpi-sub" style="display:flex; flex-direction:column; gap:4px; align-items:flex-start;">
             <span>${report.periods.today_minutes} minutos</span>
-            <span class="stats-kpi-delta ${deltaClass}">${deltaText}</span>
+            ${deltaText ? `<span class="stats-kpi-delta ${deltaClass}" id="stats-delta-comparison">${escHTML(deltaText)}</span>` : ''}
           </div>
         </div>
 
@@ -1708,7 +1741,46 @@
         </div>
       </div>
 
-      <!-- ROW 2: Heatmap 7x24 y Franja Pico -->
+      <!-- ROW 2: Barras Diarias (7d) y Calendario Ciclo (15->14) -->
+      <div class="stats-section-row">
+        <div class="stats-panel-card">
+          <h3>
+            <span class="material-icons-round" style="color:var(--accent-teal);">bar_chart</span>
+            <span>Actividad Diaria (Últimos 7 días)</span>
+          </h3>
+          <div class="daily-bars-wrap">
+            ${bars7dHtml}
+          </div>
+          <table class="sr-only">
+            <caption>Actividad de estudio diaria de los últimos 7 días</caption>
+            <thead><tr><th>Fecha</th><th>Minutos</th><th>Horas</th></tr></thead>
+            <tbody>
+              ${(bars7d && bars7d.series) ? bars7d.series.map(b => `<tr><td>${b.date}</td><td>${b.minutes}</td><td>${b.hours}</td></tr>`).join('') : ''}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="stats-panel-card">
+          <h3>
+            <span class="material-icons-round" style="color:var(--accent-purple);">calendar_month</span>
+            <span>Mapa del Ciclo (${report.periods.cycle_start} al ${report.periods.cycle_end})</span>
+          </h3>
+          <div class="cycle-heat-grid">
+            ${cycleDaysHtml}
+          </div>
+          <div class="cycle-heat-legend">
+            <span>0m</span>
+            <span style="display:inline-block; width:12px; height:12px; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:2px;" title="0 min"></span>
+            <span style="display:inline-block; width:12px; height:12px; background:rgba(20, 184, 166, 0.35); border-radius:2px;" title="1-30 min"></span>
+            <span style="display:inline-block; width:12px; height:12px; background:rgba(20, 184, 166, 0.65); border-radius:2px;" title="31-60 min"></span>
+            <span style="display:inline-block; width:12px; height:12px; background:rgba(20, 184, 166, 0.85); border-radius:2px;" title="61-120 min"></span>
+            <span style="display:inline-block; width:12px; height:12px; background:var(--accent-teal); border-radius:2px;" title=">120 min"></span>
+            <span>>2h</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ROW 3: Heatmap 7x24 y Franja Pico -->
       <div class="stats-section-row">
         <div class="stats-panel-card" style="grid-column: 1 / -1;">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
@@ -1716,9 +1788,9 @@
               <span class="material-icons-round" style="color:var(--accent-teal);">grid_view</span>
               <span>Matriz Semanal de Enfoque (7 días × 24 horas)</span>
             </h3>
-            <div style="font-size:0.82rem; color:var(--text-secondary); background:var(--bg-primary); padding:6px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+            <div class="best-slot-badge" style="font-size:0.82rem; color:var(--text-secondary); background:var(--bg-primary); padding:6px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
               <span style="color:var(--accent-teal); font-weight:700;">★ Franja más productiva:</span>
-              <span>${report.best_time_slots.best_2h_slot} (${Math.round(report.best_time_slots.best_2h_seconds / 60)} min)</span>
+              <span style="margin-left:4px;">${report.best_time_slots.best_2h_slot} (${Math.round(report.best_time_slots.best_2h_seconds / 60)} min)</span>
             </div>
           </div>
           <div class="heatmap-scroll-wrap" tabindex="0" role="region" aria-label="Matriz de concentración horaria por día">
@@ -1730,7 +1802,7 @@
         </div>
       </div>
 
-      <!-- ROW 3: Distribución por Materias y Estado de Sesiones -->
+      <!-- ROW 4: Distribución por Materias y Estado de Sesiones -->
       <div class="stats-section-row">
         <div class="stats-panel-card">
           <h3>
@@ -1816,6 +1888,14 @@
     });
     const totalHours = (totalStudySeconds / 3600).toFixed(1) + 'h';
 
+    let todayStudySeconds = 0;
+    if (typeof StatsCore !== 'undefined' && StatsCore.aggregateDailyTotals) {
+      const dMap = StatsCore.aggregateDailyTotals(focusSessions);
+      const todayStr = new Date().toISOString().slice(0, 10);
+      todayStudySeconds = (dMap[todayStr] && dMap[todayStr].effective_seconds) || 0;
+    }
+    const todayMinutes = Math.round(todayStudySeconds / 60);
+
     let totalWeeklyGoalMinutes = 0;
     activeSubjects.filter(s => !s.archived).forEach(s => {
       totalWeeklyGoalMinutes += Number(s.weekly_goal_minutes) || 0;
@@ -1824,6 +1904,8 @@
 
     const statCountEl = $('#study-stat-active-count');
     if (statCountEl) statCountEl.textContent = activeNonArchivedCount;
+    const statTodayMinsEl = $('#study-stat-today-minutes');
+    if (statTodayMinsEl) statTodayMinsEl.textContent = `${todayMinutes} min`;
     const statHoursEl = $('#study-stat-total-hours');
     if (statHoursEl) statHoursEl.textContent = totalHours;
     const statGoalEl = $('#study-stat-weekly-goal');
@@ -1860,9 +1942,10 @@
 
     grid.innerHTML = visibleSubjects.map(sub => {
       const summary = (typeof FocusCore !== 'undefined' && FocusCore.summarizeSubject)
-        ? FocusCore.summarizeSubject(sub, topics, focusSessions)
+        ? FocusCore.summarizeSubject(sub, topics, focusSessions, { todayStr: new Date().toISOString().slice(0, 10) })
         : {
             total_hours: 0,
+            week_hours: 0,
             weekly_goal_minutes: sub.weekly_goal_minutes || 0,
             goal_progress_percent: 0,
             session_count: 0,
@@ -1902,10 +1985,10 @@
             <div class="subject-progress-wrap">
               <div class="subject-progress-header">
                 <span>Meta semanal (${weeklyGoalHours}h)</span>
-                <span>${summary.goal_progress_percent}%</span>
+                <span>${summary.week_hours}h esta semana / ${weeklyGoalHours}h</span>
               </div>
               <div class="subject-progress-bar">
-                <div class="subject-progress-fill" style="width: ${summary.goal_progress_percent}%; background: ${escHTML(color)};"></div>
+                <div class="subject-progress-fill" style="width: ${Math.min(100, summary.goal_progress_percent)}%; background: ${escHTML(color)};"></div>
               </div>
             </div>
           ` : ''}
@@ -2225,6 +2308,9 @@
                 </div>
               </div>
               <div style="display:flex; align-items:center; gap:8px;">
+                <button class="topbar-btn btn-touch-target" data-action="edit-session" data-id="${escHTML(s.id)}" title="Editar sesión" style="color:var(--text-secondary);">
+                  <span class="material-icons-round" style="font-size:18px;">edit</span>
+                </button>
                 <button class="topbar-btn btn-touch-target" data-action="delete-session" data-id="${escHTML(s.id)}" title="Eliminar sesión" style="color:var(--accent-red);">
                   <span class="material-icons-round" style="font-size:18px;">delete_outline</span>
                 </button>
@@ -2233,11 +2319,135 @@
           `;
         }).join('');
 
+        sessionsList.querySelectorAll('[data-action="edit-session"]').forEach(btn => {
+          btn.addEventListener('click', () => handleOpenEditFocusSession(btn.dataset.id));
+        });
         sessionsList.querySelectorAll('[data-action="delete-session"]').forEach(btn => {
           btn.addEventListener('click', () => handleDeleteFocusSession(btn.dataset.id));
         });
       }
     }
+  }
+
+  function handleOpenEditFocusSession(sessionId) {
+    focusSessions = loadFocusSessions();
+    const session = focusSessions.find(s => s.id === sessionId);
+    if (!session) return;
+
+    const overlay = $('#session-edit-overlay');
+    if (!overlay) return;
+
+    const idInput = $('#edit-session-id-input');
+    const subSelect = $('#edit-session-subject-select');
+    const dateInput = $('#edit-session-date-input');
+    const durInput = $('#edit-session-duration-minutes');
+    const goalInput = $('#edit-session-goal-input');
+    const errorsDiv = $('#edit-session-errors');
+
+    if (errorsDiv) {
+      errorsDiv.textContent = '';
+      errorsDiv.style.display = 'none';
+    }
+
+    if (idInput) idInput.value = session.id;
+    if (subSelect) {
+      subjects = loadSubjects();
+      const activeSubs = subjects.filter(s => !s.deleted_at && !s.archived);
+      subSelect.innerHTML = '<option value="">-- Sin Materia --</option>' +
+        activeSubs.map(s => `<option value="${escHTML(s.id)}" ${s.id === session.subject_id ? 'selected' : ''}>${escHTML(s.name)}</option>`).join('');
+    }
+
+    if (dateInput) {
+      const dStr = (session.started_at || session.completed_at || session.created_at || '').substring(0, 10);
+      dateInput.value = dStr || todayStr();
+    }
+
+    if (durInput) {
+      durInput.value = Math.max(1, Math.round((Number(session.effective_seconds) || 0) / 60));
+    }
+
+    if (goalInput) {
+      goalInput.value = session.goal || '';
+    }
+
+    overlay.classList.add('open');
+  }
+
+  function closeSessionEditModal() {
+    const overlay = $('#session-edit-overlay');
+    if (overlay) overlay.classList.remove('open');
+  }
+
+  function handleSaveEditFocusSession() {
+    const idInput = $('#edit-session-id-input');
+    const subSelect = $('#edit-session-subject-select');
+    const dateInput = $('#edit-session-date-input');
+    const durInput = $('#edit-session-duration-minutes');
+    const goalInput = $('#edit-session-goal-input');
+    const errorsDiv = $('#edit-session-errors');
+
+    const sessionId = idInput ? idInput.value : null;
+    if (!sessionId) return;
+
+    const mins = parseInt(durInput ? durInput.value : '0', 10);
+    if (isNaN(mins) || mins <= 0) {
+      if (errorsDiv) {
+        errorsDiv.textContent = 'La duración debe ser mayor a 0 minutos.';
+        errorsDiv.style.display = 'block';
+      }
+      return;
+    }
+
+    focusSessions = loadFocusSessions();
+    const idx = focusSessions.findIndex(s => s.id === sessionId);
+    if (idx === -1) return;
+
+    const existing = focusSessions[idx];
+    const now = new Date().toISOString();
+    const selectedDate = dateInput && dateInput.value ? dateInput.value : todayStr();
+    const newSubId = subSelect && subSelect.value ? subSelect.value : null;
+    const newGoal = goalInput ? goalInput.value.trim() : '';
+
+    let newStartedAt = existing.started_at;
+    if (newStartedAt && newStartedAt.length >= 10) {
+      newStartedAt = `${selectedDate}T${newStartedAt.substring(11)}`;
+    } else {
+      newStartedAt = `${selectedDate}T12:00:00.000Z`;
+    }
+
+    let newCompletedAt = existing.completed_at;
+    if (newCompletedAt && newCompletedAt.length >= 10) {
+      newCompletedAt = `${selectedDate}T${newCompletedAt.substring(11)}`;
+    } else {
+      newCompletedAt = newStartedAt;
+    }
+
+    const updated = {
+      ...existing,
+      subject_id: newSubId,
+      goal: newGoal || null,
+      effective_seconds: mins * 60,
+      total_duration_seconds: Math.max(mins * 60, existing.total_duration_seconds || mins * 60),
+      started_at: newStartedAt,
+      completed_at: newCompletedAt,
+      updated_at: now,
+      version: (existing.version || 1) + 1,
+      base_version: existing.version || 1
+    };
+
+    focusSessions[idx] = updated;
+    saveFocusSessions(focusSessions);
+    enqueueChange({ ...updated, collection: 'focus_sessions' });
+    showToast('Sesión actualizada ✓');
+    closeSessionEditModal();
+
+    if (existing.subject_id) {
+      renderSubjectDetailContent(existing.subject_id);
+    } else if (newSubId) {
+      renderSubjectDetailContent(newSubId);
+    }
+    renderStudyView();
+    syncWithBackend();
   }
 
   function handleDeleteFocusSession(sessionId) {
@@ -2705,6 +2915,31 @@
     const dispEl = $('#focus-timer-display');
     if (dispEl) dispEl.textContent = formatTimeDisplay(dispSec);
 
+    const methodBadge = $('#focus-method-badge');
+    if (methodBadge) {
+      methodBadge.textContent = activeFocusTimer.config && activeFocusTimer.config.name
+        ? activeFocusTimer.config.name
+        : (activeFocusTimer.method === 'deep_work' ? 'Deep Work' :
+           activeFocusTimer.method === 'flowtime' ? 'Flowtime' :
+           activeFocusTimer.method === 'stopwatch' ? 'Cronómetro' :
+           activeFocusTimer.method === 'custom' ? 'Personalizado' :
+           activeFocusTimer.method === '50_10' ? '50/10' :
+           activeFocusTimer.method === '52_17' ? '52/17' :
+           activeFocusTimer.method === 'ultradian' ? 'Ritmo Ultradiano' : 'Pomodoro Clásico');
+    }
+
+    const cycleBadge = $('#focus-cycle-badge');
+    if (cycleBadge) {
+      if (activeFocusTimer.method === 'stopwatch' || (activeFocusTimer.config && !activeFocusTimer.config.longBreakInterval)) {
+        cycleBadge.style.display = 'none';
+      } else {
+        cycleBadge.style.display = 'inline-block';
+        const currCycle = (activeFocusTimer.cycles_completed || 0) + 1;
+        const totalCycles = (activeFocusTimer.config && activeFocusTimer.config.longBreakInterval) ? activeFocusTimer.config.longBreakInterval : 4;
+        cycleBadge.textContent = `Ciclo ${currCycle}/${totalCycles}`;
+      }
+    }
+
     const progFill = $('#focus-timer-progress-fill');
     if (progFill) progFill.style.width = `${metrics.progressPercent}%`;
 
@@ -2849,7 +3084,7 @@
     const goalInput = $('#focus-goal-input');
 
     const method = methodSelect ? methodSelect.value : 'pomodoro';
-    const customMinutes = customMinsInput ? Number(customMinsInput.value) : 30;
+    const customMinutes = (method === 'custom' && customMinsInput) ? Number(customMinsInput.value) : undefined;
     const subjectId = subSelect ? subSelect.value : null;
     const goal = goalInput ? goalInput.value.trim() : '';
 
@@ -4288,6 +4523,14 @@ SIEMPRE devuelve un JSON válido.
       renderManualTopicsChecklist(e.target.value);
     });
 
+    // Session edit modal
+    $('#session-edit-close')?.addEventListener('click', closeSessionEditModal);
+    $('#btn-cancel-edit-session')?.addEventListener('click', closeSessionEditModal);
+    $('#btn-save-edit-session')?.addEventListener('click', handleSaveEditFocusSession);
+    $('#session-edit-overlay')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) closeSessionEditModal();
+    });
+
     // Storage event for multi-tab synchronization & locking
     window.addEventListener('storage', (e) => {
       if (e.key === ACTIVE_FOCUS_SESSION_KEY) {
@@ -4737,8 +4980,9 @@ SIEMPRE devuelve un JSON válido.
       openManualTimeModal,
       closeManualTimeModal,
       handleSaveManualTime,
-      loadActiveFocusSession,
-      saveActiveFocusSession,
+      handleOpenEditFocusSession,
+      closeSessionEditModal,
+      handleSaveEditFocusSession,
       loadActiveFocusSession,
       saveActiveFocusSession,
       clearActiveFocusSession,
@@ -4772,6 +5016,9 @@ SIEMPRE devuelve un JSON válido.
     window.openManualTimeModal = openManualTimeModal;
     window.closeManualTimeModal = closeManualTimeModal;
     window.handleSaveManualTime = handleSaveManualTime;
+    window.handleOpenEditFocusSession = handleOpenEditFocusSession;
+    window.closeSessionEditModal = closeSessionEditModal;
+    window.handleSaveEditFocusSession = handleSaveEditFocusSession;
     window.loadActiveFocusSession = loadActiveFocusSession;
     window.saveActiveFocusSession = saveActiveFocusSession;
     window.clearActiveFocusSession = clearActiveFocusSession;

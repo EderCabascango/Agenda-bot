@@ -324,10 +324,14 @@
 
   /**
    * Comparativa: Hoy vs promedio de los 7 días inmediatamente anteriores (t-7 a t-1).
+   * Muestra el delta absoluto en minutos (+X min / -Y min).
+   * Si hoy = 0: texto neutro "Aún sin sesiones hoy" sin aviso negativo.
+   * Si el promedio previo es < 15 min: no muestra comparación ("Promedio previo insuficiente (< 15 min)").
    */
   function calculateTodayVs7DayAvg(dailyMap, todayStr) {
     const today = todayStr || new Date().toISOString().slice(0, 10);
     const todaySeconds = (dailyMap[today] && dailyMap[today].effective_seconds) || 0;
+    const todayMinutes = Math.round(todaySeconds / 60);
 
     const d = new Date(today + 'T12:00:00Z');
     const start7 = new Date(d);
@@ -341,20 +345,48 @@
       if (dailyMap[dt]) prev7TotalSec += dailyMap[dt].effective_seconds;
     }
     const avg7dSec = Math.round(prev7TotalSec / 7);
+    const avg7dMin = Math.round(avg7dSec / 60);
 
     const deltaSec = todaySeconds - avg7dSec;
-    let deltaPercent = 0;
-    if (avg7dSec > 0) {
-      deltaPercent = Math.round((deltaSec / avg7dSec) * 100);
-    } else if (todaySeconds > 0) {
-      deltaPercent = 100;
+    const deltaMin = Math.round(deltaSec / 60);
+
+    const hasSufficientHistory = avg7dMin >= 15;
+    const isTodayZero = todaySeconds === 0;
+
+    let text = '';
+    let status = 'neutral';
+    let showComparison = false;
+
+    if (!hasSufficientHistory) {
+      text = 'Promedio previo insuficiente (< 15 min)';
+      showComparison = false;
+      status = 'neutral';
+    } else if (isTodayZero) {
+      text = 'Aún sin sesiones hoy';
+      showComparison = true;
+      status = 'neutral';
+    } else if (deltaMin >= 0) {
+      text = `+${deltaMin} min sobre tu promedio de 7 días`;
+      showComparison = true;
+      status = 'positive';
+    } else {
+      text = `${deltaMin} min sobre tu promedio de 7 días`;
+      showComparison = true;
+      status = 'negative';
     }
 
     return {
       today_seconds: todaySeconds,
+      today_minutes: todayMinutes,
       avg_7d_preceding_seconds: avg7dSec,
+      avg_7d_preceding_minutes: avg7dMin,
       delta_seconds: deltaSec,
-      delta_percent: deltaPercent
+      delta_minutes: deltaMin,
+      has_sufficient_history: hasSufficientHistory,
+      is_today_zero: isTodayZero,
+      show_comparison: showComparison,
+      status: status,
+      formatted_text: text
     };
   }
 
@@ -535,19 +567,26 @@
    * Reparte equitativamente entre subtemas si la sesión asocia varios.
    * Tolerante a huérfanos (sesión sin materia asignada o materia borrada).
    */
+  /**
+   * Calcula la distribución de tiempo por materia y porcentaje relativo.
+   * Reparte equitativamente entre subtemas si la sesión asocia varios.
+   * Agrupa todas las sesiones huérfanas (subject_id inexistente, nulo, vacío o con tombstone) en UNA sola entrada "Sin materia".
+   */
   function calculateSubjectDistribution(sessions, subjects, topics) {
-    const subjectMap = {};
+    const validSubjectMap = {};
     const subjectNames = {};
     const subjectColors = {};
 
     if (Array.isArray(subjects)) {
       for (const s of subjects) {
         if (!s || s.deleted_at) continue;
+        validSubjectMap[s.id] = s;
         subjectNames[s.id] = s.name;
         subjectColors[s.id] = s.color || '#5B6FA0';
       }
     }
 
+    const subjectMap = {};
     let totalTimeSec = 0;
 
     if (Array.isArray(sessions)) {
@@ -557,13 +596,15 @@
         if (sec <= 0) continue;
 
         totalTimeSec += sec;
-        const subId = session.subject_id || 'unassigned';
+        const rawSubId = session.subject_id;
+        const isOrphan = !rawSubId || !validSubjectMap[rawSubId];
+        const subId = isOrphan ? 'unassigned' : rawSubId;
 
         if (!subjectMap[subId]) {
           subjectMap[subId] = {
-            subject_id: subId,
-            name: subId === 'unassigned' ? 'Sin Materia' : (subjectNames[subId] || 'Materia Desconocida'),
-            color: subId === 'unassigned' ? '#8A99AD' : (subjectColors[subId] || '#5B6FA0'),
+            subject_id: isOrphan ? null : subId,
+            name: isOrphan ? 'Sin materia' : (subjectNames[subId] || 'Sin materia'),
+            color: isOrphan ? '#8A99AD' : (subjectColors[subId] || '#5B6FA0'),
             effective_seconds: 0,
             sessions_count: 0
           };
@@ -590,6 +631,100 @@
       total_minutes: Math.round(totalTimeSec / 60),
       total_hours: +(totalTimeSec / 3600).toFixed(2),
       subjects: items
+    };
+  }
+
+  /**
+   * Obtiene la serie de datos diarios para gráficos de barras (últimos 7 o 30 días).
+   * Incluye hoy como día final (ancla).
+   */
+  function getDailyBarSeries(dailyMap, daysCount = 7, referenceDateStr) {
+    const today = referenceDateStr || new Date().toISOString().slice(0, 10);
+    const refDt = new Date(today + 'T12:00:00Z');
+    const startDt = new Date(refDt);
+    startDt.setUTCDate(refDt.getUTCDate() - (daysCount - 1));
+    const dates = getDatesInRange(startDt.toISOString().slice(0, 10), today);
+
+    const dayShortNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+    let maxMinutes = 0;
+    const series = dates.map(dtStr => {
+      const sec = (dailyMap[dtStr] && dailyMap[dtStr].effective_seconds) || 0;
+      const mins = Math.round(sec / 60);
+      if (mins > maxMinutes) maxMinutes = mins;
+
+      const d = new Date(dtStr + 'T12:00:00Z');
+      const dayName = dayShortNames[d.getUTCDay()];
+      const dayNum = d.getUTCDate();
+      const isToday = (dtStr === today);
+
+      return {
+        date: dtStr,
+        day_name: dayName,
+        day_number: dayNum,
+        label: `${dayName} ${dayNum}`,
+        seconds: sec,
+        minutes: mins,
+        hours: +(sec / 3600).toFixed(1),
+        is_today: isToday
+      };
+    });
+
+    return {
+      days_count: daysCount,
+      start_date: dates[0],
+      end_date: today,
+      max_minutes: maxMinutes,
+      series: series
+    };
+  }
+
+  /**
+   * Calcula la cuadrícula de intensidad del ciclo de estudio (15 al 14).
+   * Niveles: 0 (0m), 1 (1-30m), 2 (31-60m), 3 (61-120m), 4 (>120m).
+   */
+  function calculateCycleCalendarHeatmap(dailyMap, referenceDateStr) {
+    const today = referenceDateStr || new Date().toISOString().slice(0, 10);
+    const range = getStudyCycleRange(today);
+    const dates = getDatesInRange(range.startDate, range.endDate);
+
+    let maxMinutes = 0;
+    let totalCycleMinutes = 0;
+
+    const days = dates.map(dtStr => {
+      const sec = (dailyMap[dtStr] && dailyMap[dtStr].effective_seconds) || 0;
+      const mins = Math.round(sec / 60);
+      totalCycleMinutes += mins;
+      if (mins > maxMinutes) maxMinutes = mins;
+
+      let level = 0;
+      if (mins > 120) level = 4;
+      else if (mins > 60) level = 3;
+      else if (mins > 30) level = 2;
+      else if (mins > 0) level = 1;
+
+      const d = new Date(dtStr + 'T12:00:00Z');
+      const weekday = (d.getUTCDay() + 6) % 7; // 0=Mon..6=Sun
+      const dayOfMonth = d.getUTCDate();
+
+      return {
+        date: dtStr,
+        day_of_month: dayOfMonth,
+        weekday: weekday,
+        seconds: sec,
+        minutes: mins,
+        level: level,
+        is_today: dtStr === today
+      };
+    });
+
+    return {
+      cycle_start: range.startDate,
+      cycle_end: range.endDate,
+      total_minutes: totalCycleMinutes,
+      total_hours: +(totalCycleMinutes / 60).toFixed(1),
+      max_minutes: maxMinutes,
+      days: days
     };
   }
 
@@ -681,17 +816,24 @@
     // 5. Racha
     const streak = calculateStreak(dailyMap, today, minStreakMinutes);
 
-    // 6. Heatmap y mejor horario
+    // 6. Heatmap y mejor horario (matriz semanal 7x24)
     const heatmap = calculateHeatmap(sessions, tz);
     const bestSlots = calculateBestTimeSlot(heatmap);
 
-    // 7. Distribución por materias
+    // 7. Heatmap de ciclo de estudio (15 al 14)
+    const cycleHeatmap = calculateCycleCalendarHeatmap(dailyMap, today);
+
+    // 8. Series diarias para barras 7d y 30d
+    const dailyBars7d = getDailyBarSeries(dailyMap, 7, today);
+    const dailyBars30d = getDailyBarSeries(dailyMap, 30, today);
+
+    // 9. Distribución por materias
     const subjectDist = calculateSubjectDistribution(sessions, subjects, topics);
 
-    // 8. Completadas vs abandonadas
+    // 10. Completadas vs abandonadas
     const statusBreakdown = calculateSessionStatusBreakdown(sessions);
 
-    // 9. Meta diaria
+    // 11. Meta diaria
     const goalProgress = calculateDailyGoalProgress(periodTotals.today_seconds, dailyGoalMinutes);
 
     return {
@@ -707,6 +849,9 @@
       streak: streak,
       heatmap: heatmap,
       best_time_slots: bestSlots,
+      cycle_heatmap: cycleHeatmap,
+      daily_bars_7d: dailyBars7d,
+      daily_bars_30d: dailyBars30d,
       subjects_distribution: subjectDist,
       session_status: statusBreakdown,
       daily_goal: goalProgress
@@ -728,6 +873,8 @@
     calculateHeatmap: calculateHeatmap,
     calculateBestTimeSlot: calculateBestTimeSlot,
     calculateSubjectDistribution: calculateSubjectDistribution,
+    getDailyBarSeries: getDailyBarSeries,
+    calculateCycleCalendarHeatmap: calculateCycleCalendarHeatmap,
     calculateSessionStatusBreakdown: calculateSessionStatusBreakdown,
     calculateDailyGoalProgress: calculateDailyGoalProgress,
     generateFullStatsReport: generateFullStatsReport

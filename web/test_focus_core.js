@@ -92,40 +92,50 @@ test('FocusCore - Suite de Lógica Pura de Materias y Temas (Fase B1)', async (t
     assert.ok(decision.topicTombstones[1].deleted_at);
   });
 
-  await t.test('5. summarizeSubject calcula minutos, horas y reparto equitativo entre múltiples subtemas', () => {
+  await t.test('5. summarizeSubject calcula minutos, horas y reparto equitativo, separando total histórico de la semana en curso', () => {
     const subject = {
       id: 'sub_prog',
       name: 'Programación',
-      weekly_goal_minutes: 120
+      weekly_goal_minutes: 120 // Meta semanal: 2 horas (120 min)
     };
     const topics = [
       { id: 'top_js', subject_id: 'sub_prog', name: 'JavaScript', status: 'in_progress' },
       { id: 'top_py', subject_id: 'sub_prog', name: 'Python', status: 'mastered' },
       { id: 'top_rust', subject_id: 'sub_prog', name: 'Rust', status: 'pending' }
     ];
+    // Referencia temporal: Jueves 2026-10-15 (Semana: Lun 2026-10-12 a Dom 2026-10-18)
     const sessions = [
-      // Sesión 1: 3600 segundos (60 min) divididos entre JS y Python (1800s c/u = 30 min c/u)
+      // Sesión Antigua (semana previa: 2026-10-05): 3600 segundos (60 min)
+      {
+        id: 'sess_old',
+        subject_id: 'sub_prog',
+        topic_ids: ['top_js'],
+        started_at: '2026-10-05T10:00:00.000Z',
+        ended_at: '2026-10-05T11:00:00.000Z',
+        focus_intervals: [['2026-10-05T10:00:00.000Z', '2026-10-05T11:00:00.000Z']],
+        effective_seconds: 3600,
+        deleted_at: null
+      },
+      // Sesión Esta Semana 1 (2026-10-13): 3600 segundos (60 min) divididos entre JS y Python (30 min c/u)
       {
         id: 'sess_1',
         subject_id: 'sub_prog',
         topic_ids: ['top_js', 'top_py'],
+        started_at: '2026-10-13T10:00:00.000Z',
+        ended_at: '2026-10-13T11:00:00.000Z',
+        focus_intervals: [['2026-10-13T10:00:00.000Z', '2026-10-13T11:00:00.000Z']],
         effective_seconds: 3600,
         deleted_at: null
       },
-      // Sesión 2: 1800 segundos (30 min) solo para JS (1800s = 30 min)
+      // Sesión Esta Semana 2 (2026-10-15): 1800 segundos (30 min) solo JS
       {
         id: 'sess_2',
         subject_id: 'sub_prog',
         topic_ids: ['top_js'],
+        started_at: '2026-10-15T14:00:00.000Z',
+        ended_at: '2026-10-15T14:30:00.000Z',
+        focus_intervals: [['2026-10-15T14:00:00.000Z', '2026-10-15T14:30:00.000Z']],
         effective_seconds: 1800,
-        deleted_at: null
-      },
-      // Sesión 3: 1200 segundos (20 min) sin temas asociados (solo a la materia)
-      {
-        id: 'sess_3',
-        subject_id: 'sub_prog',
-        topic_ids: [],
-        effective_seconds: 1200,
         deleted_at: null
       },
       // Sesión borrada (tombstone) debe ser ignorada
@@ -133,36 +143,42 @@ test('FocusCore - Suite de Lógica Pura de Materias y Temas (Fase B1)', async (t
         id: 'sess_del',
         subject_id: 'sub_prog',
         topic_ids: ['top_rust'],
+        started_at: '2026-10-15T16:00:00.000Z',
         effective_seconds: 9999,
-        deleted_at: '2026-10-09T00:00:00Z'
+        deleted_at: '2026-10-15T17:00:00Z'
       }
     ];
 
-    const summary = FocusCore.summarizeSubject(subject, topics, sessions);
+    const summary = FocusCore.summarizeSubject(subject, topics, sessions, {
+      todayStr: '2026-10-15',
+      ianaTimezone: 'UTC'
+    });
 
-    // Total segundos: 3600 + 1800 + 1200 = 6600 segundos (110 minutos = 1.83 horas)
-    assert.equal(summary.total_seconds, 6600);
-    assert.equal(summary.total_minutes, 110);
-    assert.equal(summary.total_hours, 1.83);
+    // Total histórico acumulado: 3600 (antigua) + 3600 + 1800 = 9000 segundos (150 min = 2.50 horas)
+    assert.equal(summary.total_seconds, 9000);
+    assert.equal(summary.total_minutes, 150);
+    assert.equal(summary.total_hours, 2.5);
     assert.equal(summary.session_count, 3);
-    assert.equal(summary.goal_progress_percent, 92); // 110 / 120 = 91.66% -> 92%
 
-    // JS: 1800 (de sesión 1) + 1800 (de sesión 2) = 3600s (60 min, 1.0 h, 55% del total)
-    assert.equal(summary.topic_stats['top_js'].seconds, 3600);
-    assert.equal(summary.topic_stats['top_js'].minutes, 60);
-    assert.equal(summary.topic_stats['top_js'].hours, 1);
-    assert.equal(summary.topic_stats['top_js'].percentage, 55);
+    // Total de esta semana en curso (L-D): 3600 + 1800 = 5400 segundos (90 min = 1.50 horas)
+    assert.equal(summary.week_seconds, 5400);
+    assert.equal(summary.week_minutes, 90);
+    assert.equal(summary.week_hours, 1.5);
 
-    // Python: 1800s (30 min, 0.5 h, 27% del total)
+    // Progreso semanal hacia la meta de 120 min: 90 / 120 = 75% (NO el 125% del total histórico)
+    assert.equal(summary.goal_progress_percent, 75);
+
+    // JS acumulado: 3600 (antigua) + 1800 (sess_1) + 1800 (sess_2) = 7200s (120 min, 2.0 h, 80%)
+    assert.equal(summary.topic_stats['top_js'].seconds, 7200);
+    assert.equal(summary.topic_stats['top_js'].minutes, 120);
+    assert.equal(summary.topic_stats['top_js'].hours, 2);
+    assert.equal(summary.topic_stats['top_js'].percentage, 80);
+
+    // Python acumulado: 1800s (30 min, 0.5 h, 20%)
     assert.equal(summary.topic_stats['top_py'].seconds, 1800);
     assert.equal(summary.topic_stats['top_py'].minutes, 30);
     assert.equal(summary.topic_stats['top_py'].hours, 0.5);
-    assert.equal(summary.topic_stats['top_py'].percentage, 27);
-
-    // Rust: 0s
-    assert.equal(summary.topic_stats['top_rust'].seconds, 0);
-    assert.equal(summary.topic_stats['top_rust'].minutes, 0);
-    assert.equal(summary.topic_stats['top_rust'].percentage, 0);
+    assert.equal(summary.topic_stats['top_py'].percentage, 20);
   });
 
   await t.test('6. summarizeSubject con sesiones que referencian subtemas inexistentes, de otra materia o con tombstone acumula segundos a la materia sin error', () => {

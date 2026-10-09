@@ -128,7 +128,7 @@
     const baseConfig = METHODS_CONFIG[methodKey] || METHODS_CONFIG.pomodoro;
 
     let focusSec = baseConfig.focusDurationSec;
-    if (options.customFocusMinutes && Number(options.customFocusMinutes) > 0) {
+    if (methodKey === 'custom' && options.customFocusMinutes && Number(options.customFocusMinutes) > 0) {
       focusSec = Math.round(Number(options.customFocusMinutes) * 60);
     }
 
@@ -318,6 +318,8 @@
   // 5. HEARTBEAT Y POLÍTICA DE GAPS (AUSENCIAS) CON TICK REACTIVO
   // ============================================================================
 
+  const GAP_FLOWTIME_SOFT_MS = 5 * 60 * 1000;      // 5 minutos: aviso con 3 opciones en Flowtime
+
   function tick(timer, nowFn = defaultNow) {
     if (!timer) return { state: timer, events: [] };
     const now = nowFn();
@@ -331,17 +333,34 @@
     const last = timer.last_heartbeat || now;
     const diff = now - last;
 
-    // Métodos abiertos (Flowtime, Cronómetro, Deep Work)
-    if (timer.method === 'flowtime' || timer.method === 'stopwatch' || !timer.config.isCountdown) {
-      if (diff > GAP_FLOWTIME_STALE_MS) {
+    // 1. Flowtime: detección de hueco suave (5 a 30 min) o severo (> 30 min)
+    if (timer.method === 'flowtime') {
+      if (diff >= GAP_FLOWTIME_SOFT_MS && diff <= GAP_FLOWTIME_STALE_MS) {
         timer.status = 'waiting';
         timer.waiting_reason = 'flowtime_gap';
         timer.gap_detected_ms = diff;
-        events.push({ type: 'gap_detected', reason: 'flowtime_gap', gap_ms: diff });
+        events.push({ type: 'gap_detected', reason: 'flowtime_gap', gap_ms: diff, allow_keep: true });
+        return { state: timer, events };
+      } else if (diff > GAP_FLOWTIME_STALE_MS) {
+        timer.status = 'waiting';
+        timer.waiting_reason = 'flowtime_stale_gap';
+        timer.gap_detected_ms = diff;
+        events.push({ type: 'gap_detected', reason: 'flowtime_stale_gap', gap_ms: diff, allow_keep: false });
         return { state: timer, events };
       }
-    } else {
-      // Métodos fijos de cuenta regresiva (Pomodoro, 52/17, Ultradiano, Custom)
+    } else if (timer.method === 'stopwatch' || timer.method === 'deep_work' || timer.method === 'custom' || !timer.config.isCountdown) {
+      // 2. Cronómetro libre, Deep Work y Personalizado: hueco > 30 min
+      if (diff > GAP_FLOWTIME_STALE_MS) {
+        timer.status = 'waiting';
+        timer.waiting_reason = 'absence_detected';
+        timer.gap_detected_ms = diff;
+        events.push({ type: 'gap_detected', reason: 'absence_detected', gap_ms: diff, allow_keep: false });
+        return { state: timer, events };
+      }
+    }
+
+    // 3. Métodos fijos de cuenta regresiva (Pomodoro, 52/17, Ultradiano, Custom con cuenta regresiva)
+    if (timer.config.isCountdown && timer.method !== 'deep_work') {
       const targetSec = timer.phase === 'focus'
         ? timer.config.focusDurationSec
         : (timer.phase === 'long_break' ? timer.config.longBreakDurationSec : timer.config.breakDurationSec);
@@ -401,15 +420,19 @@
     if (!timer || timer.status !== 'waiting') return timer;
     const now = nowFn();
 
-    if (keepElapsedTime) {
-      // Usuario confirma que estuvo presente todo el tiempo
+    // En ausencias mayores a 30 min (absence_detected o flowtime_stale_gap), NO se permite acreditar todo sin hora real
+    const isStaleAbsence = (timer.waiting_reason === 'absence_detected' || timer.waiting_reason === 'flowtime_stale_gap');
+    const effectiveKeep = isStaleAbsence ? false : keepElapsedTime;
+
+    if (effectiveKeep && !customEndIso) {
+      // Usuario confirma que estuvo presente todo el tiempo (solo permitido en huecos <= 30 min de Flowtime o latidos vivos)
       timer.last_heartbeat = now;
       timer.status = timer.phase === 'focus' ? 'running' : 'break';
       timer.waiting_reason = null;
       timer.gap_detected_ms = 0;
     } else {
-      // Usuario se detuvo en el último latido o en hora manual
-      let cutoffMs = timer.last_heartbeat || (now - timer.gap_detected_ms);
+      // Usuario se detuvo en el último latido o en hora manual especificada
+      let cutoffMs = timer.last_heartbeat || (now - (timer.gap_detected_ms || 0));
       if (customEndIso) {
         const parsed = new Date(customEndIso).getTime();
         if (!isNaN(parsed) && parsed >= (timer.current_interval_start || 0) && parsed <= now) {

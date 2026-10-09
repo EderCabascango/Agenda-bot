@@ -673,8 +673,10 @@ input:focus, select:focus, textarea:focus {
 }
 .modal-overlay.open { display: flex; }
 #subject-modal-overlay,
-#topic-modal-overlay {
-  z-index: 220;
+#topic-modal-overlay,
+#session-edit-overlay,
+#manual-time-overlay {
+  z-index: 230;
 }
 .modal {
   background: var(--bg-secondary); border-radius: var(--radius-xl);
@@ -1639,6 +1641,146 @@ input:focus, select:focus, textarea:focus {
   height: 100%;
   border-radius: 4px;
   transition: width 0.3s ease;
+}
+
+/* Accessibility: Hidden Screen Reader Only Table */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Ciclo 15->14 Calendar Heatmap */
+.cycle-heat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.cycle-heat-cell {
+  aspect-ratio: 1;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  transition: transform 0.15s ease;
+  cursor: default;
+}
+
+.cycle-heat-cell:hover {
+  transform: scale(1.1);
+}
+
+.cycle-heat-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 12px;
+}
+
+/* Daily Bar Charts (7d / 30d) */
+.daily-bars-wrap {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 140px;
+  padding: 12px 4px 4px 4px;
+  overflow-x: auto;
+}
+
+.daily-bar-col {
+  flex: 1;
+  min-width: 32px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.daily-bar-track {
+  width: 100%;
+  max-width: 22px;
+  flex: 1;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+.daily-bar-fill {
+  width: 100%;
+  border-radius: 4px;
+  transition: height 0.4s ease;
+}
+
+.daily-bar-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.daily-bar-label.is-today {
+  color: var(--accent-teal);
+  font-weight: 700;
+}
+
+/* Layout and Mobile Bottom Protection */
+.study-content, .dashboard-grid, .calendar-view, .habits-content, .focus-stats-container {
+  padding-bottom: 110px !important;
+}
+
+.best-slot-badge {
+  display: inline-flex;
+  flex-wrap: wrap;
+  word-break: break-word;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.topbar-date {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+@media (max-width: 600px) {
+  .topbar-date {
+    max-width: 140px;
+    font-size: 0.8rem;
+  }
+  #btn-focus-timer {
+    display: none !important;
+  }
+  #modal-subject-detail .modal-actions {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+  }
+  #modal-subject-detail .modal-actions > div {
+    display: contents !important;
+  }
+  #modal-subject-detail .modal-actions button {
+    width: 100% !important;
+    margin: 0 !important;
+  }
 }
 
 

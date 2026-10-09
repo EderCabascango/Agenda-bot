@@ -144,28 +144,92 @@ test('TimerCore - Suite de Lógica Pura del Temporizador (Fase C1)', async (t) =
     assert.equal(timer.effective_seconds, 25 * 60);
   });
 
-  // 7. Flowtime con ausencia > 30 min pasa a waiting pidiendo confirmación
-  await t.test('7. Flowtime con ausencia > 30 min pasa a waiting pidiendo confirmación de hora real', () => {
+  // 7. Flowtime con ausencia y huecos suaves (5 a 30 min) y severos (> 30 min)
+  await t.test('7. Flowtime gestiona hueco suave (5-30m) con 3 opciones y hueco severo (>30m) sin acreditar horas', () => {
     let now = 1700000000000;
     const nowFn = () => now;
 
-    let timer = TimerCore.createTimer({ method: 'flowtime' });
-    timer = TimerCore.start(timer, nowFn);
+    // 7.1 Hueco suave (15 min): muestra aviso con 3 opciones
+    let timerSoft = TimerCore.createTimer({ method: 'flowtime' });
+    timerSoft = TimerCore.start(timerSoft, nowFn);
 
-    now += 45 * 60 * 1000; // 45 min sin tick
-    const res = TimerCore.tick(timer, nowFn);
-    assert.equal(res.events.length, 1);
-    assert.equal(res.events[0].type, 'gap_detected');
-    assert.equal(timer.status, 'waiting');
-    assert.equal(timer.waiting_reason, 'flowtime_gap');
+    now += 15 * 60 * 1000; // 15 min sin tick
+    const resSoft = TimerCore.tick(timerSoft, nowFn);
+    assert.equal(resSoft.events.length, 1);
+    assert.equal(resSoft.events[0].type, 'gap_detected');
+    assert.equal(resSoft.events[0].reason, 'flowtime_gap');
+    assert.equal(resSoft.events[0].allow_keep, true);
+    assert.equal(timerSoft.status, 'waiting');
 
-    // Si el usuario corta en el último latido (inicio)
-    TimerCore.resolveGap(timer, false, null, nowFn);
-    assert.equal(timer.status, 'paused');
+    // Opción A: Contar todo (keepElapsedTime = true)
+    TimerCore.resolveGap(timerSoft, true, null, nowFn);
+    assert.equal(timerSoft.status, 'running');
+
+    // Opción B: Descartar tramo (keepElapsedTime = false)
+    let timerDiscard = TimerCore.createTimer({ method: 'flowtime' });
+    timerDiscard = TimerCore.start(timerDiscard, nowFn);
+    now += 15 * 60 * 1000;
+    TimerCore.tick(timerDiscard, nowFn);
+    TimerCore.resolveGap(timerDiscard, false, null, nowFn);
+    assert.equal(timerDiscard.status, 'paused');
+    assert.equal(timerDiscard.effective_seconds, 0); // Tramo descartado
+
+    // 7.2 Hueco severo (> 30 min): nunca acredita horas automáticamente
+    let timerStale = TimerCore.createTimer({ method: 'flowtime' });
+    timerStale = TimerCore.start(timerStale, nowFn);
+    now += 90 * 60 * 1000; // 90 min de ausencia
+    const resStale = TimerCore.tick(timerStale, nowFn);
+    assert.equal(resStale.events[0].allow_keep, false);
+    assert.equal(timerStale.status, 'waiting');
+
+    // Intentar keepElapsedTime sin hora real debe ser rechazado y cortar en último latido
+    TimerCore.resolveGap(timerStale, true, null, nowFn);
+    assert.equal(timerStale.status, 'paused');
+    assert.equal(timerStale.effective_seconds, 0); // No acreditó 90 min
   });
 
-  // 8. finish y confirmación de descarte en < 60s
-  await t.test('8. finish con menos de 60s devuelve ask_discard, y con >= 60s completa la sesión', () => {
+  // 8. Cronómetro libre, Deep Work y Personalizado con hueco > 30 min
+  await t.test('8. Cronómetro libre, Deep Work y Personalizado detectan hueco > 30 min y rechazan crédito automático', () => {
+    // 8.1 Cronómetro libre (stopwatch)
+    let nowSw = 1700000000000;
+    const nowSwFn = () => nowSw;
+    let sw = TimerCore.createTimer({ method: 'stopwatch' });
+    sw = TimerCore.start(sw, nowSwFn);
+    nowSw += 45 * 60 * 1000; // 45 min
+    const resSw = TimerCore.tick(sw, nowSwFn);
+    assert.equal(resSw.events.length, 1);
+    assert.equal(sw.status, 'waiting');
+    assert.equal(sw.waiting_reason, 'absence_detected');
+    TimerCore.resolveGap(sw, true, null, nowSwFn); // Intento de acreditar sin hora
+    assert.equal(sw.effective_seconds, 0); // No acredita 45m
+
+    // 8.2 Deep Work
+    let nowDw = 1700000000000;
+    const nowDwFn = () => nowDw;
+    let dw = TimerCore.createTimer({ method: 'deep_work' });
+    dw = TimerCore.start(dw, nowDwFn);
+    nowDw += 40 * 60 * 1000; // 40 min
+    const resDw = TimerCore.tick(dw, nowDwFn);
+    assert.equal(dw.status, 'waiting');
+    assert.equal(dw.waiting_reason, 'absence_detected');
+
+    // Ajustar con hora real válida (ej: 20 min después de inicio)
+    const validEndIso = new Date(1700000000000 + (20 * 60 * 1000)).toISOString();
+    TimerCore.resolveGap(dw, false, validEndIso, nowDwFn);
+    assert.equal(dw.effective_seconds, 20 * 60);
+
+    // 8.3 Personalizado (custom)
+    let nowCust = 1700000000000;
+    const nowCustFn = () => nowCust;
+    let custom = TimerCore.createTimer({ method: 'custom', customFocusMinutes: 45 });
+    custom = TimerCore.start(custom, nowCustFn);
+    nowCust += 50 * 60 * 1000; // 50 min
+    const resCustom = TimerCore.tick(custom, nowCustFn);
+    assert.equal(custom.status, 'waiting');
+  });
+
+  // 9. finish y confirmación de descarte en < 60s
+  await t.test('9. finish con menos de 60s devuelve ask_discard, y con >= 60s completa la sesión', () => {
     let now = 1700000000000;
     const nowFn = () => now;
 
@@ -187,8 +251,8 @@ test('TimerCore - Suite de Lógica Pura del Temporizador (Fase C1)', async (t) =
     assert.equal(longTimer.status, 'completed');
   });
 
-  // 9. buildSessionRecord genera registro sin versión hardcodeada conforme a invariantes
-  await t.test('9. buildSessionRecord y buildManualSession generan payloads válidos sin solapamiento', () => {
+  // 10. buildSessionRecord genera registro sin versión hardcodeada conforme a invariantes
+  await t.test('10. buildSessionRecord y buildManualSession generan payloads válidos sin solapamiento', () => {
     let now = 1700000000000;
     const nowFn = () => now;
 
@@ -224,5 +288,26 @@ test('TimerCore - Suite de Lógica Pura del Temporizador (Fase C1)', async (t) =
     assert.equal(manual.effective_seconds, 45 * 60);
     assert.equal(manual.focus_intervals.length, 1);
     assert.equal(manual.version, undefined);
+  });
+
+  // 11. Comparación de duración mostrada vs configurada para cada método soportado
+  await t.test('11. Todos los métodos de estudio inician con su duración configurada exacta por defecto', () => {
+    const methods = [
+      { method: 'pomodoro', expectedSec: 25 * 60, expectedText: '25:00' },
+      { method: 'pomodoro_50', expectedSec: 50 * 60, expectedText: '50:00' },
+      { method: '52_17', expectedSec: 52 * 60, expectedText: '52:00' },
+      { method: 'ultradian', expectedSec: 90 * 60, expectedText: '90:00' },
+      { method: 'deep_work', expectedSec: 120 * 60, expectedText: '120:00' },
+      { method: 'flowtime', expectedSec: 0, expectedText: '00:00' },
+      { method: 'stopwatch', expectedSec: 0, expectedText: '00:00' }
+    ];
+
+    for (const m of methods) {
+      const timer = TimerCore.createTimer({ method: m.method });
+      assert.equal(timer.config.focusDurationSec, m.expectedSec, `Duración configurada para ${m.method} debe ser ${m.expectedSec}s`);
+      const metrics = TimerCore.getElapsedAndRemaining(timer);
+      const dispSec = timer.config.isCountdown ? metrics.remainingSeconds : metrics.currentPhaseElapsedSeconds;
+      assert.equal(dispSec, m.expectedSec, `Segundos iniciales mostrados para ${m.method} deben ser ${m.expectedSec}s`);
+    }
   });
 });

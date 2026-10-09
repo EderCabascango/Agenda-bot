@@ -283,6 +283,11 @@
                   <span>materias activas</span>
                 </div>
                 <div class="db-chip db-chip--teal">
+                  <span class="material-icons-round">today</span>
+                  <span>Hoy: </span>
+                  <span id="study-stat-today-minutes">0 min</span>
+                </div>
+                <div class="db-chip db-chip--teal">
                   <span class="material-icons-round">timer</span>
                   <span id="study-stat-total-hours">0h</span>
                   <span>horas estudiadas</span>
@@ -307,7 +312,7 @@
 
             <!-- Filter & Controls -->
             <div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:16px;">
-              <label class="checkbox-label" style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.85rem; color:var(--text-secondary); min-height:44px;">
+              <label class="checkbox-label" style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.85rem; color:var(--text-secondary); min-height:44px; white-space:nowrap;">
                 <input type="checkbox" id="study-filter-archived" />
                 <span>Mostrar materias archivadas</span>
               </label>
@@ -774,6 +779,49 @@
     </div>
   </div>
 
+  <!-- Modal: Editar Sesión de Estudio -->
+  <div class="modal-overlay" id="session-edit-overlay">
+    <div class="modal" id="modal-session-edit" style="max-width: 480px;">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="material-icons-round" style="color:var(--accent-teal);">edit_note</span>
+          <h3 class="modal-title" id="session-edit-title">Editar Sesión de Estudio</h3>
+        </div>
+        <button class="modal-close material-icons-round" id="session-edit-close">close</button>
+      </div>
+      <form id="form-session-edit" onsubmit="return false;">
+        <input type="hidden" id="edit-session-id-input" />
+        <div class="modal-body" style="display:flex; flex-direction:column; gap:14px;">
+          <div class="form-group">
+            <label for="edit-session-subject-select">Materia</label>
+            <select id="edit-session-subject-select" style="height:44px;">
+              <option value="">-- Sin Materia --</option>
+            </select>
+          </div>
+          <div class="form-row" style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+            <div class="form-group">
+              <label for="edit-session-date-input">Fecha</label>
+              <input type="date" id="edit-session-date-input" required />
+            </div>
+            <div class="form-group">
+              <label for="edit-session-duration-minutes">Minutos Efectivos *</label>
+              <input type="number" id="edit-session-duration-minutes" min="1" max="1440" required />
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="edit-session-goal-input">Objetivo / Detalle</label>
+            <input type="text" id="edit-session-goal-input" maxlength="200" placeholder="Ej: Ejercicios de repaso" />
+          </div>
+          <div id="edit-session-errors" class="form-errors" style="color:var(--accent-red); font-size:0.85rem; display:none;"></div>
+        </div>
+        <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:8px; padding:0 24px 20px;">
+          <button class="btn-secondary btn-touch-target" id="btn-cancel-edit-session" type="button">Cancelar</button>
+          <button class="btn-primary btn-touch-target" id="btn-save-edit-session" type="button">Guardar Cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Modal: Import Routine -->
   <div class="modal-overlay" id="routine-overlay">
     <div class="modal" id="modal-routine">
@@ -915,8 +963,10 @@
 
       <!-- VISTA 2: SESIÓN ACTIVA / CORRIENDO (RUNNING / PAUSED / BREAK) -->
       <div id="focus-active-view" style="display:none; text-align:center;">
-        <div style="display:flex; justify-content:center; margin-bottom:12px;">
+        <div style="display:flex; justify-content:center; align-items:center; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+          <span class="topic-status-badge pending" id="focus-method-badge" style="font-size:0.8rem; padding:4px 10px; font-weight:600;">Pomodoro Clásico</span>
           <span class="topic-status-badge in_progress" id="focus-phase-badge" style="font-size:0.85rem; padding:6px 14px; font-weight:700; letter-spacing:0.5px;">ENFOQUE</span>
+          <span id="focus-cycle-badge" style="font-size:0.8rem; color:var(--text-secondary); background:var(--bg-primary); padding:4px 10px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-weight:600;">Ciclo 1/4</span>
         </div>
 
         <div id="focus-timer-display" style="font-size:3.5rem; font-weight:800; font-variant-numeric:tabular-nums; color:var(--text-primary); margin:8px 0; letter-spacing:1px;">

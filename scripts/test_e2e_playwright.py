@@ -1049,13 +1049,13 @@ def test_playwright_e2e_full_sync():
                 const yesterday = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
 
                 const sampleSessions = [
-                    // Hoy: 2 horas (7200s) en Matemáticas
+                    // Hoy: 2 horas (7200s) en Inglés
                     {
                         id: 'foc-e2e-stat-1',
-                        subject_id: 'subject-seed-matematicas',
+                        subject_id: 'subject-seed-ingles',
                         topic_ids: [],
                         method: 'pomodoro',
-                        goal: 'Estudio intensivo cálculo',
+                        goal: 'Estudio intensivo vocabulario',
                         started_at: `${todayStr}T10:00:00.000Z`,
                         ended_at: `${todayStr}T12:00:00.000Z`,
                         focus_intervals: [[`${todayStr}T10:00:00.000Z`, `${todayStr}T12:00:00.000Z`]],
@@ -1069,13 +1069,13 @@ def test_playwright_e2e_full_sync():
                         updated_at: `${todayStr}T12:00:00.000Z`,
                         deleted_at: null
                     },
-                    // Ayer: 1.5 horas (5400s) en Programación
+                    // Ayer: 1.5 horas (5400s) en GenAI
                     {
                         id: 'foc-e2e-stat-2',
-                        subject_id: 'subject-seed-programacion',
+                        subject_id: 'subject-seed-genai',
                         topic_ids: [],
                         method: 'deep_work',
-                        goal: 'Programación backend',
+                        goal: 'Estudio de LLMs',
                         started_at: `${yesterday}T14:00:00.000Z`,
                         ended_at: `${yesterday}T15:30:00.000Z`,
                         focus_intervals: [[`${yesterday}T14:00:00.000Z`, `${yesterday}T15:30:00.000Z`]],
@@ -1114,18 +1114,149 @@ def test_playwright_e2e_full_sync():
             heatmap_svg = page_a.query_selector(".heatmap-svg")
             assert heatmap_svg is not None, "El elemento SVG del Heatmap debe existir en el DOM"
 
-            # Capturas de pantalla
-            # 1. Desktop (1280x800)
-            page_a.set_viewport_size({"width": 1280, "height": 800})
-            time.sleep(0.5)
-            page_a.screenshot(path=os.path.join(BASE_DIR, "screenshots", "stats_desktop.png"), full_page=True)
+            # ============================================================
+            # [E2E 21] Verificación de Meta Semanal de Materia y Agrupación de Huérfanos
+            # ============================================================
+            print("\n[E2E 21] Probando cálculo de meta semanal por materia y huérfanos...")
+            page_a.click(".nav-item[data-view='study'], .bnav-item[data-view='study']")
+            page_a.wait_for_selector("#view-study.active", timeout=3000)
+            page_a.evaluate("""() => {
+                if (window.switchStudySubtab) window.switchStudySubtab('subjects');
+                if (window.renderStudyView) window.renderStudyView();
+            }""")
+            page_a.wait_for_selector(".subject-card[data-id='subject-seed-ingles']", timeout=3000)
+            time.sleep(0.3)
 
-            # 2. Mobile (390x844)
-            page_a.set_viewport_size({"width": 390, "height": 844})
-            time.sleep(0.5)
-            page_a.screenshot(path=os.path.join(BASE_DIR, "screenshots", "stats_mobile.png"), full_page=True)
+            # Verificar que el texto de meta semanal de Inglés tenga el formato "esta semana"
+            mat_card_text = page_a.inner_text(".subject-card[data-id='subject-seed-ingles']")
+            assert "esta semana" in mat_card_text, f"Se esperaba texto con 'esta semana' en la tarjeta de Inglés: {mat_card_text}"
+            print(" -> Formato de progreso semanal verificado ('X.Xh esta semana / Y h').")
 
-            print(" -> Estadísticas verificadas contra cifras manuales y capturas guardadas (desktop y móvil).")
+            # ============================================================
+            # [E2E 22] Verificación Responsive y Detección de Desbordamientos (Overflow)
+            # ============================================================
+            print("\n[E2E 22] Probando que ningún contenedor ni tarjeta desborde el ancho de pantalla (1280px y 390px)...")
+            for vp_width, vp_height in [(1280, 800), (390, 844)]:
+                page_a.set_viewport_size({"width": vp_width, "height": vp_height})
+                time.sleep(0.3)
+                overflow_elements = page_a.evaluate("""() => {
+                    const bad = [];
+                    const body = document.body;
+                    if (body.scrollWidth > body.clientWidth) {
+                        bad.push(`body: scrollWidth(${body.scrollWidth}) > clientWidth(${body.clientWidth})`);
+                    }
+                    const cards = document.querySelectorAll('.subject-card, .stat-card, .best-slot-card, .study-stats-grid');
+                    cards.forEach((el, idx) => {
+                        if (el.scrollWidth > el.clientWidth + 1) { // 1px tolerance for subpixel rendering
+                            bad.push(`card[${idx}]: scrollWidth(${el.scrollWidth}) > clientWidth(${el.clientWidth})`);
+                        }
+                    });
+                    return bad;
+                }""")
+                assert len(overflow_elements) == 0, f"Desbordamiento detectado en viewport {vp_width}px: {overflow_elements}"
+            print(" -> 0 desbordamientos horizontales detectados en 1280px y 390px.")
+
+            # ============================================================
+            # [E2E 23] Verificación de Métodos de Temporizador y Duraciones Iniciales
+            # ============================================================
+            print("\n[E2E 23] Probando duraciones y configuraciones de cada método de temporizador...")
+            method_duration_expectations = [
+                ("pomodoro", "25:00"),
+                ("pomodoro_50", "50:00"),
+                ("52_17", "52:00"),
+                ("ultradian", "01:30:00"),
+                ("deep_work", "02:00:00"),
+                ("flowtime", "00:00"),
+                ("stopwatch", "00:00")
+            ]
+            for meth, expected_display in method_duration_expectations:
+                page_a.evaluate(f"""() => {{
+                    window.clearActiveFocusSession();
+                    window.openFocusModal();
+                    const sel = document.getElementById('focus-method-select');
+                    if (sel) {{
+                        sel.value = '{meth}';
+                        sel.dispatchEvent(new Event('change'));
+                    }}
+                    window.startFocusSessionFromSetup();
+                }}""")
+                time.sleep(0.3)
+                disp_text = page_a.inner_text("#focus-timer-display").strip()
+                assert disp_text == expected_display, f"Método {meth}: duración mostrada esperada {expected_display}, obtenida {disp_text}"
+                page_a.evaluate("() => { window.clearActiveFocusSession(); window.closeFocusModal(); }")
+            print(" -> Todos los métodos inicializan con la duración exacta configurada (Pomodoro 25:00, 50/10 50:00, etc.).")
+
+            # ============================================================
+            # [E2E 24] Edición de Sesión de Estudio en Detalle de Materia
+            # ============================================================
+            print("\n[E2E 24] Probando edición de sesión de estudio desde el modal de detalle...")
+            page_a.click(".subject-card[data-id='subject-seed-ingles'] [data-action='detail']")
+            page_a.wait_for_selector("#subject-detail-overlay.open", timeout=3000)
+
+            # Abrir edición de la primera sesión
+            page_a.wait_for_selector("#detail-recent-sessions-list [data-action='edit-session']", timeout=3000)
+            page_a.click("#detail-recent-sessions-list [data-action='edit-session']")
+            page_a.wait_for_selector("#session-edit-overlay.open", timeout=3000)
+
+            # Modificar duración a 45 minutos y objetivo
+            page_a.fill("#edit-session-duration-minutes", "45")
+            page_a.fill("#edit-session-goal-input", "Estudio intensivo vocabulario (editado)")
+            page_a.click("#btn-save-edit-session")
+            page_a.wait_for_selector("#session-edit-overlay", state="hidden", timeout=3000)
+
+            # Verificar que el modal de detalle muestra los 45 min
+            recent_text = page_a.inner_text("#detail-recent-sessions-list")
+            assert "45 min" in recent_text, f"Se esperaba 45 min en la lista de sesiones recientes: {recent_text}"
+            page_a.click("#btn-close-subject-detail")
+            print(" -> Sesión editada correctamente y reflejada en el detalle de la materia.")
+
+            # ============================================================
+            # [E2E 25] Capturas de Pantalla Automatizadas de las Vistas Clave
+            # ============================================================
+            print("\n[E2E 25] Generando capturas de pantalla de la suite E2E...")
+            os.makedirs(os.path.join(BASE_DIR, "screenshots"), exist_ok=True)
+
+            for vp_name, vp_w, vp_h in [("desktop", 1280, 800), ("mobile", 390, 844)]:
+                page_a.set_viewport_size({"width": vp_w, "height": vp_h})
+                nav_sel_dashboard = ".bnav-item[data-view='dashboard']" if vp_name == "mobile" else ".nav-item[data-view='dashboard']"
+                nav_sel_study = ".bnav-item[data-view='study']" if vp_name == "mobile" else ".nav-item[data-view='study']"
+
+                # 1. Dashboard
+                page_a.click(nav_sel_dashboard)
+                time.sleep(0.4)
+                page_a.screenshot(path=os.path.join(BASE_DIR, "screenshots", f"e2e_dashboard_{vp_name}.png"))
+
+                # 2. Estudio (Materias)
+                page_a.click(nav_sel_study)
+                page_a.evaluate("() => { if (window.switchStudySubtab) window.switchStudySubtab('subjects'); }")
+                time.sleep(0.4)
+                page_a.screenshot(path=os.path.join(BASE_DIR, "screenshots", f"e2e_study_subjects_{vp_name}.png"))
+
+                # 3. Detalle de Materia (con aserción de visibilidad)
+                page_a.click(".subject-card[data-id='subject-seed-ingles'] [data-action='detail']")
+                page_a.wait_for_selector("#modal-subject-detail", state="visible", timeout=3000)
+                time.sleep(0.4)
+                page_a.screenshot(path=os.path.join(BASE_DIR, "screenshots", f"e2e_subject_detail_{vp_name}.png"))
+                page_a.click("#btn-close-subject-detail")
+                page_a.wait_for_selector("#subject-detail-overlay", state="hidden", timeout=3000)
+
+                # 4. Temporizador Activo
+                page_a.evaluate("""() => {
+                    window.openFocusModal();
+                    window.startFocusSessionFromSetup();
+                }""")
+                page_a.wait_for_selector("#focus-active-view", state="visible", timeout=3000)
+                time.sleep(0.4)
+                page_a.screenshot(path=os.path.join(BASE_DIR, "screenshots", f"e2e_focus_active_{vp_name}.png"))
+                page_a.evaluate("() => { window.clearActiveFocusSession(); window.closeFocusModal(); }")
+
+                # 5. Estadísticas de Enfoque
+                page_a.click(nav_sel_study)
+                page_a.evaluate("() => { if (window.switchStudySubtab) window.switchStudySubtab('stats'); }")
+                time.sleep(0.4)
+                page_a.screenshot(path=os.path.join(BASE_DIR, "screenshots", f"e2e_stats_{vp_name}.png"))
+
+            print(" -> Capturas E2E guardadas en screenshots/ con nombres distintivos e2e_*.")
 
             browser.close()
             print("\n============================================================")

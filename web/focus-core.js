@@ -221,7 +221,7 @@
   // 4. RESUMEN Y MÉTRICAS DE MATERIA Y TEMAS (REPARTO EQUITATIVO DE SEGUNDOS)
   // ============================================================================
 
-  function summarizeSubject(subject, topics = [], sessions = []) {
+  function summarizeSubject(subject, topics = [], sessions = [], options = {}) {
     if (!subject || !subject.id) {
       return {
         total_seconds: 0,
@@ -242,6 +242,7 @@
       s => s && s.subject_id === subject.id && !s.deleted_at
     );
 
+    // 1. Total histórico acumulado de la materia y subtemas
     let totalEffectiveSeconds = 0;
     const topicStats = {};
 
@@ -274,7 +275,7 @@
       }
     });
 
-    // Calcular minutos, horas y porcentajes
+    // Calcular minutos, horas y porcentajes por subtema
     Object.keys(topicStats).forEach(tid => {
       const stat = topicStats[tid];
       stat.minutes = Math.round(stat.seconds / 60);
@@ -287,9 +288,62 @@
     const totalMinutes = Math.round(totalEffectiveSeconds / 60);
     const totalHours = Number((totalEffectiveSeconds / 3600).toFixed(2));
 
+    // 2. Cálculo de minutos de la semana en curso (Lunes a Domingo local)
+    const optionsObj = (typeof options === 'object' && options !== null) ? options : {};
+    const refDateStr = optionsObj.todayStr || (function () {
+      try {
+        const tz = optionsObj.ianaTimezone || (typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'UTC');
+        return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(optionsObj.nowMs || Date.now()));
+      } catch (e) {
+        return new Date(optionsObj.nowMs || Date.now()).toISOString().slice(0, 10);
+      }
+    })();
+
+    const refDt = new Date(refDateStr + 'T12:00:00Z');
+    const dayOfWeek = (refDt.getUTCDay() + 6) % 7; // 0=Mon ... 6=Sun
+    const mondayDt = new Date(refDt);
+    mondayDt.setUTCDate(refDt.getUTCDate() - dayOfWeek);
+    const mondayStr = mondayDt.toISOString().slice(0, 10);
+    const sundayDt = new Date(mondayDt);
+    sundayDt.setUTCDate(mondayDt.getUTCDate() + 6);
+    const sundayStr = sundayDt.toISOString().slice(0, 10);
+
+    let weekEffectiveSeconds = 0;
+    let statsCoreLib = (typeof StatsCore !== 'undefined') ? StatsCore : null;
+    if (!statsCoreLib && typeof require === 'function') {
+      try {
+        statsCoreLib = require('./stats-core.js');
+      } catch (e) {}
+    }
+
+    activeSessions.forEach(session => {
+      if (statsCoreLib && typeof statsCoreLib.splitSessionByLocalDate === 'function') {
+        const splits = statsCoreLib.splitSessionByLocalDate(session, optionsObj.ianaTimezone);
+        if (splits && splits.length > 0) {
+          for (const sp of splits) {
+            if (sp.date >= mondayStr && sp.date <= sundayStr) {
+              weekEffectiveSeconds += (sp.effective_seconds || 0);
+            }
+          }
+        } else if (!session.started_at && !session.focus_intervals) {
+          // Sesiones sin fecha explícita (ej. tests sintéticos de materias) se consideran de la semana actual
+          weekEffectiveSeconds += (Number(session.effective_seconds) || 0);
+        }
+      } else {
+        // Fallback: evaluar fecha de started_at, date o created_at
+        const sDate = (session.started_at || session.date || session.created_at || refDateStr).substring(0, 10);
+        if (sDate >= mondayStr && sDate <= sundayStr) {
+          weekEffectiveSeconds += (Number(session.effective_seconds) || 0);
+        }
+      }
+    });
+
+    const weekMinutes = Math.round(weekEffectiveSeconds / 60);
+    const weekHours = Number((weekEffectiveSeconds / 3600).toFixed(2));
+
     const weeklyGoalMinutes = Number(subject.weekly_goal_minutes) || 0;
     const goalProgressPercent = weeklyGoalMinutes > 0
-      ? Math.min(100, Math.round((totalMinutes / weeklyGoalMinutes) * 100))
+      ? Math.round((weekMinutes / weeklyGoalMinutes) * 100)
       : 0;
 
     return {
@@ -301,6 +355,9 @@
       total_seconds: totalEffectiveSeconds,
       total_minutes: totalMinutes,
       total_hours: totalHours,
+      week_seconds: weekEffectiveSeconds,
+      week_minutes: weekMinutes,
+      week_hours: weekHours,
       weekly_goal_minutes: weeklyGoalMinutes,
       goal_progress_percent: goalProgressPercent,
       session_count: activeSessions.length,

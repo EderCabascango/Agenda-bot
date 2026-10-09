@@ -126,10 +126,8 @@ test('StatsCore - Suite Completa de Métricas y Estadísticas Puras (Fase D1)', 
     assert.equal(avgs.avg_active_days_minutes, 90);
   });
 
-  await t.test('5. calculateTodayVs7DayAvg compara hoy frente a los 7 días precedentes', () => {
-    // Hoy es 2026-10-08 con 7200s (120 min)
-    // Días t-7 a t-1 (01 al 07): 3600s cada uno -> total 25200s -> promedio 3600s (60 min)
-    // Delta = +3600s (+100%)
+  await t.test('5. calculateTodayVs7DayAvg compara hoy frente a los 7 días precedentes en minutos absolutos y maneja hoy=0 y media < 15 min', () => {
+    // 5.1 Caso normal: Hoy 120 min (7200s), media previa 60 min (3600s) -> Delta = +60 min (+3600s)
     const dailyMap = {
       '2026-10-01': { effective_seconds: 3600 },
       '2026-10-02': { effective_seconds: 3600 },
@@ -143,9 +141,35 @@ test('StatsCore - Suite Completa de Métricas y Estadísticas Puras (Fase D1)', 
 
     const comp = StatsCore.calculateTodayVs7DayAvg(dailyMap, '2026-10-08');
     assert.equal(comp.today_seconds, 7200);
+    assert.equal(comp.today_minutes, 120);
     assert.equal(comp.avg_7d_preceding_seconds, 3600);
+    assert.equal(comp.avg_7d_preceding_minutes, 60);
     assert.equal(comp.delta_seconds, 3600);
-    assert.equal(comp.delta_percent, 100);
+    assert.equal(comp.delta_minutes, 60);
+    assert.equal(comp.has_sufficient_history, true);
+    assert.equal(comp.is_today_zero, false);
+    assert.equal(comp.show_comparison, true);
+    assert.equal(comp.status, 'positive');
+    assert.equal(comp.formatted_text, '+60 min sobre tu promedio de 7 días');
+
+    // 5.2 Caso hoy = 0 min (aún no ha estudiado hoy): texto neutro "Aún sin sesiones hoy" sin alarma roja
+    const mapZeroToday = { ...dailyMap, '2026-10-08': { effective_seconds: 0 } };
+    const compZero = StatsCore.calculateTodayVs7DayAvg(mapZeroToday, '2026-10-08');
+    assert.equal(compZero.today_minutes, 0);
+    assert.equal(compZero.is_today_zero, true);
+    assert.equal(compZero.status, 'neutral');
+    assert.equal(compZero.formatted_text, 'Aún sin sesiones hoy');
+
+    // 5.3 Caso media previa < 15 min: no mostrar comparación ("Promedio previo insuficiente (< 15 min)")
+    const mapLowHistory = {
+      '2026-10-01': { effective_seconds: 600 }, // 10 min
+      '2026-10-08': { effective_seconds: 3600 }
+    };
+    const compLow = StatsCore.calculateTodayVs7DayAvg(mapLowHistory, '2026-10-08');
+    assert.equal(compLow.has_sufficient_history, false);
+    assert.equal(compLow.show_comparison, false);
+    assert.equal(compLow.status, 'neutral');
+    assert.equal(compLow.formatted_text, 'Promedio previo insuficiente (< 15 min)');
   });
 
   await t.test('6. calculateStreak calcula racha actual y mejor racha con umbral configurable y estado de hoy', () => {
@@ -207,37 +231,45 @@ test('StatsCore - Suite Completa de Métricas y Estadísticas Puras (Fase D1)', 
     assert.equal(bestSlots.best_2h_slot, '10:00 - 12:00');
   });
 
-  await t.test('8. calculateSubjectDistribution tolera huérfanos, materias borradas y tombstones con cálculo manual de control', () => {
+  await t.test('8. calculateSubjectDistribution agrupa todas las sesiones huérfanas en UNA sola entrada "Sin materia"', () => {
     const subjects = [
       { id: 'sub-mat-1', name: 'Matemáticas', color: '#10B981', deleted_at: null },
       { id: 'sub-del-1', name: 'Materia Borrada', color: '#EF4444', deleted_at: '2026-10-01T00:00:00.000Z' }
     ];
 
     const sessions = [
-      // 1. Sesión normal en Matemáticas (3600s)
+      // 1. Sesión normal en Matemáticas (3600s = 60 min)
       { id: 'foc-s1', subject_id: 'sub-mat-1', effective_seconds: 3600, deleted_at: null },
-      // 2. Sesión huérfana (sin materia existente) (1800s)
+      // 2. Sesión huérfana con materia inexistente (1800s = 30 min)
       { id: 'foc-s2', subject_id: 'sub-inexistente', effective_seconds: 1800, deleted_at: null },
-      // 3. Sesión con subject_id null (1800s)
+      // 3. Sesión huérfana con subject_id null (1800s = 30 min)
       { id: 'foc-s3', subject_id: null, effective_seconds: 1800, deleted_at: null },
-      // 4. Sesión borrada con tombstone (no debe sumarse) (7200s)
-      { id: 'foc-s4', subject_id: 'sub-mat-1', effective_seconds: 7200, deleted_at: '2026-10-10T12:00:00.000Z' }
+      // 4. Sesión huérfana con materia borrada (1800s = 30 min)
+      { id: 'foc-s4', subject_id: 'sub-del-1', effective_seconds: 1800, deleted_at: null },
+      // 5. Sesión borrada con tombstone (no debe sumarse) (7200s)
+      { id: 'foc-s5', subject_id: 'sub-mat-1', effective_seconds: 7200, deleted_at: '2026-10-10T12:00:00.000Z' }
     ];
 
-    // Total activo esperado = 3600 + 1800 + 1800 = 7200s (120 min = 2h)
-    // Matemáticas = 3600s (50%)
-    // Desconocida/Sin materia = 3600s (50%)
+    // Total activo esperado = 3600 + 1800 + 1800 + 1800 = 9000s (150 min = 2.5h)
+    // Matemáticas = 3600s (40%)
+    // Sin materia (foc-s2 + foc-s3 + foc-s4) = 5400s (60%) -> EXACTAMENTE 1 ENTRADA
     const dist = StatsCore.calculateSubjectDistribution(sessions, subjects, []);
-    assert.equal(dist.total_seconds, 7200);
-    assert.equal(dist.total_minutes, 120);
-    assert.equal(dist.total_hours, 2.0);
-    assert.equal(dist.subjects.length, 3); // sub-mat-1, sub-inexistente, unassigned
+    assert.equal(dist.total_seconds, 9000);
+    assert.equal(dist.total_minutes, 150);
+    assert.equal(dist.total_hours, 2.5);
+    assert.equal(dist.subjects.length, 2); // Exactamente 2 grupos: Matemáticas y Sin materia
 
-    const mat = dist.subjects.find(s => s.subject_id === 'sub-mat-1');
+    const mat = dist.subjects.find(s => s.name === 'Matemáticas');
     assert.ok(mat);
-    assert.equal(mat.name, 'Matemáticas');
     assert.equal(mat.effective_seconds, 3600);
-    assert.equal(mat.percentage, 50);
+    assert.equal(mat.percentage, 40);
+
+    const orphanGroup = dist.subjects.find(s => s.name === 'Sin materia');
+    assert.ok(orphanGroup);
+    assert.equal(orphanGroup.effective_seconds, 5400); // 1800 + 1800 + 1800
+    assert.equal(orphanGroup.percentage, 60);
+    assert.equal(orphanGroup.sessions_count, 3);
+    assert.equal(orphanGroup.color, '#8A99AD');
   });
 
   await t.test('9. calculateSessionStatusBreakdown y calculateDailyGoalProgress calculan ratios y metas', () => {
@@ -263,7 +295,32 @@ test('StatsCore - Suite Completa de Métricas y Estadísticas Puras (Fase D1)', 
     assert.equal(goal.is_completed, false);
   });
 
-  await t.test('10. generateFullStatsReport emite el reporte consolidado 100% estructurado y determinista', () => {
+  await t.test('10. getDailyBarSeries y calculateCycleCalendarHeatmap generan series y cuadrículas de intensidad', () => {
+    const dailyMap = {
+      '2026-10-10': { effective_seconds: 1800 }, // 30m (level 1)
+      '2026-10-11': { effective_seconds: 3600 }, // 60m (level 2)
+      '2026-10-12': { effective_seconds: 5400 }, // 90m (level 3)
+      '2026-10-13': { effective_seconds: 9000 }, // 150m (level 4)
+      '2026-10-14': { effective_seconds: 0 }     // 0m (level 0)
+    };
+
+    const bars7d = StatsCore.getDailyBarSeries(dailyMap, 7, '2026-10-14');
+    assert.equal(bars7d.series.length, 7);
+    assert.equal(bars7d.end_date, '2026-10-14');
+    assert.equal(bars7d.series[6].is_today, true);
+
+    const cycleHeatmap = StatsCore.calculateCycleCalendarHeatmap(dailyMap, '2026-10-14');
+    assert.equal(cycleHeatmap.cycle_start, '2026-09-15');
+    assert.equal(cycleHeatmap.cycle_end, '2026-10-14');
+    assert.ok(cycleHeatmap.days.length >= 28);
+
+    const d13 = cycleHeatmap.days.find(d => d.date === '2026-10-13');
+    assert.ok(d13);
+    assert.equal(d13.minutes, 150);
+    assert.equal(d13.level, 4);
+  });
+
+  await t.test('11. generateFullStatsReport emite el reporte consolidado 100% estructurado y determinista', () => {
     const sessions = [
       {
         id: 'foc-rep-1',
@@ -290,6 +347,8 @@ test('StatsCore - Suite Completa de Métricas y Estadísticas Puras (Fase D1)', 
     assert.equal(report.streak.current_streak, 1);
     assert.equal(report.session_status.completed_percent, 100);
     assert.equal(report.subjects_distribution.subjects[0].name, 'Matemáticas');
+    assert.ok(report.cycle_heatmap);
+    assert.ok(report.daily_bars_7d);
   });
 
 });
