@@ -41,6 +41,10 @@
           <span class="material-icons-round">analytics</span>
           <span>Estadísticas</span>
         </button>
+        <button class="nav-item" data-view="study">
+          <span class="material-icons-round">school</span>
+          <span>Estudio</span>
+        </button>
         <button class="nav-item" data-view="settings">
           <span class="material-icons-round">settings</span>
           <span>Ajustes</span>
@@ -241,6 +245,58 @@
               <h4>Productividad (últimos 7 días)</h4>
               <div class="productivity-chart" id="productivity-chart"></div>
             </div>
+          </div>
+        </section>
+
+        <!-- ========== STUDY VIEW (MATERIAS Y TEMAS) ========== -->
+        <section class="view" id="view-study">
+          <div class="view-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+            <div>
+              <h2>Materias y Estudio</h2>
+              <p class="section-desc" style="color:var(--text-secondary); font-size:0.9rem; margin-top:4px;">Organiza tus materias, temas y objetivos de aprendizaje</p>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <button class="btn-outline btn-touch-target" id="btn-seed-subjects" style="gap:6px; padding:0 14px;">
+                <span class="material-icons-round">auto_awesome</span>
+                <span>Materias sugeridas</span>
+              </button>
+              <button class="btn-primary btn-touch-target" id="btn-add-subject" style="gap:6px; padding:0 16px;">
+                <span class="material-icons-round">add</span>
+                <span>Nueva Materia</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Study Stats / Overview Bar -->
+          <div class="db-chips" style="margin-bottom:20px;">
+            <div class="db-chip db-chip--purple">
+              <span class="material-icons-round">school</span>
+              <span id="study-stat-active-count">0</span>
+              <span>materias activas</span>
+            </div>
+            <div class="db-chip db-chip--teal">
+              <span class="material-icons-round">timer</span>
+              <span id="study-stat-total-hours">0h</span>
+              <span>horas estudiadas</span>
+            </div>
+            <div class="db-chip db-chip--amber">
+              <span class="material-icons-round">flag</span>
+              <span id="study-stat-weekly-goal">0h</span>
+              <span>meta semanal</span>
+            </div>
+          </div>
+
+          <!-- Filter & Controls -->
+          <div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:16px;">
+            <label class="checkbox-label" style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.85rem; color:var(--text-secondary); min-height:44px;">
+              <input type="checkbox" id="study-filter-archived" />
+              <span>Mostrar materias archivadas</span>
+            </label>
+          </div>
+
+          <!-- Subjects Grid -->
+          <div class="subjects-grid" id="subjects-grid">
+            <!-- Renderizado dinámico -->
           </div>
         </section>
 
@@ -537,7 +593,142 @@
         <span class="material-icons-round">analytics</span>
         <span>Stats</span>
       </button>
+      <button class="bnav-item" data-view="study">
+        <span class="material-icons-round">school</span>
+        <span>Estudio</span>
+      </button>
     </nav>
+  </div>
+
+  <!-- Modal: Crear / Editar Materia -->
+  <div class="modal-overlay" id="subject-modal-overlay">
+    <div class="modal" id="modal-subject" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 id="modal-subject-title">Nueva Materia</h3>
+        <button class="modal-close material-icons-round" id="modal-subject-close">close</button>
+      </div>
+      <form id="form-subject" onsubmit="return false;">
+        <input type="hidden" id="subject-id-input" />
+        <div class="form-group" style="margin-bottom:16px;">
+          <label for="subject-name-input">Nombre de la Materia *</label>
+          <input type="text" id="subject-name-input" maxlength="60" placeholder="Ej: Inglés Avanzado" required />
+        </div>
+        <div class="form-row" style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+          <div class="form-group">
+            <label for="subject-color-input">Color Identificador</label>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <input type="color" id="subject-color-picker" value="#3B82F6" style="width:44px; height:44px; padding:2px; cursor:pointer; border-radius:var(--radius-sm);" />
+              <input type="text" id="subject-color-input" value="#3B82F6" maxlength="7" style="flex:1;" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="subject-icon-input">Ícono</label>
+            <select id="subject-icon-input" style="height:44px;">
+              <option value="school">Graduación (school)</option>
+              <option value="language">Idioma (language)</option>
+              <option value="psychology">Cerebro / IA (psychology)</option>
+              <option value="cloud">Nube / Cloud (cloud)</option>
+              <option value="dataset">Datos (dataset)</option>
+              <option value="code">Código (code)</option>
+              <option value="menu_book">Libro (menu_book)</option>
+              <option value="science">Ciencia (science)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:20px;">
+          <label for="subject-goal-input">Meta Semanal (minutos)</label>
+          <input type="number" id="subject-goal-input" min="0" step="15" value="180" placeholder="Minutos por semana (ej: 180 = 3h)" />
+        </div>
+        <div id="subject-form-errors" class="form-errors" style="color:var(--accent-red); font-size:0.85rem; margin-bottom:12px; display:none;"></div>
+        <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:8px;">
+          <button class="btn-secondary btn-touch-target" id="btn-cancel-subject" type="button">Cancelar</button>
+          <button class="btn-primary btn-touch-target" id="btn-save-subject" type="button">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Crear / Editar Tema -->
+  <div class="modal-overlay" id="topic-modal-overlay">
+    <div class="modal" id="modal-topic" style="max-width: 440px;">
+      <div class="modal-header">
+        <h3 id="modal-topic-title">Nuevo Tema</h3>
+        <button class="modal-close material-icons-round" id="modal-topic-close">close</button>
+      </div>
+      <form id="form-topic" onsubmit="return false;">
+        <input type="hidden" id="topic-id-input" />
+        <input type="hidden" id="topic-subject-id-input" />
+        <div class="form-group" style="margin-bottom:16px;">
+          <label for="topic-name-input">Nombre del Tema / Subtema *</label>
+          <input type="text" id="topic-name-input" maxlength="60" placeholder="Ej: Vocabulario B2" required />
+        </div>
+        <div class="form-group" style="margin-bottom:20px;">
+          <label for="topic-status-input">Estado</label>
+          <select id="topic-status-input" style="height:44px;">
+            <option value="not_started">No iniciado</option>
+            <option value="in_progress">En progreso</option>
+            <option value="completed">Completado</option>
+            <option value="review_needed">Requiere repaso</option>
+          </select>
+        </div>
+        <div id="topic-form-errors" class="form-errors" style="color:var(--accent-red); font-size:0.85rem; margin-bottom:12px; display:none;"></div>
+        <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:8px;">
+          <button class="btn-secondary btn-touch-target" id="btn-cancel-topic" type="button">Cancelar</button>
+          <button class="btn-primary btn-touch-target" id="btn-save-topic" type="button">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Detalle de Materia y Gestión de Temas -->
+  <div class="modal-overlay" id="subject-detail-overlay">
+    <div class="modal" id="modal-subject-detail" style="max-width: 600px;">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div id="detail-subject-icon-box" style="width:36px; height:36px; border-radius:var(--radius-sm); display:flex; align-items:center; justify-content:center; color:#FFFFFF; background:var(--accent-teal);">
+            <span class="material-icons-round" id="detail-subject-icon" style="font-size:22px;">school</span>
+          </div>
+          <div>
+            <h3 class="modal-title" id="detail-subject-title" style="margin:0;">Materia</h3>
+            <span id="detail-subject-badge" style="font-size:0.75rem; color:var(--text-muted);">Activa</span>
+          </div>
+        </div>
+        <button class="modal-close material-icons-round" id="detail-subject-close">close</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:16px;">
+        <div class="subject-detail-stats" id="detail-stats-bar" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; padding:12px; background:var(--bg-primary); border-radius:var(--radius-md);">
+          <div>
+            <span style="font-size:0.75rem; color:var(--text-secondary);">Tiempo total</span>
+            <p id="detail-stat-hours" style="font-size:1.1rem; font-weight:700; margin:0;">0h</p>
+          </div>
+          <div>
+            <span style="font-size:0.75rem; color:var(--text-secondary);">Meta semanal</span>
+            <p id="detail-stat-goal" style="font-size:1.1rem; font-weight:700; margin:0;">0h</p>
+          </div>
+          <div>
+            <span style="font-size:0.75rem; color:var(--text-secondary);">Sesiones</span>
+            <p id="detail-stat-sessions" style="font-size:1.1rem; font-weight:700; margin:0;">0</p>
+          </div>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+          <h4 style="font-size:0.95rem; margin:0;">Temas y Subtemas</h4>
+          <button class="btn-outline btn-touch-target" id="btn-add-topic-from-detail" style="gap:4px; padding:0 12px; font-size:0.85rem;">
+            <span class="material-icons-round" style="font-size:18px;">add</span>
+            <span>Nuevo Tema</span>
+          </button>
+        </div>
+        <div id="detail-topics-list" style="display:flex; flex-direction:column; gap:8px; max-height:300px; overflow-y:auto;">
+          <!-- Renderizado dinámico de temas -->
+        </div>
+      </div>
+      <div class="modal-actions" style="margin-top:16px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; gap:8px;">
+          <button class="btn-outline btn-touch-target" id="btn-edit-subject-from-detail">Editar</button>
+          <button class="btn-outline btn-touch-target" id="btn-delete-subject-from-detail" style="color:var(--accent-red); border-color:var(--accent-red);">Eliminar</button>
+        </div>
+        <button class="btn-secondary btn-touch-target" id="btn-close-subject-detail">Cerrar</button>
+      </div>
+    </div>
   </div>
 
   <!-- Modal: Import Routine -->
@@ -644,9 +835,10 @@
     </div>
   </div>
 
-  <!-- SheetJS & App script -->
+  <!-- SheetJS & App scripts -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="sync-core.js?v=8"></script>
-  <script src="app.js?v=8"></script>
+  <script src="sync-core.js?v=9"></script>
+  <script src="focus-core.js?v=9"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>

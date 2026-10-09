@@ -642,6 +642,135 @@ def test_playwright_e2e_full_sync():
             assert b_received_offline["hasNot"] is True
             print(" -> Lote multi-colección offline subido y sincronizado atómicamente a B.")
 
+            # ============================================================
+            # [E2E 9] Creación de Materias Sugeridas (Seeds) Idempotente en Paralelo
+            # ============================================================
+            print("\n[E2E 9] Probando creación de materias sugeridas (seeds con create_if_absent) concurrente...")
+            page_a.evaluate("async () => { window.handleSeedSubjects(); await window.syncWithBackend(); }")
+            page_b.evaluate("async () => { window.handleSeedSubjects(); await window.syncWithBackend(); }")
+
+            # Verificar que ambos contextos tienen las 4 materias sugeridas y 8 temas sin conflictos
+            conflicts_a = page_a.evaluate("() => Object.keys(JSON.parse(localStorage.getItem('diary_conflicts') || '{}')).length")
+            conflicts_b = page_b.evaluate("() => Object.keys(JSON.parse(localStorage.getItem('diary_conflicts') || '{}')).length")
+            assert conflicts_a == 0, f"Contexto A no debe tener conflictos con seeds sugeridas, tiene: {conflicts_a}"
+            assert conflicts_b == 0, f"Contexto B no debe tener conflictos con seeds sugeridas, tiene: {conflicts_b}"
+
+            subs_count_a = page_a.evaluate("() => JSON.parse(localStorage.getItem('diary_subjects') || '[]').filter(s => s && s.id.startsWith('subject-seed-') && !s.deleted_at).length")
+            subs_count_b = page_b.evaluate("() => JSON.parse(localStorage.getItem('diary_subjects') || '[]').filter(s => s && s.id.startsWith('subject-seed-') && !s.deleted_at).length")
+            assert subs_count_a == 4, f"Contexto A debe tener 4 materias semillas, tiene: {subs_count_a}"
+            assert subs_count_b == 4, f"Contexto B debe tener 4 materias semillas, tiene: {subs_count_b}"
+
+            topics_count_a = page_a.evaluate("() => JSON.parse(localStorage.getItem('diary_topics') || '[]').filter(t => t && t.id.startsWith('topic-seed-') && !t.deleted_at).length")
+            topics_count_b = page_b.evaluate("() => JSON.parse(localStorage.getItem('diary_topics') || '[]').filter(t => t && t.id.startsWith('topic-seed-') && !t.deleted_at).length")
+            assert topics_count_a == 8, f"Contexto A debe tener 8 temas semillas, tiene: {topics_count_a}"
+            assert topics_count_b == 8, f"Contexto B debe tener 8 temas semillas, tiene: {topics_count_b}"
+            print(" -> Creación de materias sugeridas 100% idempotente (0 conflictos, 4 materias y 8 temas sincronizados).")
+
+            # ============================================================
+            # [E2E 10] UI de Materias y Temas, Creación, Eliminación con Tombstone y Filtro de Archivadas
+            # ============================================================
+            print("\n[E2E 10] Probando UI de Materias, creación de tema, eliminación de tema y archivado...")
+            page_a.click(".nav-item[data-view='study']")
+            page_a.wait_for_selector("#view-study.active", timeout=3000)
+            page_a.wait_for_selector(".subject-card[data-id='subject-seed-ingles']", timeout=3000)
+
+            # Abrir detalle de Inglés y agregar un tema nuevo
+            page_a.click(".subject-card[data-id='subject-seed-ingles'] [data-action='detail']")
+            page_a.wait_for_selector("#subject-detail-overlay.open", timeout=3000)
+
+            page_a.click("#btn-add-topic-from-detail")
+            page_a.wait_for_selector("#topic-modal-overlay.open", timeout=3000)
+            page_a.fill("#topic-name-input", "Listening Avanzado C1")
+            page_a.click("#btn-save-topic")
+            page_a.wait_for_selector("#topic-modal-overlay", state="hidden", timeout=3000)
+            page_a.evaluate("async () => { await window.syncWithBackend(); }")
+
+            # Contexto B sincroniza y verifica recepción del nuevo tema
+            page_b.evaluate("async () => { await window.syncWithBackend(); }")
+            has_new_topic_in_b = page_b.evaluate("""() => {
+                const tops = JSON.parse(localStorage.getItem('diary_topics') || '[]');
+                return tops.some(t => t.name === 'Listening Avanzado C1' && !t.deleted_at);
+            }""")
+            assert has_new_topic_in_b is True, "Contexto B debió recibir el nuevo tema 'Listening Avanzado C1'"
+
+            # Contexto A elimina un tema (ej: Listening Avanzado C1)
+            page_a.evaluate("""async () => {
+                const tops = JSON.parse(localStorage.getItem('diary_topics') || '[]');
+                const top = tops.find(t => t.name === 'Listening Avanzado C1');
+                if (top) {
+                    window.handleDeleteTopic(top.id);
+                }
+                await window.syncWithBackend();
+            }""")
+
+            # Contexto B sincroniza y verifica que el tema eliminado fue purgado de la lista activa
+            page_b.evaluate("async () => { await window.syncWithBackend(); }")
+            active_top_in_b = page_b.evaluate("""() => {
+                const tops = JSON.parse(localStorage.getItem('diary_topics') || '[]');
+                const top = tops.find(t => t.name === 'Listening Avanzado C1');
+                return top ? (!top.deleted_at) : false;
+            }""")
+            assert active_top_in_b is False, "El tema borrado no debe estar activo en Contexto B tras sincronizar el tombstone"
+            print(" -> Creación y eliminación de temas con tombstones validada en UI y sincronizada.")
+
+            # ============================================================
+            # [E2E 11] Tolerancia a Huérfanos y Resistencia a Inyecciones XSS en Estudio
+            # ============================================================
+            print("\n[E2E 11] Probando tolerancia a huérfanos y neutralización de inyecciones XSS en materias/temas...")
+            xss_dialogs = []
+            page_a.on("dialog", lambda dialog: (xss_dialogs.append(dialog.message), dialog.dismiss()))
+
+            # Inyectar materia y tema con payloads XSS y entidad huérfana
+            page_a.evaluate("""async () => {
+                const xssSub = {
+                    id: 'sub-xss-1',
+                    name: '<script>alert("xss-sub")</script><img src=x onerror=alert("xss-img")>',
+                    color: '#8B5CF6',
+                    icon: 'school',
+                    weekly_goal_minutes: 120,
+                    version: 1
+                };
+                const xssTop = {
+                    id: 'top-xss-1',
+                    subject_id: 'sub-xss-1',
+                    name: '<svg onload=alert("xss-top")>',
+                    status: 'in_progress',
+                    version: 1
+                };
+                // Huérfano: Sesión que referencia una materia inexistente
+                const orphanFoc = {
+                    id: 'foc-orphan-ui-1',
+                    subject_id: 'non-existent-subject-xyz',
+                    topic_ids: ['non-existent-top-xyz'],
+                    source: 'manual',
+                    effective_seconds: 3600,
+                    version: 1
+                };
+
+                let subs = JSON.parse(localStorage.getItem('diary_subjects') || '[]');
+                subs.push(xssSub);
+                localStorage.setItem('diary_subjects', JSON.stringify(subs));
+
+                let tops = JSON.parse(localStorage.getItem('diary_topics') || '[]');
+                tops.push(xssTop);
+                localStorage.setItem('diary_topics', JSON.stringify(tops));
+
+                let focs = JSON.parse(localStorage.getItem('diary_focus_sessions') || '[]');
+                focs.push(orphanFoc);
+                localStorage.setItem('diary_focus_sessions', JSON.stringify(focs));
+
+                window.renderStudyView();
+                window.openSubjectDetailModal('sub-xss-1');
+            }""")
+
+            time.sleep(0.5)
+            assert len(xss_dialogs) == 0, f"Inyección XSS detectada en Vista de Estudio: {xss_dialogs}"
+
+            # Verificar que el texto en DOM está correctamente escapado y no ejecutó etiquetas
+            title_text = page_a.inner_text("#detail-subject-title")
+            assert "<script>" in title_text or "alert" in title_text, "El texto crudo debe mostrarse sin interpretar tags HTML"
+            print(" -> Verificación de seguridad y huérfanos exitosa: 0 alertas XSS, render tolerante a huérfanos.")
+
             browser.close()
             print("\n============================================================")
             print("TODOS LOS TESTS E2E DE PLAYWRIGHT PASARON (100% OK)")
@@ -653,3 +782,4 @@ def test_playwright_e2e_full_sync():
 
 if __name__ == "__main__":
     test_playwright_e2e_full_sync()
+

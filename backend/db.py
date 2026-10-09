@@ -246,7 +246,7 @@ COLLECTION_SCHEMAS = {
         "columns": {
             "subject_id": {"type": str, "max_length": 100, "default": "", "sql_col": "subject_id"},
             "name": {"type": str, "max_length": 200, "default": "", "sql_col": "name"},
-            "status": {"type": str, "enum": ["pending", "in_progress", "mastered"], "default": "pending", "sql_col": "status"},
+            "status": {"type": str, "enum": ["not_started", "in_progress", "completed", "review_needed", "pending", "mastered"], "default": "not_started", "sql_col": "status"},
         },
         "order_by": "name ASC"
     },

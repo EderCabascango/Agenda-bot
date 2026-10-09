@@ -28,9 +28,14 @@ console.log('============================================================\n');
 
 const steps = [
   {
-    name: '1. Tests Unitarios Frontend (SyncCore)',
+    name: '1.a Tests Unitarios Frontend (SyncCore)',
     cmd: process.execPath,
     args: ['--test', path.join(ROOT_DIR, 'web/test_sync_core.js')]
+  },
+  {
+    name: '1.b Tests Unitarios Frontend (FocusCore)',
+    cmd: process.execPath,
+    args: ['--test', path.join(ROOT_DIR, 'web/test_focus_core.js')]
   },
   {
     name: '2. Tests Unitarios e Integración Backend (Pytest)',

@@ -222,6 +222,7 @@
     if (name === 'activities') renderActivityList();
     if (name === 'calendar') renderCalendar();
     if (name === 'stats') renderStats();
+    if (name === 'study') renderStudyView();
   }
 
   function refreshActiveView() {
@@ -232,6 +233,8 @@
       renderDashboard();
     } else if (viewName === 'activities') {
       renderActivityList();
+    } else if (viewName === 'study') {
+      renderStudyView();
     }
   }
 
@@ -1455,6 +1458,621 @@
       .replace(/'/g, '&#39;');
   }
 
+  // ── Study View Logic (Materias, Temas y Métricas - Fase B) ──
+  let showArchivedSubjects = false;
+  let selectedSubjectIdForDetail = null;
+
+  function renderStudyView() {
+    subjects = loadSubjects();
+    topics = loadTopics();
+    focusSessions = loadFocusSessions();
+    learningNotes = loadLearningNotes();
+
+    const activeSubjects = subjects.filter(s => s && !s.deleted_at);
+    const visibleSubjects = activeSubjects.filter(s => showArchivedSubjects ? true : !s.archived);
+
+    // Stats calculations
+    const activeNonArchivedCount = activeSubjects.filter(s => !s.archived).length;
+    let totalStudySeconds = 0;
+    focusSessions.forEach(f => {
+      if (f && !f.deleted_at) {
+        totalStudySeconds += Number(f.effective_seconds) || 0;
+      }
+    });
+    const totalHours = (totalStudySeconds / 3600).toFixed(1) + 'h';
+
+    let totalWeeklyGoalMinutes = 0;
+    activeSubjects.filter(s => !s.archived).forEach(s => {
+      totalWeeklyGoalMinutes += Number(s.weekly_goal_minutes) || 0;
+    });
+    const totalGoalHours = (totalWeeklyGoalMinutes / 60).toFixed(1) + 'h';
+
+    const statCountEl = $('#study-stat-active-count');
+    if (statCountEl) statCountEl.textContent = activeNonArchivedCount;
+    const statHoursEl = $('#study-stat-total-hours');
+    if (statHoursEl) statHoursEl.textContent = totalHours;
+    const statGoalEl = $('#study-stat-weekly-goal');
+    if (statGoalEl) statGoalEl.textContent = totalGoalHours;
+
+    const grid = $('#subjects-grid');
+    if (!grid) return;
+
+    if (visibleSubjects.length === 0) {
+      grid.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px dashed var(--border-medium);">
+          <span class="material-icons-round" style="font-size: 48px; color: var(--text-muted); margin-bottom: 12px;">school</span>
+          <h3 style="font-size: 1.1rem; color: var(--text-primary); margin-bottom: 6px;">No tienes materias ${showArchivedSubjects ? '' : 'activas'}</h3>
+          <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 20px; max-width: 400px; margin-left: auto; margin-right: auto;">
+            Crea tu primera materia o usa las sugerencias preconfiguradas para empezar a organizar tu estudio.
+          </p>
+          <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+            <button class="btn-outline btn-touch-target" id="btn-empty-seed" style="gap: 6px; padding: 0 14px;">
+              <span class="material-icons-round">auto_awesome</span>
+              <span>Cargar sugeridas</span>
+            </button>
+            <button class="btn-primary btn-touch-target" id="btn-empty-add" style="gap: 6px; padding: 0 16px;">
+              <span class="material-icons-round">add</span>
+              <span>Crear Materia</span>
+            </button>
+          </div>
+        </div>
+      `;
+      $('#btn-empty-seed')?.addEventListener('click', handleSeedSubjects);
+      $('#btn-empty-add')?.addEventListener('click', () => openSubjectModal());
+      return;
+    }
+
+    grid.innerHTML = visibleSubjects.map(sub => {
+      const summary = (typeof FocusCore !== 'undefined' && FocusCore.summarizeSubject)
+        ? FocusCore.summarizeSubject(sub, topics, focusSessions)
+        : {
+            total_hours: 0,
+            weekly_goal_minutes: sub.weekly_goal_minutes || 0,
+            goal_progress_percent: 0,
+            session_count: 0,
+            topic_count: topics.filter(t => t.subject_id === sub.id && !t.deleted_at).length
+          };
+
+      const color = sub.color || '#3B82F6';
+      const isArchived = !!sub.archived;
+      const weeklyGoalHours = ((sub.weekly_goal_minutes || 0) / 60).toFixed(1);
+
+      return `
+        <div class="subject-card ${isArchived ? 'is-archived' : ''}" data-id="${escHTML(sub.id)}" style="border-top: 4px solid ${escHTML(color)};">
+          <div class="subject-card-header">
+            <div class="subject-card-title-wrap">
+              <div class="subject-card-icon" style="background: ${escHTML(color)};">
+                <span class="material-icons-round">${escHTML(sub.icon || 'school')}</span>
+              </div>
+              <div>
+                <h4 class="subject-card-title">${escHTML(sub.name || 'Sin título')}</h4>
+                ${isArchived ? '<span style="font-size: 0.7rem; color: var(--accent-amber); font-weight: 600;">(Archivada)</span>' : ''}
+              </div>
+            </div>
+          </div>
+
+          <div class="subject-card-metrics">
+            <div>
+              <div class="subject-metric-label">Tiempo estudiado</div>
+              <div class="subject-metric-value">${summary.total_hours}h</div>
+            </div>
+            <div>
+              <div class="subject-metric-label">Temas / Sesiones</div>
+              <div class="subject-metric-value">${summary.topic_count} / ${summary.session_count}</div>
+            </div>
+          </div>
+
+          ${sub.weekly_goal_minutes > 0 ? `
+            <div class="subject-progress-wrap">
+              <div class="subject-progress-header">
+                <span>Meta semanal (${weeklyGoalHours}h)</span>
+                <span>${summary.goal_progress_percent}%</span>
+              </div>
+              <div class="subject-progress-bar">
+                <div class="subject-progress-fill" style="width: ${summary.goal_progress_percent}%; background: ${escHTML(color)};"></div>
+              </div>
+            </div>
+          ` : ''}
+
+          <div class="subject-card-actions">
+            <button class="btn-outline btn-touch-target" data-action="detail" data-id="${escHTML(sub.id)}" style="gap: 4px; padding: 0 12px; font-size: 0.85rem;">
+              <span class="material-icons-round" style="font-size: 18px;">list_alt</span>
+              <span>Temas</span>
+            </button>
+            <div style="display: flex; gap: 4px;">
+              <button class="topbar-btn btn-touch-target" data-action="edit" data-id="${escHTML(sub.id)}" title="Editar materia">
+                <span class="material-icons-round" style="font-size: 18px;">edit</span>
+              </button>
+              <button class="topbar-btn btn-touch-target" data-action="delete" data-id="${escHTML(sub.id)}" title="${isArchived ? 'Desarchivar o eliminar' : 'Archivar o eliminar'}" style="color: var(--accent-red);">
+                <span class="material-icons-round" style="font-size: 18px;">${isArchived ? 'unarchive' : 'delete'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Attach card event listeners
+    grid.querySelectorAll('[data-action="detail"]').forEach(btn => {
+      btn.addEventListener('click', () => openSubjectDetailModal(btn.dataset.id));
+    });
+    grid.querySelectorAll('[data-action="edit"]').forEach(btn => {
+      btn.addEventListener('click', () => openSubjectModal(btn.dataset.id));
+    });
+    grid.querySelectorAll('[data-action="delete"]').forEach(btn => {
+      btn.addEventListener('click', () => handleDeleteOrArchiveSubject(btn.dataset.id));
+    });
+  }
+
+  function handleSeedSubjects() {
+    subjects = loadSubjects();
+    topics = loadTopics();
+
+    const plan = (typeof FocusCore !== 'undefined' && FocusCore.planSeedCreation)
+      ? FocusCore.planSeedCreation(subjects, topics)
+      : { subjects: [], topics: [] };
+
+    plan.subjects.forEach(seedSub => {
+      const existsIdx = subjects.findIndex(s => s.id === seedSub.id);
+      if (existsIdx === -1) {
+        subjects.push(seedSub);
+      }
+      enqueueChange({ ...seedSub, collection: 'subjects' });
+    });
+
+    plan.topics.forEach(seedTopic => {
+      const existsIdx = topics.findIndex(t => t.id === seedTopic.id);
+      if (existsIdx === -1) {
+        topics.push(seedTopic);
+      }
+      enqueueChange({ ...seedTopic, collection: 'topics' });
+    });
+
+    saveSubjects(subjects);
+    saveTopics(topics);
+    renderStudyView();
+    showToast('✨ Materias sugeridas creadas con éxito', 'check_circle', 'var(--accent-teal)');
+    syncWithBackend();
+  }
+
+  function openSubjectModal(subjectId = null) {
+    const overlay = $('#subject-modal-overlay');
+    if (!overlay) return;
+    const titleEl = $('#modal-subject-title');
+    const idInput = $('#subject-id-input');
+    const nameInput = $('#subject-name-input');
+    const colorPicker = $('#subject-color-picker');
+    const colorInput = $('#subject-color-input');
+    const iconInput = $('#subject-icon-input');
+    const goalInput = $('#subject-goal-input');
+    const errorsDiv = $('#subject-form-errors');
+
+    if (errorsDiv) {
+      errorsDiv.textContent = '';
+      errorsDiv.style.display = 'none';
+    }
+
+    if (subjectId) {
+      const sub = subjects.find(s => s.id === subjectId);
+      if (sub) {
+        if (titleEl) titleEl.textContent = 'Editar Materia';
+        if (idInput) idInput.value = sub.id;
+        if (nameInput) nameInput.value = sub.name || '';
+        if (colorPicker) colorPicker.value = sub.color || '#3B82F6';
+        if (colorInput) colorInput.value = sub.color || '#3B82F6';
+        if (iconInput) iconInput.value = sub.icon || 'school';
+        if (goalInput) goalInput.value = sub.weekly_goal_minutes !== undefined ? sub.weekly_goal_minutes : 180;
+      }
+    } else {
+      if (titleEl) titleEl.textContent = 'Nueva Materia';
+      if (idInput) idInput.value = '';
+      if (nameInput) nameInput.value = '';
+      if (colorPicker) colorPicker.value = '#3B82F6';
+      if (colorInput) colorInput.value = '#3B82F6';
+      if (iconInput) iconInput.value = 'school';
+      if (goalInput) goalInput.value = '180';
+    }
+
+    overlay.classList.add('open');
+  }
+
+  function closeSubjectModal() {
+    const overlay = $('#subject-modal-overlay');
+    if (overlay) overlay.classList.remove('open');
+  }
+
+  function handleSaveSubject() {
+    const idInput = $('#subject-id-input');
+    const nameInput = $('#subject-name-input');
+    const colorInput = $('#subject-color-input');
+    const iconInput = $('#subject-icon-input');
+    const goalInput = $('#subject-goal-input');
+    const errorsDiv = $('#subject-form-errors');
+
+    const subjectId = idInput?.value ? idInput.value : null;
+    const name = nameInput ? nameInput.value.trim() : '';
+    const color = colorInput ? colorInput.value.trim() : '#3B82F6';
+    const icon = iconInput ? iconInput.value : 'school';
+    const weeklyGoal = goalInput ? parseInt(goalInput.value, 10) : 0;
+
+    const data = {
+      name,
+      color,
+      icon,
+      weekly_goal_minutes: isNaN(weeklyGoal) ? 0 : weeklyGoal
+    };
+
+    subjects = loadSubjects();
+
+    if (typeof FocusCore !== 'undefined' && FocusCore.validateSubjectForm) {
+      const validation = FocusCore.validateSubjectForm(data, subjects, subjectId);
+      if (!validation.valid) {
+        if (errorsDiv) {
+          errorsDiv.innerHTML = validation.errors.map(e => `<div>• ${escHTML(e)}</div>`).join('');
+          errorsDiv.style.display = 'block';
+        }
+        return;
+      }
+    }
+
+    const now = new Date().toISOString();
+
+    if (subjectId) {
+      const idx = subjects.findIndex(s => s.id === subjectId);
+      if (idx !== -1) {
+        const existing = subjects[idx];
+        const updated = {
+          ...existing,
+          name: data.name,
+          color: data.color,
+          icon: data.icon,
+          weekly_goal_minutes: data.weekly_goal_minutes,
+          updated_at: now,
+          base_version: existing.version || 1
+        };
+        subjects[idx] = updated;
+        saveSubjects(subjects);
+        enqueueChange({ ...updated, collection: 'subjects' });
+        showToast('Materia actualizada ✓');
+      }
+    } else {
+      const newSub = {
+        id: uid(),
+        name: data.name,
+        color: data.color,
+        icon: data.icon,
+        weekly_goal_minutes: data.weekly_goal_minutes,
+        archived: 0,
+        version: 1,
+        created_at: now,
+        updated_at: now,
+        deleted_at: null
+      };
+      subjects.push(newSub);
+      saveSubjects(subjects);
+      enqueueChange({ ...newSub, collection: 'subjects' });
+      showToast('Materia creada ✓');
+    }
+
+    closeSubjectModal();
+    renderStudyView();
+    if (selectedSubjectIdForDetail) {
+      renderSubjectDetailContent(selectedSubjectIdForDetail);
+    }
+    syncWithBackend();
+  }
+
+  function openSubjectDetailModal(subjectId) {
+    selectedSubjectIdForDetail = subjectId;
+    const overlay = $('#subject-detail-overlay');
+    if (!overlay) return;
+    renderSubjectDetailContent(subjectId);
+    overlay.classList.add('open');
+  }
+
+  function closeSubjectDetailModal() {
+    const overlay = $('#subject-detail-overlay');
+    if (overlay) overlay.classList.remove('open');
+    selectedSubjectIdForDetail = null;
+  }
+
+  function renderSubjectDetailContent(subjectId) {
+    subjects = loadSubjects();
+    topics = loadTopics();
+    focusSessions = loadFocusSessions();
+    learningNotes = loadLearningNotes();
+
+    const sub = subjects.find(s => s.id === subjectId && !s.deleted_at);
+    if (!sub) {
+      closeSubjectDetailModal();
+      return;
+    }
+
+    const titleEl = $('#detail-subject-title');
+    const badgeEl = $('#detail-subject-badge');
+    const iconEl = $('#detail-subject-icon');
+    const iconBoxEl = $('#detail-subject-icon-box');
+
+    if (titleEl) titleEl.textContent = sub.name;
+    if (badgeEl) badgeEl.textContent = sub.archived ? 'Archivada' : 'Activa';
+    if (iconEl) iconEl.textContent = sub.icon || 'school';
+    if (iconBoxEl) iconBoxEl.style.background = sub.color || 'var(--accent-teal)';
+
+    const summary = (typeof FocusCore !== 'undefined' && FocusCore.summarizeSubject)
+      ? FocusCore.summarizeSubject(sub, topics, focusSessions)
+      : { total_hours: 0, session_count: 0, topic_stats: {} };
+
+    const statHours = $('#detail-stat-hours');
+    if (statHours) statHours.textContent = summary.total_hours + 'h';
+    const statGoal = $('#detail-stat-goal');
+    if (statGoal) statGoal.textContent = ((sub.weekly_goal_minutes || 0) / 60).toFixed(1) + 'h';
+    const statSessions = $('#detail-stat-sessions');
+    if (statSessions) statSessions.textContent = summary.session_count;
+
+    const childTopics = topics.filter(t => t.subject_id === subjectId && !t.deleted_at);
+    const topicsList = $('#detail-topics-list');
+    if (topicsList) {
+      if (childTopics.length === 0) {
+        topicsList.innerHTML = '<p style="font-size:0.85rem; color:var(--text-muted); text-align:center; padding:16px;">No hay temas agregados en esta materia.</p>';
+      } else {
+        const STATUS_LABELS = {
+          not_started: 'No iniciado',
+          in_progress: 'En progreso',
+          completed: 'Completado',
+          review_needed: 'Repasar'
+        };
+
+        topicsList.innerHTML = childTopics.map(t => {
+          const tStat = summary.topic_stats[t.id] || { hours: 0 };
+          const status = t.status || 'not_started';
+          return `
+            <div class="topic-item" data-id="${escHTML(t.id)}">
+              <div>
+                <div style="font-weight:600; font-size:0.9rem; color:var(--text-primary);">${escHTML(t.name)}</div>
+                <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:2px;">
+                  <span>${tStat.hours}h dedicadas</span>
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="topic-status-badge ${escHTML(status)}">${STATUS_LABELS[status] || status}</span>
+                <button class="topbar-btn btn-touch-target" data-action="edit-topic" data-id="${escHTML(t.id)}" title="Editar tema">
+                  <span class="material-icons-round" style="font-size:18px;">edit</span>
+                </button>
+                <button class="topbar-btn btn-touch-target" data-action="delete-topic" data-id="${escHTML(t.id)}" title="Eliminar tema" style="color:var(--accent-red);">
+                  <span class="material-icons-round" style="font-size:18px;">delete</span>
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        topicsList.querySelectorAll('[data-action="edit-topic"]').forEach(btn => {
+          btn.addEventListener('click', () => openTopicModal(subjectId, btn.dataset.id));
+        });
+        topicsList.querySelectorAll('[data-action="delete-topic"]').forEach(btn => {
+          btn.addEventListener('click', () => handleDeleteTopic(btn.dataset.id));
+        });
+      }
+    }
+  }
+
+  function openTopicModal(subjectId, topicId = null) {
+    const overlay = $('#topic-modal-overlay');
+    if (!overlay) return;
+    const titleEl = $('#modal-topic-title');
+    const idInput = $('#topic-id-input');
+    const subIdInput = $('#topic-subject-id-input');
+    const nameInput = $('#topic-name-input');
+    const statusInput = $('#topic-status-input');
+    const errorsDiv = $('#topic-form-errors');
+
+    if (errorsDiv) {
+      errorsDiv.textContent = '';
+      errorsDiv.style.display = 'none';
+    }
+
+    if (subIdInput) subIdInput.value = subjectId;
+
+    if (topicId) {
+      const top = topics.find(t => t.id === topicId);
+      if (top) {
+        if (titleEl) titleEl.textContent = 'Editar Tema';
+        if (idInput) idInput.value = top.id;
+        if (nameInput) nameInput.value = top.name || '';
+        if (statusInput) statusInput.value = top.status || 'not_started';
+      }
+    } else {
+      if (titleEl) titleEl.textContent = 'Nuevo Tema';
+      if (idInput) idInput.value = '';
+      if (nameInput) nameInput.value = '';
+      if (statusInput) statusInput.value = 'not_started';
+    }
+
+    overlay.classList.add('open');
+  }
+
+  function closeTopicModal() {
+    const overlay = $('#topic-modal-overlay');
+    if (overlay) overlay.classList.remove('open');
+  }
+
+  function handleSaveTopic() {
+    const idInput = $('#topic-id-input');
+    const subIdInput = $('#topic-subject-id-input');
+    const nameInput = $('#topic-name-input');
+    const statusInput = $('#topic-status-input');
+    const errorsDiv = $('#topic-form-errors');
+
+    const topicId = idInput?.value ? idInput.value : null;
+    const subjectId = subIdInput?.value || selectedSubjectIdForDetail;
+    const name = nameInput ? nameInput.value.trim() : '';
+    const status = statusInput ? statusInput.value : 'not_started';
+
+    const data = {
+      subject_id: subjectId,
+      name,
+      status
+    };
+
+    topics = loadTopics();
+
+    if (typeof FocusCore !== 'undefined' && FocusCore.validateTopicForm) {
+      const validation = FocusCore.validateTopicForm(data, topics, topicId);
+      if (!validation.valid) {
+        if (errorsDiv) {
+          errorsDiv.innerHTML = validation.errors.map(e => `<div>• ${escHTML(e)}</div>`).join('');
+          errorsDiv.style.display = 'block';
+        }
+        return;
+      }
+    }
+
+    const now = new Date().toISOString();
+
+    if (topicId) {
+      const idx = topics.findIndex(t => t.id === topicId);
+      if (idx !== -1) {
+        const existing = topics[idx];
+        const updated = {
+          ...existing,
+          name: data.name,
+          status: data.status,
+          updated_at: now,
+          base_version: existing.version || 1
+        };
+        topics[idx] = updated;
+        saveTopics(topics);
+        enqueueChange({ ...updated, collection: 'topics' });
+        showToast('Tema actualizado ✓');
+      }
+    } else {
+      const newTopic = {
+        id: uid(),
+        subject_id: subjectId,
+        name: data.name,
+        status: data.status,
+        version: 1,
+        created_at: now,
+        updated_at: now,
+        deleted_at: null
+      };
+      topics.push(newTopic);
+      saveTopics(topics);
+      enqueueChange({ ...newTopic, collection: 'topics' });
+      showToast('Tema agregado ✓');
+    }
+
+    closeTopicModal();
+    if (subjectId) {
+      renderSubjectDetailContent(subjectId);
+    }
+    renderStudyView();
+    syncWithBackend();
+  }
+
+  function handleDeleteTopic(topicId) {
+    topics = loadTopics();
+    const idx = topics.findIndex(t => t.id === topicId);
+    if (idx === -1) return;
+
+    const existing = topics[idx];
+    const now = new Date().toISOString();
+    const tombstone = {
+      ...existing,
+      deleted_at: now,
+      updated_at: now,
+      base_version: existing.version || 1
+    };
+    topics[idx] = tombstone;
+    saveTopics(topics);
+    enqueueChange({ ...tombstone, collection: 'topics' });
+    showToast('Tema eliminado ✓');
+
+    if (existing.subject_id) {
+      renderSubjectDetailContent(existing.subject_id);
+    }
+    renderStudyView();
+    syncWithBackend();
+  }
+
+  function handleDeleteOrArchiveSubject(subjectId) {
+    subjects = loadSubjects();
+    topics = loadTopics();
+    focusSessions = loadFocusSessions();
+    learningNotes = loadLearningNotes();
+
+    const sub = subjects.find(s => s.id === subjectId);
+    if (!sub) return;
+
+    const childTopics = topics.filter(t => t.subject_id === subjectId && !t.deleted_at);
+
+    if (sub.archived) {
+      // Si ya está archivada, desarchivar
+      const unarchived = {
+        ...sub,
+        archived: 0,
+        updated_at: new Date().toISOString(),
+        base_version: sub.version || 1
+      };
+      const idx = subjects.findIndex(s => s.id === subjectId);
+      if (idx !== -1) subjects[idx] = unarchived;
+      saveSubjects(subjects);
+      enqueueChange({ ...unarchived, collection: 'subjects' });
+      showToast('Materia desarchivada ✓');
+      closeSubjectDetailModal();
+      renderStudyView();
+      syncWithBackend();
+      return;
+    }
+
+    const decision = (typeof FocusCore !== 'undefined' && FocusCore.decideSubjectRemoval)
+      ? FocusCore.decideSubjectRemoval(sub, focusSessions, learningNotes, childTopics)
+      : { action: 'delete' };
+
+    const idx = subjects.findIndex(s => s.id === subjectId);
+    if (idx === -1) return;
+
+    if (decision.action === 'archive') {
+      const updated = {
+        ...sub,
+        archived: 1,
+        updated_at: decision.subjectPatch.updated_at,
+        base_version: sub.version || 1
+      };
+      subjects[idx] = updated;
+      saveSubjects(subjects);
+      enqueueChange({ ...updated, collection: 'subjects' });
+      showToast('Materia archivada (conserva su historial) ✓');
+    } else {
+      const updated = {
+        ...sub,
+        deleted_at: decision.subjectPatch.deleted_at,
+        updated_at: decision.subjectPatch.updated_at,
+        base_version: sub.version || 1
+      };
+      subjects[idx] = updated;
+      saveSubjects(subjects);
+      enqueueChange({ ...updated, collection: 'subjects' });
+
+      // Cascading tombstones to child topics
+      if (Array.isArray(decision.topicTombstones)) {
+        decision.topicTombstones.forEach(tt => {
+          const tIdx = topics.findIndex(t => t.id === tt.id);
+          if (tIdx !== -1) {
+            topics[tIdx] = { ...topics[tIdx], ...tt };
+            enqueueChange({ ...topics[tIdx], collection: 'topics' });
+          }
+        });
+        saveTopics(topics);
+      }
+      showToast('Materia eliminada ✓');
+    }
+
+    closeSubjectDetailModal();
+    renderStudyView();
+    syncWithBackend();
+  }
+
   // ── Excel Routine Template Downloader ──
   function downloadRoutineTemplate() {
     const headers = ['Hora', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado', 'Domingo'];
@@ -2063,10 +2681,28 @@ SIEMPRE devuelve un JSON válido.
         renderDiarioGrid();
         scheduleWebAlarms();
       });
-      mergeCol(subjects, 'subjects', (m) => { subjects = m; saveSubjects(subjects); });
-      mergeCol(topics, 'topics', (m) => { topics = m; saveTopics(topics); });
-      mergeCol(focusSessions, 'focus_sessions', (m) => { focusSessions = m; saveFocusSessions(focusSessions); });
-      mergeCol(learningNotes, 'learning_notes', (m) => { learningNotes = m; saveLearningNotes(learningNotes); });
+      mergeCol(subjects, 'subjects', (m) => {
+        subjects = m;
+        saveSubjects(subjects);
+        if ($('#view-study')?.classList.contains('active')) renderStudyView();
+        if (selectedSubjectIdForDetail) renderSubjectDetailContent(selectedSubjectIdForDetail);
+      });
+      mergeCol(topics, 'topics', (m) => {
+        topics = m;
+        saveTopics(topics);
+        if ($('#view-study')?.classList.contains('active')) renderStudyView();
+        if (selectedSubjectIdForDetail) renderSubjectDetailContent(selectedSubjectIdForDetail);
+      });
+      mergeCol(focusSessions, 'focus_sessions', (m) => {
+        focusSessions = m;
+        saveFocusSessions(focusSessions);
+        if ($('#view-study')?.classList.contains('active')) renderStudyView();
+        if (selectedSubjectIdForDetail) renderSubjectDetailContent(selectedSubjectIdForDetail);
+      });
+      mergeCol(learningNotes, 'learning_notes', (m) => {
+        learningNotes = m;
+        saveLearningNotes(learningNotes);
+      });
 
       return true;
     } catch (err) {
@@ -2432,8 +3068,67 @@ SIEMPRE devuelve un JSON válido.
     $('#conflicts-done-btn')?.addEventListener('click', closeConflictsModal);
     $('#conflicts-overlay')?.addEventListener('click', (e) => { if (e.target === e.currentTarget) closeConflictsModal(); });
 
+    // Study view event listeners (Phase B)
+    $('#btn-seed-subjects')?.addEventListener('click', handleSeedSubjects);
+    $('#btn-add-subject')?.addEventListener('click', () => openSubjectModal());
+    $('#study-filter-archived')?.addEventListener('change', (e) => {
+      showArchivedSubjects = e.target.checked;
+      renderStudyView();
+    });
+
+    // Subject modal
+    $('#modal-subject-close')?.addEventListener('click', closeSubjectModal);
+    $('#btn-cancel-subject')?.addEventListener('click', closeSubjectModal);
+    $('#btn-save-subject')?.addEventListener('click', handleSaveSubject);
+    $('#subject-modal-overlay')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) closeSubjectModal();
+    });
+    $('#subject-color-picker')?.addEventListener('input', (e) => {
+      const txt = $('#subject-color-input');
+      if (txt) txt.value = e.target.value;
+    });
+    $('#subject-color-input')?.addEventListener('input', (e) => {
+      const picker = $('#subject-color-picker');
+      if (picker && /^#[0-9A-Fa-f]{6}$/.test(e.target.value)) {
+        picker.value = e.target.value;
+      }
+    });
+
+    // Topic modal
+    $('#modal-topic-close')?.addEventListener('click', closeTopicModal);
+    $('#btn-cancel-topic')?.addEventListener('click', closeTopicModal);
+    $('#btn-save-topic')?.addEventListener('click', handleSaveTopic);
+    $('#topic-modal-overlay')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) closeTopicModal();
+    });
+
+    // Subject detail modal
+    $('#detail-subject-close')?.addEventListener('click', closeSubjectDetailModal);
+    $('#btn-close-subject-detail')?.addEventListener('click', closeSubjectDetailModal);
+    $('#subject-detail-overlay')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) closeSubjectDetailModal();
+    });
+    $('#btn-add-topic-from-detail')?.addEventListener('click', () => {
+      if (selectedSubjectIdForDetail) openTopicModal(selectedSubjectIdForDetail);
+    });
+    $('#btn-edit-subject-from-detail')?.addEventListener('click', () => {
+      if (selectedSubjectIdForDetail) openSubjectModal(selectedSubjectIdForDetail);
+    });
+    $('#btn-delete-subject-from-detail')?.addEventListener('click', () => {
+      if (selectedSubjectIdForDetail) handleDeleteOrArchiveSubject(selectedSubjectIdForDetail);
+    });
+
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { closeSearch(); closeModal(); closeDeleteModal(); closeConflictsModal(); $('#routine-overlay')?.classList.remove('open'); }
+      if (e.key === 'Escape') {
+        closeSearch();
+        closeModal();
+        closeDeleteModal();
+        closeConflictsModal();
+        closeSubjectModal();
+        closeTopicModal();
+        closeSubjectDetailModal();
+        $('#routine-overlay')?.classList.remove('open');
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); openSearch(); }
     });
 
@@ -2833,19 +3528,47 @@ SIEMPRE devuelve un JSON válido.
       renderDashboard,
       renderCalendar,
       renderActivityList,
+      renderStudyView,
       openConflictsModal,
       closeConflictsModal,
       updateConflictsBadge,
       loadActivities,
-      saveActivities
+      saveActivities,
+      loadSubjects,
+      saveSubjects,
+      loadTopics,
+      saveTopics,
+      handleSeedSubjects,
+      openSubjectModal,
+      closeSubjectModal,
+      handleSaveSubject,
+      openTopicModal,
+      closeTopicModal,
+      handleSaveTopic,
+      openSubjectDetailModal,
+      closeSubjectDetailModal,
+      handleDeleteTopic,
+      handleDeleteOrArchiveSubject
     };
     window.syncWithBackend = syncWithBackend;
     window.renderDashboard = renderDashboard;
     window.renderCalendar = renderCalendar;
     window.renderActivityList = renderActivityList;
+    window.renderStudyView = renderStudyView;
     window.openConflictsModal = openConflictsModal;
     window.closeConflictsModal = closeConflictsModal;
     window.updateConflictsBadge = updateConflictsBadge;
+    window.handleSeedSubjects = handleSeedSubjects;
+    window.openSubjectModal = openSubjectModal;
+    window.closeSubjectModal = closeSubjectModal;
+    window.handleSaveSubject = handleSaveSubject;
+    window.openTopicModal = openTopicModal;
+    window.closeTopicModal = closeTopicModal;
+    window.handleSaveTopic = handleSaveTopic;
+    window.openSubjectDetailModal = openSubjectDetailModal;
+    window.closeSubjectDetailModal = closeSubjectDetailModal;
+    window.handleDeleteTopic = handleDeleteTopic;
+    window.handleDeleteOrArchiveSubject = handleDeleteOrArchiveSubject;
   }
 
   // ── Boot ──
