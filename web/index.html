@@ -120,18 +120,48 @@
 
           <div class="db-editorial-grid">
             
-            <!-- LEFT COLUMN: MIS MATERIAS -->
-            <div class="db-left-section">
-              <div class="db-section-header">
-                <h2 class="db-section-title">Mis Materias</h2>
-                <button class="btn-primary btn-pill" id="btn-dashboard-new-subject">
-                  <span class="material-icons-round">add</span> Nueva Materia
-                </button>
+            <!-- LEFT COLUMN: MATRIZ DE ACTIVIDADES Y CICLO MENSUAL (ESTILO GITHUB) + HÁBITOS -->
+            <div class="db-left-section" style="display: flex; flex-direction: column; gap: 24px;">
+              
+              <!-- Matriz del ciclo mensual (GitHub-style activity execution matrix) -->
+              <div class="db-panel db-panel--wide">
+                <div class="db-panel-header">
+                  <span class="material-icons-round">calendar_view_month</span>
+                  <h3>Matriz del Ciclo Mensual</h3>
+                  <div class="db-cycle-nav">
+                    <button class="diario-nav-btn material-icons-round" id="diario-prev">chevron_left</button>
+                    <span id="diario-month-label"></span>
+                    <button class="diario-nav-btn material-icons-round" id="diario-next">chevron_right</button>
+                  </div>
+                </div>
+                <div class="diario-table-wrap">
+                  <table class="diario-table" id="diario-table"></table>
+                </div>
+                <!-- Add custom activity row -->
+                <div class="db-add-row">
+                  <input type="text" id="diario-new-row-label" placeholder="Nueva actividad a trackear en la matriz..." />
+                  <select id="diario-new-row-category">
+                    <option value="#3B82F6">Cuerpo / Ej.</option>
+                    <option value="#10B981">Desarrollo</option>
+                    <option value="#F59E0B">Ingresos</option>
+                    <option value="#F97316">Disfruto</option>
+                  </select>
+                  <button class="btn-primary" id="diario-add-row-btn" title="Añadir actividad">
+                    <span class="material-icons-round">add</span>
+                  </button>
+                </div>
               </div>
 
-              <div class="db-subjects-container" id="db-subjects-container">
-                <!-- Subject cards dynamically rendered in app.js -->
+              <!-- Hábitos de hoy checklist -->
+              <div class="db-panel">
+                <div class="db-panel-header">
+                  <span class="material-icons-round">checklist</span>
+                  <h3>Hábitos de hoy</h3>
+                  <span class="db-panel-sub" id="db-habits-sub"></span>
+                </div>
+                <div id="db-habits-list" class="db-habits-list"></div>
               </div>
+
             </div>
 
             <!-- RIGHT COLUMN: AGENDA DE HOY -->
@@ -156,50 +186,6 @@
 
                 <button class="btn-dark btn-full-width" id="btn-dashboard-manual-session">
                   <span class="material-icons-round">add</span> Registrar Sesión Manual
-                </button>
-              </div>
-            </div>
-
-          </div>
-
-          <!-- Restored Diario Monthly Matrix & Habits Checklist Section -->
-          <div class="db-columns" style="margin-top: 32px;">
-
-            <!-- LEFT: Today's habits checklist -->
-            <div class="db-panel">
-              <div class="db-panel-header">
-                <span class="material-icons-round">checklist</span>
-                <h3>Hábitos de hoy</h3>
-                <span class="db-panel-sub" id="db-habits-sub"></span>
-              </div>
-              <div id="db-habits-list" class="db-habits-list"></div>
-            </div>
-
-            <!-- RIGHT: Diario monthly grid -->
-            <div class="db-panel db-panel--wide">
-              <div class="db-panel-header">
-                <span class="material-icons-round">calendar_view_month</span>
-                <h3>Ciclo mensual</h3>
-                <div class="db-cycle-nav">
-                  <button class="diario-nav-btn material-icons-round" id="diario-prev">chevron_left</button>
-                  <span id="diario-month-label"></span>
-                  <button class="diario-nav-btn material-icons-round" id="diario-next">chevron_right</button>
-                </div>
-              </div>
-              <div class="diario-table-wrap">
-                <table class="diario-table" id="diario-table"></table>
-              </div>
-              <!-- Add custom activity row -->
-              <div class="db-add-row">
-                <input type="text" id="diario-new-row-label" placeholder="Nueva actividad a trackear..." />
-                <select id="diario-new-row-category">
-                  <option value="#3B82F6">Cuerpo / Ej.</option>
-                  <option value="#10B981">Desarrollo</option>
-                  <option value="#F59E0B">Ingresos</option>
-                  <option value="#F97316">Disfruto</option>
-                </select>
-                <button class="btn-primary" id="diario-add-row-btn" title="Añadir actividad">
-                  <span class="material-icons-round">add</span>
                 </button>
               </div>
             </div>
