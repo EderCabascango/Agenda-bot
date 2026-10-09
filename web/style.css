@@ -1075,7 +1075,8 @@ input:focus, select:focus, textarea:focus {
   .menu-toggle { display: block; }
   .content { padding: 20px 16px 120px; }
   .bottom-nav { display: flex; }
-  .fab { bottom: 80px; right: 20px; }
+  .fab { bottom: 90px; right: 20px; }
+  .focus-fab { bottom: 90px; right: 16px; padding: 10px 16px; font-size: 0.82rem; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .form-row { grid-template-columns: 1fr; }
   .calendar-nav h3 { min-width: 140px; font-size: 1rem; }
