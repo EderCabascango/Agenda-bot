@@ -304,4 +304,26 @@ test('FocusCore - Suite de Lógica Pura de Materias y Temas (Fase B1)', async (t
     });
   });
 
+  await t.test('9. shouldAllowFocusDefault calcula allow_focus por etiquetas, soporta lista personalizada y respeta override explícito', () => {
+    // 1. Tags matching default allowed tags
+    assert.equal(FocusCore.shouldAllowFocusDefault({ tags: ['estudio'] }), true);
+    assert.equal(FocusCore.shouldAllowFocusDefault({ tags: ['proyectos'] }), true);
+    assert.equal(FocusCore.shouldAllowFocusDefault({ tags: ['IA'] }), true);
+    assert.equal(FocusCore.shouldAllowFocusDefault({ tags: ['idiomas'] }), true);
+
+    // 2. Non-matching tags
+    assert.equal(FocusCore.shouldAllowFocusDefault({ tags: ['salud'], category: 'salud' }), false);
+    assert.equal(FocusCore.shouldAllowFocusDefault({ tags: ['alimentación'] }), false);
+    assert.equal(FocusCore.shouldAllowFocusDefault({ tags: ['entretenimiento'] }), false);
+
+    // 3. Custom focus tags list in settings
+    const customSettings = { defaultFocusTags: ['fitness', 'cocina'] };
+    assert.equal(FocusCore.shouldAllowFocusDefault({ tags: ['fitness'] }, customSettings), true);
+    assert.equal(FocusCore.shouldAllowFocusDefault({ tags: ['estudio'] }, customSettings), false);
+
+    // 4. Explicit user override takes precedence over rule
+    assert.equal(FocusCore.shouldAllowFocusDefault({ tags: ['salud'], allow_focus: true }), true);
+    assert.equal(FocusCore.shouldAllowFocusDefault({ tags: ['estudio'], allow_focus: false }), false);
+  });
+
 });

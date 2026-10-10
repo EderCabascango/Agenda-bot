@@ -451,8 +451,31 @@
     };
   }
 
+  const DEFAULT_FOCUS_TAGS = ['estudio', 'proyectos', 'ia', 'idiomas', 'lectura', 'programación', 'programacion', 'study', 'projects'];
+
+  function shouldAllowFocusDefault(activity = {}, settings = {}) {
+    if (!activity) return false;
+    if (typeof activity.allow_focus === 'boolean') {
+      return activity.allow_focus;
+    }
+
+    const allowedTags = (settings && Array.isArray(settings.defaultFocusTags) && settings.defaultFocusTags.length > 0)
+      ? settings.defaultFocusTags
+      : DEFAULT_FOCUS_TAGS;
+
+    const activityTags = Array.isArray(activity.tags) ? activity.tags : [];
+    const category = activity.category ? [activity.category] : [];
+    const candidates = [...activityTags, ...category].map(t => String(t).trim().toLowerCase());
+
+    return candidates.some(cand =>
+      allowedTags.some(tag => cand.includes(String(tag).trim().toLowerCase()))
+    );
+  }
+
   return {
     SUGGESTED_SEEDS,
+    DEFAULT_FOCUS_TAGS,
+    shouldAllowFocusDefault,
     planSeedCreation,
     decideSubjectRemoval,
     summarizeSubject,

@@ -1259,11 +1259,20 @@
       $('#form-desc').value = a.description || '';
       $('#form-priority').value = a.priority;
       $('#form-tags').value = (a.tags || []).join(', ');
-      if ($('#form-allow-focus')) $('#form-allow-focus').checked = (a.allow_focus !== false);
+      const settings = loadSettings();
+      const isAllowed = (typeof FocusCore !== 'undefined' && FocusCore.shouldAllowFocusDefault)
+        ? FocusCore.shouldAllowFocusDefault(a, settings)
+        : (a.allow_focus !== false);
+      if ($('#form-allow-focus')) $('#form-allow-focus').checked = isAllowed;
     } else {
       $('#modal-title').textContent = 'Nueva Actividad';
       $('#form-date').value = calSelectedDate || todayStr();
-      if ($('#form-allow-focus')) $('#form-allow-focus').checked = true;
+      const settings = loadSettings();
+      const tags = $('#form-tags')?.value ? $('#form-tags').value.split(',').map(t => t.trim()).filter(Boolean) : [];
+      const isAllowed = (typeof FocusCore !== 'undefined' && FocusCore.shouldAllowFocusDefault)
+        ? FocusCore.shouldAllowFocusDefault({ tags }, settings)
+        : false;
+      if ($('#form-allow-focus')) $('#form-allow-focus').checked = isAllowed;
     }
     $('#modal-overlay').classList.add('open');
     setTimeout(() => $('#form-title').focus(), 100);
@@ -1279,6 +1288,12 @@
     const title = $('#form-title').value.trim();
     if (!title) return;
 
+    const parsedTags = $('#form-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+    const settings = loadSettings();
+    const defaultFocus = (typeof FocusCore !== 'undefined' && FocusCore.shouldAllowFocusDefault)
+      ? FocusCore.shouldAllowFocusDefault({ tags: parsedTags }, settings)
+      : false;
+
     const nowIso = new Date().toISOString();
     const data = {
       id: editingId || uid(),
@@ -1288,8 +1303,8 @@
       endTime: $('#form-end').value || '',
       description: $('#form-desc').value.trim(),
       priority: $('#form-priority').value,
-      tags: $('#form-tags').value.split(',').map(t => t.trim()).filter(Boolean),
-      allow_focus: $('#form-allow-focus') ? $('#form-allow-focus').checked : true,
+      tags: parsedTags,
+      allow_focus: $('#form-allow-focus') ? $('#form-allow-focus').checked : defaultFocus,
       completed: false,
       updated_at: nowIso,
       version: 1
