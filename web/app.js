@@ -504,8 +504,11 @@
           const tag = (a.tags && a.tags[0]) ? a.tags[0] : 'General';
           const isDone = a.completed;
 
-          // Check if focus is allowed for this activity (default true)
-          const isFocusAllowed = (a.allow_focus !== false);
+          // Check if focus is allowed for this activity
+          const settings = loadSettings();
+          const isFocusAllowed = (typeof a.allow_focus === 'boolean')
+            ? a.allow_focus
+            : ((typeof FocusCore !== 'undefined' && FocusCore.shouldAllowFocusDefault) ? FocusCore.shouldAllowFocusDefault(a, settings) : false);
 
           let inProgress = false;
           if (a.startTime && a.endTime && !isDone && !isOverdue) {
@@ -959,6 +962,12 @@
     const tags = (a.tags || []).map(t => `<span class="tl-tag">${escHTML(t)}</span>`).join('');
     const missed = isActivityMissed(a);
     const cbClass = a.completed ? 'checked' : (missed ? 'missed' : '');
+    const settings = loadSettings();
+    const isFocusAllowed = (typeof a.allow_focus === 'boolean')
+      ? a.allow_focus
+      : ((typeof FocusCore !== 'undefined' && FocusCore.shouldAllowFocusDefault) ? FocusCore.shouldAllowFocusDefault(a, settings) : false);
+    const showFocusBtn = !a.completed && isFocusAllowed;
+
     return `
       <div class="timeline-item ${a.completed ? 'completed' : ''} ${missed ? 'missed' : ''}" data-priority="${a.priority}" data-id="${a.id}">
         <div class="tl-checkbox ${cbClass}" data-toggle="${a.id}"></div>
@@ -971,9 +980,11 @@
           </div>
         </div>
         <div class="tl-actions">
-          <button class="tl-action-btn" data-focus="${a.id}" title="Estudiar / Iniciar Enfoque">
-            <span class="material-icons-round" style="color:var(--accent-teal);">timer</span>
-          </button>
+          ${showFocusBtn ? `
+            <button class="tl-action-btn" data-focus="${a.id}" title="Estudiar / Iniciar Enfoque">
+              <span class="material-icons-round" style="color:var(--accent-teal);">timer</span>
+            </button>
+          ` : ''}
           <button class="tl-action-btn" data-edit="${a.id}" title="Editar">
             <span class="material-icons-round">edit</span>
           </button>
