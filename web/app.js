@@ -2150,9 +2150,23 @@
     syncWithBackend();
   }
 
+  function escapeMarkdownHtml(text) {
+    if (!text) return '';
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function stripHtmlTags(text) {
+    if (!text) return '';
+    return String(text).replace(/<[^>]*>?/gm, '').trim();
+  }
+
   function handleExportNoteMarkdown(noteId) {
     learningNotes = loadLearningNotes();
     subjects = loadSubjects();
+    topics = loadTopics();
     const note = learningNotes.find(n => n.id === noteId);
     if (!note) return;
 
@@ -2160,7 +2174,12 @@
     const subName = sub ? sub.name : 'Materia';
     const dateStr = (note.created_at || '').substring(0, 10);
 
-    const mdContent = `# Nota de Aprendizaje: ${subName}
+    const learnedEscaped = escapeMarkdownHtml(note.learned_text || 'Sin registro');
+    const questionsEscaped = escapeMarkdownHtml(note.questions_text || '');
+    const resourcesEscaped = escapeMarkdownHtml(note.resources_text || '');
+    const nextStepEscaped = escapeMarkdownHtml(note.next_step_text || '');
+
+    const mdContent = `# Nota de Aprendizaje: ${escapeMarkdownHtml(subName)}
 **Fecha:** ${dateStr}
 **Comprensión:** ${note.comprehension_level || 4}/5 ★
 **Concentración:** ${note.focus_level || 4}/5 
@@ -2168,11 +2187,11 @@
 ---
 
 ## Qué aprendí / avances
-${note.learned_text || 'Sin registro'}
+${learnedEscaped}
 
-${note.questions_text ? `## Dudas / Preguntas pendientes\n${note.questions_text}\n` : ''}
-${note.resources_text ? `## Recursos y referencias\n${note.resources_text}\n` : ''}
-${note.next_step_text ? `##  Próximo paso\n${note.next_step_text}\n` : ''}
+${questionsEscaped ? `## Dudas / Preguntas pendientes\n${questionsEscaped}\n` : ''}
+${resourcesEscaped ? `## Recursos y referencias\n${resourcesEscaped}\n` : ''}
+${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
 `;
 
     const blob = new Blob([mdContent], { type: 'text/markdown;charset=utf-8' });
@@ -2191,25 +2210,39 @@ ${note.next_step_text ? `##  Próximo paso\n${note.next_step_text}\n` : ''}
   function handleCreateReviewTaskFromNote(noteId) {
     learningNotes = loadLearningNotes();
     subjects = loadSubjects();
-    const note = learningNotes.find(n => n.id === noteId);
+    topics = loadTopics();
+    const note = learningNotes.find(n => n.id === noteId || n.activity_id === noteId);
     if (!note) return;
 
     const sub = subjects.find(s => s.id === note.subject_id);
-    const subName = sub ? sub.name : 'Materia';
+    const subName = sub ? sub.name : 'Sin materia';
+
+    let subtopicOrDate = (note.created_at || new Date().toISOString()).substring(0, 10);
+    if (note.topic_ids && note.topic_ids.length > 0) {
+      const matched = topics.filter(t => note.topic_ids.includes(t.id));
+      if (matched.length > 0) {
+        subtopicOrDate = matched.map(t => t.name).join(', ');
+      }
+    }
+
+    const taskTitle = `Repaso: ${subName} - ${subtopicOrDate}`;
 
     // Fecha programada: mañana
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const dateStr = tomorrow.toISOString().substring(0, 10);
 
+    const cleanLearned = stripHtmlTags(note.learned_text || '');
+    const cleanQuestions = stripHtmlTags(note.questions_text || 'Ninguna');
+
     activities = loadActivities();
     const newAct = {
       id: uid(),
-      title: `Repaso: ${subName}`,
+      title: taskTitle,
       date: dateStr,
       startTime: '09:00',
       endTime: '10:00',
-      description: `Repaso de nota de aprendizaje.\n\nPuntos a revisar:\n${note.learned_text || ''}\n\nDudas pendientes:\n${note.questions_text || 'Ninguna'}`,
+      description: `Repaso de nota de aprendizaje.\n\nPuntos a revisar:\n${cleanLearned}\n\nDudas pendientes:\n${cleanQuestions}`,
       priority: 'high',
       tags: ['repaso', 'estudio'],
       completed: false
@@ -3733,10 +3766,13 @@ ${note.next_step_text ? `##  Próximo paso\n${note.next_step_text}\n` : ''}
     }
   }
 
+  let currentFocusPresetData = null;
+
   function openFocusModal(presetData = {}) {
     const overlay = $('#focus-timer-overlay');
     if (!overlay) return;
 
+    currentFocusPresetData = presetData;
     subjects = loadSubjects();
     topics = loadTopics();
 
@@ -3760,9 +3796,9 @@ ${note.next_step_text ? `##  Próximo paso\n${note.next_step_text}\n` : ''}
       renderFocusTopicsChecklist(subSelect.value);
     }
 
-    if (presetData.goal) {
+    if (presetData.goal || presetData.title) {
       const goalInput = $('#focus-goal-input');
-      if (goalInput) goalInput.value = presetData.goal;
+      if (goalInput) goalInput.value = presetData.goal || presetData.title || '';
     }
 
     overlay.classList.add('open');
@@ -3815,11 +3851,16 @@ ${note.next_step_text ? `##  Próximo paso\n${note.next_step_text}\n` : ''}
 
     const method = methodSelect ? methodSelect.value : 'pomodoro';
     const customMinutes = (method === 'custom' && customMinsInput) ? Number(customMinsInput.value) : undefined;
-    const subjectId = subSelect ? subSelect.value : null;
-    const goal = goalInput ? goalInput.value.trim() : '';
+    const subjectId = subSelect?.value || (currentFocusPresetData ? currentFocusPresetData.subject_id : null) || null;
+    const goal = (goalInput ? goalInput.value.trim() : '') || (currentFocusPresetData ? currentFocusPresetData.title : '');
 
     const topicCheckboxes = document.querySelectorAll('input[name="focus-topic-checkbox"]:checked');
-    const topicIds = Array.from(topicCheckboxes).map(cb => cb.value);
+    let topicIds = Array.from(topicCheckboxes).map(cb => cb.value);
+    if (topicIds.length === 0 && currentFocusPresetData && currentFocusPresetData.topic_ids) {
+      topicIds = currentFocusPresetData.topic_ids;
+    }
+
+    const activityId = currentFocusPresetData ? (currentFocusPresetData.id || currentFocusPresetData.activity_id || null) : null;
 
     if (typeof TimerCore !== 'undefined' && TimerCore.createTimer) {
       let timer = TimerCore.createTimer({
@@ -3827,6 +3868,7 @@ ${note.next_step_text ? `##  Próximo paso\n${note.next_step_text}\n` : ''}
         customFocusMinutes: customMinutes,
         subject_id: subjectId,
         topic_ids: topicIds,
+        activity_id: activityId,
         goal
       });
       timer = TimerCore.start(timer);
@@ -3846,6 +3888,13 @@ ${note.next_step_text ? `##  Próximo paso\n${note.next_step_text}\n` : ''}
 
     if (!record) return;
 
+    activities = loadActivities();
+    const resolvedSubjectId = record.subject_id || (activeFocusTimer ? activeFocusTimer.subject_id : null) || (record.activity_id ? (activities.find(a => a.id === record.activity_id)?.subject_id || null) : null) || null;
+    const resolvedTopicIds = (record.topic_ids && record.topic_ids.length > 0) ? record.topic_ids : ((activeFocusTimer && activeFocusTimer.topic_ids) ? activeFocusTimer.topic_ids : (record.activity_id ? (activities.find(a => a.id === record.activity_id)?.topic_ids || []) : []));
+
+    record.subject_id = resolvedSubjectId;
+    record.topic_ids = resolvedTopicIds;
+
     focusSessions = loadFocusSessions();
     focusSessions.push(record);
     saveFocusSessions(focusSessions);
@@ -3864,9 +3913,9 @@ ${note.next_step_text ? `##  Próximo paso\n${note.next_step_text}\n` : ''}
         const noteRecord = {
           id: uid(),
           session_id: record.id,
-          activity_id: record.activity_id,
-          subject_id: record.subject_id,
-          topic_ids: record.topic_ids || [],
+          activity_id: record.activity_id || null,
+          subject_id: resolvedSubjectId,
+          topic_ids: resolvedTopicIds,
           learned_text: learnedText,
           questions_text: questionsText,
           resources_text: resourcesText,
@@ -5749,6 +5798,8 @@ SIEMPRE devuelve un JSON válido.
     window.renderDashboard = renderDashboard;
     window.renderCalendar = renderCalendar;
     window.renderActivityList = renderActivityList;
+    window.handleExportNoteMarkdown = handleExportNoteMarkdown;
+    window.handleCreateReviewTaskFromNote = handleCreateReviewTaskFromNote;
     window.renderStudyView = renderStudyView;
     window.renderStudyStatsView = renderStudyStatsView;
     window.switchStudySubtab = switchStudySubtab;
