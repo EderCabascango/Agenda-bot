@@ -65,37 +65,37 @@ const steps = [
   {
     name: '5.a E2E Meta Semanal por Materia (Semana Actual vs Histórico)',
     cmd: PYTHON,
-    args: [path.join(ROOT_DIR, 'scripts/test_point1_meta_semanal.py')]
+    args: [path.join(ROOT_DIR, 'scripts/test_e2e_meta_semanal.py')]
   },
   {
     name: '5.b E2E Sesiones Huérfanas Sin Materia',
     cmd: PYTHON,
-    args: [path.join(ROOT_DIR, 'scripts/test_point2_sin_materia.py')]
+    args: [path.join(ROOT_DIR, 'scripts/test_e2e_sin_materia.py')]
   },
   {
     name: '5.c E2E Fase E: Ratings, XSS, Notes, Export & Immutable Activity',
     cmd: PYTHON,
-    args: [path.join(ROOT_DIR, 'scripts/test_point2_fase_e_flow.py')]
+    args: [path.join(ROOT_DIR, 'scripts/test_e2e_fase_e_flow.py')]
   },
   {
     name: '5.d E2E Estadísticas: Barras 7d/30d y Heatmap Accesible 15->14',
     cmd: PYTHON,
-    args: [path.join(ROOT_DIR, 'scripts/test_point3_stats.py')]
+    args: [path.join(ROOT_DIR, 'scripts/test_e2e_stats.py')]
   },
   {
     name: '5.e E2E Campo Configurable allow_focus',
     cmd: PYTHON,
-    args: [path.join(ROOT_DIR, 'scripts/test_point4_allow_focus.py')]
+    args: [path.join(ROOT_DIR, 'scripts/test_e2e_allow_focus.py')]
   },
   {
     name: '5.f E2E Tarjeta Mis Materias con Datos Reales Semanales',
     cmd: PYTHON,
-    args: [path.join(ROOT_DIR, 'scripts/test_point5_subjects_card.py')]
+    args: [path.join(ROOT_DIR, 'scripts/test_e2e_subjects_card.py')]
   },
   {
     name: '5.g E2E Modo Offline e Iconos Locales',
     cmd: PYTHON,
-    args: [path.join(ROOT_DIR, 'scripts/test_point6_offline_icons.py')]
+    args: [path.join(ROOT_DIR, 'scripts/test_e2e_offline_icons.py')]
   }
 ];
 
