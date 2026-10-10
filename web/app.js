@@ -5841,7 +5841,7 @@ SIEMPRE devuelve un JSON válido.
       !a.deleted_at &&
       (a.allow_focus === true || a.allow_focus === undefined) &&
       !a.allow_focus_migrated &&
-      FocusCore.shouldAllowFocusDefault(a, settings) === false
+      FocusCore.shouldAllowFocusDefault({ tags: a.tags, category: a.category }, settings) === false
     );
 
     if (candidates.length === 0) return;
