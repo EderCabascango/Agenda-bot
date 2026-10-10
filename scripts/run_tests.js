@@ -96,6 +96,11 @@ const steps = [
     name: '5.g E2E Modo Offline e Iconos Locales',
     cmd: PYTHON,
     args: [path.join(ROOT_DIR, 'scripts/test_e2e_offline_icons.py')]
+  },
+  {
+    name: '5.h E2E Capturas Agenda de Hoy (1280px / 390px)',
+    cmd: PYTHON,
+    args: [path.join(ROOT_DIR, 'scripts/generate_agenda_screenshots.py')]
   }
 ];
 
