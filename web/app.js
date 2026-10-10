@@ -5809,12 +5809,82 @@ SIEMPRE devuelve un JSON válido.
       switchStudySubtab,
       renderStudyStatsView
     };
+  function checkAndProposeAllowFocusMigration() {
+    activities = loadActivities();
+    const settings = loadSettings();
+    if (typeof FocusCore === 'undefined' || !FocusCore.shouldAllowFocusDefault) return;
+
+    const candidates = activities.filter(a =>
+      a &&
+      !a.deleted_at &&
+      (a.allow_focus === true || a.allow_focus === undefined) &&
+      !a.allow_focus_migrated &&
+      FocusCore.shouldAllowFocusDefault(a, settings) === false
+    );
+
+    if (candidates.length === 0) return;
+    openAllowFocusMigrationModal(candidates);
+  }
+
+  function openAllowFocusMigrationModal(candidates) {
+    const overlay = $('#modal-migration-allow-focus-overlay');
+    const listContainer = $('#migration-activities-list');
+    if (!overlay || !listContainer) return;
+
+    listContainer.innerHTML = candidates.map(a => `
+      <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; color:var(--text-primary); cursor:pointer;">
+        <input type="checkbox" class="migration-activity-checkbox" value="${escHTML(a.id)}" checked />
+        <span><strong>${escHTML(a.title)}</strong> (${escHTML((a.tags || []).join(', ') || 'Sin etiquetas')})</span>
+      </label>
+    `).join('');
+
+    const cancelBtn = $('#btn-cancel-migration');
+    if (cancelBtn) {
+      cancelBtn.onclick = () => overlay.classList.remove('open');
+    }
+
+    const applyBtn = $('#btn-apply-migration');
+    if (applyBtn) {
+      applyBtn.onclick = () => {
+        const checkedIds = new Set(
+          Array.from(document.querySelectorAll('.migration-activity-checkbox:checked')).map(cb => cb.value)
+        );
+
+        activities = loadActivities();
+        const nowIso = new Date().toISOString();
+
+        candidates.forEach(cand => {
+          const act = activities.find(x => x.id === cand.id);
+          if (!act) return;
+          // Checked means user accepts setting allow_focus = false. Unchecked means exception (allow_focus = true).
+          const setDisallowed = checkedIds.has(act.id);
+          act.allow_focus = !setDisallowed;
+          act.allow_focus_migrated = true;
+          act.base_version = act.version || 1;
+          act.version = (act.version || 1) + 1;
+          act.updated_at = nowIso;
+          enqueueChange({ ...act, collection: 'activities' });
+        });
+
+        saveActivities(activities);
+        overlay.classList.remove('open');
+        renderDashboard();
+        renderActivityList();
+        showToast(`${candidates.length} actividades migradas ✓`);
+        syncWithBackend();
+      };
+    }
+
+    overlay.classList.add('open');
+  }
+
     window.syncWithBackend = syncWithBackend;
     window.renderDashboard = renderDashboard;
     window.renderCalendar = renderCalendar;
     window.renderActivityList = renderActivityList;
     window.handleExportNoteMarkdown = handleExportNoteMarkdown;
     window.handleCreateReviewTaskFromNote = handleCreateReviewTaskFromNote;
+    window.checkAndProposeAllowFocusMigration = checkAndProposeAllowFocusMigration;
     window.renderStudyView = renderStudyView;
     window.renderStudyStatsView = renderStudyStatsView;
     window.switchStudySubtab = switchStudySubtab;

@@ -1159,6 +1159,26 @@
     </div>
   </div>
 
+  <!-- Modal: Migración de Enfoque en Actividades Existentes -->
+  <div class="modal-overlay" id="modal-migration-allow-focus-overlay">
+    <div class="modal" style="max-width: 520px;">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="material-icons-round" style="color:var(--accent-teal);">tune</span>
+          <h3 class="modal-title">Ajuste de Enfoque en Actividades Existentes</h3>
+        </div>
+      </div>
+      <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:12px;">
+        Las siguientes actividades actualmente permiten Enfoque de Estudio pero sus etiquetas no corresponden a categorías de estudio/proyectos. Desmarca las excepciones que desees conservar con Enfoque activado:
+      </p>
+      <div id="migration-activities-list" style="max-height:240px; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:8px; border:1px solid var(--border-subtle); border-radius:6px; margin-bottom:16px;"></div>
+      <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn-secondary btn-touch-target" id="btn-cancel-migration" type="button">Cancelar</button>
+        <button class="btn-primary btn-touch-target" id="btn-apply-migration" type="button">Aplicar Cambios</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal: Registrar Tiempo Manual -->
   <div class="modal-overlay" id="manual-time-overlay">
     <div class="modal" id="modal-manual-time" style="max-width: 480px;">
