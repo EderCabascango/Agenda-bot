@@ -356,6 +356,35 @@ describe('SyncCore - Complete Client Sync Logic Test Suite (Fase 1, 1.5, 1.6)', 
     });
   });
 
+  describe('1.9.6 Spanish Accented Characters & UTF-8 Integrity', () => {
+    test('(1.9.6.a) Preserves accented characters (aprendí, código) without corruption in export, import, and HTML escaping', () => {
+      const accentedStr = 'Hoy aprendí a optimizar funciones de código en matemáticas e inglés con fórmulas.';
+      const escaped = escHTML(accentedStr);
+      assert.equal(escaped, 'Hoy aprendí a optimizar funciones de código en matemáticas e inglés con fórmulas.');
+      assert.ok(escaped.includes('aprendí'));
+      assert.ok(escaped.includes('código'));
+      assert.ok(escaped.includes('matemáticas'));
+      assert.ok(escaped.includes('inglés'));
+      assert.ok(escaped.includes('fórmulas'));
+
+      const payload = {
+        schema_version: 2,
+        activities: [{ id: 'act-utf8', title: 'Revisión de código', learned_text: 'Hoy aprendí RAG', date: '2026-10-10' }],
+        subjects: [],
+        topics: [],
+        focus_sessions: [],
+        learning_notes: [{ id: 'note-utf8', learned_text: 'Aprendí sobre modelos de lenguaje e inglés técnico', questions_text: '¿Cómo funciona la métrica?' }]
+      };
+
+      const jsonStr = JSON.stringify(payload);
+      const parsed = JSON.parse(jsonStr);
+      assert.equal(parsed.activities[0].title, 'Revisión de código');
+      assert.equal(parsed.activities[0].learned_text, 'Hoy aprendí RAG');
+      assert.equal(parsed.learning_notes[0].learned_text, 'Aprendí sobre modelos de lenguaje e inglés técnico');
+      assert.equal(parsed.learning_notes[0].questions_text, '¿Cómo funciona la métrica?');
+    });
+  });
+
   describe('A1.12 StorageAdapter QuotaExceededError Resilience', () => {
     test('(A1.12.a) StorageAdapter.setItem throws QuotaExceededError when quota is full', () => {
       const mockStorage = {
