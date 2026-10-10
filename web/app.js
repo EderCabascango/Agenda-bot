@@ -2499,6 +2499,13 @@ ${note.next_step_text ? `##  Próximo paso\n${note.next_step_text}\n` : ''}
             <span style="display:inline-block; width:12px; height:12px; background:var(--accent-teal); border-radius:2px;" title=">120 min"></span>
             <span>>2h</span>
           </div>
+          <table class="sr-only">
+            <caption>Mapa de calor del ciclo de estudio (${report.periods.cycle_start} al ${report.periods.cycle_end})</caption>
+            <thead><tr><th>Fecha</th><th>Minutos</th></tr></thead>
+            <tbody>
+              ${(cycleHeat && cycleHeat.days) ? cycleHeat.days.map(d => `<tr><td>${d.date}</td><td>${d.minutes}</td></tr>`).join('') : ''}
+            </tbody>
+          </table>
         </div>
       </div>
 

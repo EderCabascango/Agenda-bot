@@ -52,10 +52,15 @@ def run():
                     }
                 ];
                 localStorage.setItem('diary_activities', JSON.stringify(acts));
-                if (window.loadActivities) window.loadActivities();
-                location.reload();
+                if (window.activities) {
+                    window.activities.length = 0;
+                    window.activities.push(...acts);
+                }
+                if (window.renderDashboard) window.renderDashboard();
+                if (window.renderActivities) window.renderActivities();
             }"""
             page.evaluate(script)
+            page.goto('http://127.0.0.1:8000/?e2e=1')
             page.wait_for_load_state("networkidle")
             time.sleep(0.5)
             
