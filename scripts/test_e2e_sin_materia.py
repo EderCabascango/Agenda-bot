@@ -1,8 +1,12 @@
+import os
 import sys
 import time
 import subprocess
 import urllib.request
 from playwright.sync_api import sync_playwright
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+BACKEND_DIR = os.path.join(ROOT_DIR, "backend")
 
 def ensure_server():
     try:
@@ -11,7 +15,9 @@ def ensure_server():
         return None
     except Exception:
         print("Starting server...")
-        proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "backend.app:app", "--host", "127.0.0.1", "--port", "8000"])
+        env = os.environ.copy()
+        env["PYTHONPATH"] = BACKEND_DIR
+        proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"], cwd=BACKEND_DIR, env=env)
         time.sleep(3)
         return proc
 

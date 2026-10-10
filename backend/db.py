@@ -130,6 +130,7 @@ def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
                 user_id TEXT NOT NULL, id TEXT NOT NULL, title TEXT NOT NULL, date TEXT NOT NULL,
                 start_time TEXT DEFAULT '', end_time TEXT DEFAULT '', description TEXT DEFAULT '',
                 priority TEXT DEFAULT 'medium', tags TEXT DEFAULT '[]', completed INTEGER DEFAULT 0,
+                allow_focus INTEGER DEFAULT NULL, allow_focus_migrated INTEGER DEFAULT 0,
                 updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
                 PRIMARY KEY (user_id, id))"""
         )
@@ -144,6 +145,10 @@ def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
             conn.execute("ALTER TABLE activities ADD COLUMN deleted_at TEXT DEFAULT NULL")
         if "version" not in cols:
             conn.execute("ALTER TABLE activities ADD COLUMN version INTEGER DEFAULT 1")
+        if "allow_focus" not in cols:
+            conn.execute("ALTER TABLE activities ADD COLUMN allow_focus INTEGER DEFAULT NULL")
+        if "allow_focus_migrated" not in cols:
+            conn.execute("ALTER TABLE activities ADD COLUMN allow_focus_migrated INTEGER DEFAULT 0")
         now = monotonic_utc_now_iso()
         conn.execute("UPDATE activities SET updated_at = ? WHERE updated_at IS NULL OR updated_at = ''", (now,))
         conn.execute("UPDATE activities SET version = 1 WHERE version IS NULL OR version < 1")
@@ -236,6 +241,8 @@ COLLECTION_SCHEMAS = {
             "priority": {"type": str, "max_length": 20, "default": "medium", "sql_col": "priority"},
             "tags": {"type": list, "default": [], "sql_col": "tags", "serialize": json.dumps, "deserialize": lambda v: json.loads(v or "[]")},
             "completed": {"type": bool, "default": False, "sql_col": "completed", "serialize": lambda v: int(bool(v)), "deserialize": lambda v: bool(v)},
+            "allow_focus": {"type": bool, "default": True, "sql_col": "allow_focus", "nullable": True, "serialize": lambda v: None if v is None else int(bool(v)), "deserialize": lambda v: None if v is None else bool(v)},
+            "allow_focus_migrated": {"type": bool, "default": False, "sql_col": "allow_focus_migrated", "nullable": True, "serialize": lambda v: None if v is None else int(bool(v)), "deserialize": lambda v: None if v is None else bool(v)},
         },
         "order_by": "date, start_time"
     },
