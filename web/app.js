@@ -4330,7 +4330,12 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
                 ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean)
                 : [String(tagsRaw)].filter(Boolean);
 
-              activities.push({
+              const settings = loadSettings();
+              const allowFocus = (typeof FocusCore !== 'undefined' && FocusCore.shouldAllowFocusDefault)
+                ? FocusCore.shouldAllowFocusDefault({ tags, title }, settings)
+                : false;
+
+              const newAct = {
                 id: uid(),
                 title,
                 date: dateStr,
@@ -4339,8 +4344,14 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
                 description,
                 priority: ['low', 'medium', 'high'].includes(priority) ? priority : 'medium',
                 tags,
-                completed: false
-              });
+                allow_focus: allowFocus,
+                completed: false,
+                version: 1,
+                updated_at: new Date().toISOString()
+              };
+
+              activities.push(newAct);
+              enqueueChange({ ...newAct, collection: 'activities' });
               addedCount++;
             });
           });
