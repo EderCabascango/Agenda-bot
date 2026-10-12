@@ -1,36 +1,18 @@
 import os
-import sys
 import time
-import subprocess
-import urllib.request
 from playwright.sync_api import sync_playwright
-
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-BACKEND_DIR = os.path.join(ROOT_DIR, "backend")
-
-def ensure_server():
-    try:
-        urllib.request.urlopen("http://127.0.0.1:8000/", timeout=1)
-        print("Server already running.")
-        return None
-    except Exception:
-        print("Starting server...")
-        env = os.environ.copy()
-        env["PYTHONPATH"] = BACKEND_DIR
-        proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"], cwd=BACKEND_DIR, env=env)
-        time.sleep(3)
-        return proc
+from test_server import TestServerRunner
 
 def run():
     print("Generating Agenda de Hoy screenshots at 1280px and 390px viewports...")
-    proc = ensure_server()
+    server = TestServerRunner().start()
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             
             # 1280px Desktop
             page1280 = browser.new_page(viewport={"width": 1280, "height": 800})
-            page1280.goto('http://127.0.0.1:8000/?e2e=1')
+            page1280.goto(f"{server.url}/?e2e=1")
             page1280.wait_for_load_state("networkidle")
             
             script_seed = """() => {
@@ -79,7 +61,7 @@ def run():
 
             # 390px Mobile
             page390 = browser.new_page(viewport={"width": 390, "height": 844})
-            page390.goto('http://127.0.0.1:8000/?e2e=1')
+            page390.goto(f"{server.url}/?e2e=1")
             page390.wait_for_load_state("networkidle")
             page390.evaluate(script_seed)
             page390.reload()
@@ -90,8 +72,7 @@ def run():
 
             browser.close()
     finally:
-        if proc:
-            proc.terminate()
+        server.stop()
 
 if __name__ == '__main__':
     run()

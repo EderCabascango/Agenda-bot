@@ -37,6 +37,7 @@ E2E_TEMP_DIR = tempfile.mkdtemp()
 E2E_TEST_DB = os.path.join(E2E_TEMP_DIR, "test_e2e_agenda.db")
 os.environ["AGENDA_DB"] = E2E_TEST_DB
 os.environ["DATABASE_PATH"] = E2E_TEST_DB
+os.environ["DEFAULT_USER_ID"] = "test_user"
 
 assert "tmp" in E2E_TEST_DB.lower() or "temp" in E2E_TEST_DB.lower(), f"ERROR CRÍTICO: AGENDA_DB ({E2E_TEST_DB}) debe ser temporal."
 assert os.path.abspath(E2E_TEST_DB) != os.path.abspath(os.path.join(BACKEND_DIR, "agenda.db")), "ERROR: El test E2E no puede usar la base de datos real."
@@ -48,17 +49,22 @@ from playwright.sync_api import sync_playwright
 
 
 def get_free_port():
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(('127.0.0.1', 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
+    for _ in range(100):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(('127.0.0.1', 0))
+        port = s.getsockname()[1]
+        s.close()
+        if port not in (8000, 8001):
+            return port
+    raise RuntimeError("Could not find free port for test server")
 
 
 class TestServer:
     def __init__(self, db_path):
         self.db_path = db_path
         self.port = get_free_port()
+        assert self.port not in (8000, 8001), f"CRITICAL ERROR: Test server port MUST NOT be 8000 or 8001! Got {self.port}"
+        assert os.path.abspath(self.db_path) != os.path.abspath(os.path.join(BACKEND_DIR, "agenda.db")), "CRITICAL ERROR: Test server MUST NOT use real agenda.db!"
         self.host = '127.0.0.1'
         self.url = f"http://{self.host}:{self.port}"
         self.server = None
@@ -327,7 +333,7 @@ def test_playwright_e2e_full_sync():
             print("\n[E2E 5] Probando creación concurrente del agente + edición de usuario...")
             time.sleep(0.5)
             # Agent creates an activity in DB
-            created = db.upsert_activity("me", {
+            created = db.upsert_activity("test_user", {
                 "id": "act-agent-created-1",
                 "title": "Revisión creada por Agente IA",
                 "date": "2026-10-12",
@@ -355,6 +361,7 @@ def test_playwright_e2e_full_sync():
 
             # Context A synchronizes
             sync_res = page_a.evaluate("""async () => {
+                localStorage.setItem('diary_last_sync', '0');
                 await window.syncWithBackend();
                 return {
                     acts: JSON.parse(localStorage.getItem('diary_activities') || '[]'),

@@ -1,36 +1,18 @@
 import os
-import sys
 import time
-import subprocess
-import urllib.request
 from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright
-
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-BACKEND_DIR = os.path.join(ROOT_DIR, "backend")
-
-def ensure_server():
-    try:
-        urllib.request.urlopen("http://127.0.0.1:8000/", timeout=1)
-        print("Server already running.")
-        return None
-    except Exception:
-        print("Starting server...")
-        env = os.environ.copy()
-        env["PYTHONPATH"] = BACKEND_DIR
-        proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"], cwd=BACKEND_DIR, env=env)
-        time.sleep(3)
-        return proc
+from test_server import TestServerRunner
 
 def run():
     print("Testing Point 3: Cycle Heatmap 15->14, 7d/30d bars, legend, accessible tables & viewport screenshots...")
-    proc = ensure_server()
+    server = TestServerRunner().start()
     
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page(viewport={'width': 1280, 'height': 900})
-            page.goto('http://127.0.0.1:8000/?e2e=1')
+            page.goto(f"{server.url}/?e2e=1")
             page.wait_for_load_state("networkidle")
             
             # Inject real sessions across the past 30 days and cycle range
@@ -100,7 +82,7 @@ def run():
             
             # Take 390px screenshots
             page390 = browser.new_page(viewport={'width': 390, 'height': 844})
-            page390.goto('http://127.0.0.1:8000/?e2e=1')
+            page390.goto(f"{server.url}/?e2e=1")
             page390.click('button[data-view="study"]')
             page390.wait_for_selector('#subtab-btn-stats')
             page390.click('#subtab-btn-stats')
@@ -112,8 +94,7 @@ def run():
             browser.close()
             print("Point 3 verification PASSED 100%!")
     finally:
-        if proc:
-            proc.terminate()
+        server.stop()
 
 if __name__ == '__main__':
     run()

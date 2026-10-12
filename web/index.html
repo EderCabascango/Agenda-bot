@@ -132,16 +132,21 @@
                   </div>
                 </div>
                 <div class="diario-table-wrap">
-                  <table class="diario-table" id="diario-table"></table>
+                  <table class="diario-table" id="diario-table" role="grid" aria-label="Matriz del ciclo mensual de hábitos"></table>
+                </div>
+                <!-- Leyenda mínima accesible -->
+                <div class="diario-legend" id="diario-legend" aria-label="Leyenda de la matriz">
+                  <div class="legend-item"><span class="legend-box is-empty"></span><span>Sin actividad</span></div>
+                  <div class="legend-item"><span class="legend-box is-pending"></span><span>Pendiente</span></div>
+                  <div class="legend-item"><span class="legend-box is-done"></span><span>Realizada</span></div>
+                  <div class="legend-item"><span class="legend-box is-missed"></span><span>No realizada</span></div>
+                  <div class="legend-item"><span class="legend-box is-today"></span><span>Hoy</span></div>
                 </div>
                 <!-- Add custom activity row -->
                 <div class="db-add-row">
                   <input type="text" id="diario-new-row-label" placeholder="Nueva actividad a trackear en la matriz..." />
-                  <select id="diario-new-row-category">
-                    <option value="#3B82F6">Cuerpo / Ej.</option>
-                    <option value="#10B981">Desarrollo</option>
-                    <option value="#F59E0B">Ingresos</option>
-                    <option value="#F97316">Disfruto</option>
+                  <select id="diario-new-row-category" style="display:none;">
+                    <option value="habito" selected>Hábito</option>
                   </select>
                   <button class="btn-primary" id="diario-add-row-btn" title="Añadir actividad">
                     <span class="material-icons-round">add</span>

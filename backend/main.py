@@ -81,7 +81,9 @@ def graph():
     return _graph
 
 
-def auth(x_app_token: str | None = Header(default=None), x_user_id: str = Header(default="me")) -> str:
+DEFAULT_USER = os.getenv("DEFAULT_USER_ID", "me")
+
+def auth(x_app_token: str | None = Header(default=None), x_user_id: str = Header(default=DEFAULT_USER)) -> str:
     expected = os.getenv("APP_TOKEN")
     if expected and x_app_token != expected:
         raise HTTPException(401, "Token inválido.")

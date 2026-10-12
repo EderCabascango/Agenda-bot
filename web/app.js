@@ -707,18 +707,18 @@
 
   const TRACKED_ROWS_KEY = 'diary_tracked_rows';
   const DEFAULT_ROWS = [
-    { label: 'Dormir 6-8 h', keys: ['dormir'],       color: '#48A6C8' }, // Azul (cuerpo)
-    { label: 'Inglés',        keys: ['inglés','ingles'], color: '#3BA55D' }, // Verde (desarrollo)
-    { label: 'Ejercicio',     keys: ['calistenia','correr','ejercicio','gym','cardio','pesas','yoga'], color: '#48A6C8' }, // Azul (ejercicio)
-    { label: 'AI-300',        keys: ['ai-300','ai300'], color: '#3BA55D' }, // Verde (desarrollo)
-    { label: 'MLOps',         keys: ['mlops'],         color: '#3BA55D' }, // Verde (desarrollo)
-    { label: 'Leer',          keys: ['leer'],          color: '#E67E22' }, // Naranja (entretenimiento)
-    { label: 'Meditar',       keys: ['meditar'],       color: '#E67E22' }, // Naranja (entretenimiento)
-    { label: 'Fuyu',          keys: ['fuyu'],          color: '#D1B83B' }, // Amarillo (ingresos)
-    { label: 'Proyectos',     keys: ['proyecto','proyectos','estudio'], color: '#D1B83B' }, // Amarillo (desarrollo/proyectos)
-    { label: 'Manifestar',    keys: ['manifestar','planificación'], color: '#E67E22' }, // Naranja (disfruto/entretenimiento)
-    { label: 'Crema',         keys: ['crema'],         color: '#E67E22' }, // Naranja (disfruto/entretenimiento)
-    { label: 'Pastilla',      keys: ['pastilla'],      color: '#E67E22' }, // Naranja (disfruto/entretenimiento)
+    { label: 'Dormir 6-8 h', keys: ['dormir'] },
+    { label: 'Inglés',        keys: ['inglés','ingles'] },
+    { label: 'Ejercicio',     keys: ['calistenia','correr','ejercicio','gym','cardio','pesas','yoga'] },
+    { label: 'AI-300',        keys: ['ai-300','ai300'] },
+    { label: 'MLOps',         keys: ['mlops'] },
+    { label: 'Leer',          keys: ['leer'] },
+    { label: 'Meditar',       keys: ['meditar'] },
+    { label: 'Fuyu',          keys: ['fuyu'] },
+    { label: 'Proyectos',     keys: ['proyecto','proyectos','estudio'] },
+    { label: 'Manifestar',    keys: ['manifestar','planificación'] },
+    { label: 'Crema',         keys: ['crema'] },
+    { label: 'Pastilla',      keys: ['pastilla'] },
   ];
 
   function normalizeLabel(s) {
@@ -746,10 +746,12 @@
         return true;
       });
       
-      // Migration: if keys for 'Leer' include 'libro' or if Inglés is old color, force reset
+      // Remove colorful legacy colors from stored rows
+      parsed.forEach(r => { delete r.color; });
+      
+      // Migration: if keys for 'Leer' include 'libro'
       const needsMigration = parsed.some(r => 
-        (r.label === 'Leer' && r.keys.includes('libro')) || 
-        (r.label === 'Inglés' && r.color === '#48A6C8')
+        (r.label === 'Leer' && r.keys.includes('libro'))
       );
 
       if (needsMigration) {
@@ -805,6 +807,7 @@
     function isRowMissed(dateStr, rowKeys) {
       const matching = activities.find(a =>
         a.date === dateStr &&
+        !a.deleted_at &&
         rowKeys.some(k => a.title.toLowerCase().includes(k))
       );
       if (!matching) return false;
@@ -814,52 +817,100 @@
       const all = allByDate[dateStr] || [];
       return rowKeys.some(k => all.some(t => t.includes(k)));
     }
+    function getDoneLevel(dateStr, rowKeys) {
+      const matchingActs = activities.filter(a =>
+        a.date === dateStr &&
+        !a.deleted_at &&
+        a.completed &&
+        rowKeys.some(k => a.title.toLowerCase().includes(k))
+      );
+      if (matchingActs.length === 0) return 0;
+      let totalMins = 0;
+      matchingActs.forEach(a => {
+        if (a.startTime && a.endTime) {
+          const [sh, sm] = a.startTime.split(':').map(Number);
+          const [eh, em] = a.endTime.split(':').map(Number);
+          const diff = (eh * 60 + em) - (sh * 60 + sm);
+          if (diff > 0) totalMins += diff;
+        }
+      });
+      if (matchingActs.length >= 3 || totalMins >= 120) return 3;
+      if (matchingActs.length >= 2 || totalMins >= 60) return 2;
+      return 1;
+    }
 
     // Build HTML
     let html = '<thead><tr>';
     // First cell: empty corner
-    html += `<th class="act-label" style="background:var(--bg-secondary); border-bottom: 2px solid var(--border-medium);"></th>`;
+    html += `<th class="act-label" style="border-bottom: 2px solid var(--border-medium);"></th>`;
     cycleDates.forEach(dateObj => {
       const dateStr = toDateStr(dateObj);
       const d = dateObj.getDate();
       const isToday = dateStr === todayStr();
-      html += `<th class="day-head${isToday ? ' is-today' : ''}" data-date="${dateStr}" style="border-bottom: 2px solid var(--border-medium);">${d}</th>`;
+      const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+      let headCls = 'day-head';
+      if (isToday) headCls += ' is-today';
+      if (isWeekend) headCls += ' is-weekend';
+      html += `<th class="${headCls}" data-date="${dateStr}" style="border-bottom: 2px solid var(--border-medium);">${d}</th>`;
     });
     html += '</tr></thead><tbody>';
 
     diarioRows.forEach(row => {
       html += `<tr>`;
-      // Label cell
-      html += `<td class="act-label" style="background:${row.color || '#5B6FA0'};color:#fff;" title="${escHTML(row.label)}">${escHTML(row.label)}</td>`;
+      // Label cell: pure text on white/card background, no colored pills
+      html += `<td class="act-label" title="${escHTML(row.label)}">${escHTML(row.label)}</td>`;
 
       cycleDates.forEach(dateObj => {
         const dateStr = toDateStr(dateObj);
         const d = dateObj.getDate();
-        const m = dateObj.getMonth() + 1;
+        const monthName = MONTHS_ES[dateObj.getMonth()].substring(0, 3).toLowerCase();
         const isFuture = dateStr > todayStr();
         const isToday  = dateStr === todayStr();
         const done = isDone(dateStr, row.keys);
-        const missed = isRowMissed(dateStr, row.keys);
-        const has  = hasAct(dateStr, row.keys);
+        const missed = !done && isRowMissed(dateStr, row.keys);
+        const has = hasAct(dateStr, row.keys);
+        const pending = !done && !missed && has;
 
         let cls = 'act-cell';
-        if (done)     cls += ' done';
-        else if (missed) cls += ' missed';
-        if (isFuture) cls += ' is-future';
-        if (isToday)  cls += ' is-today-col';
+        let statusText = 'sin actividad';
 
-        const tooltip = `${row.label} – ${d}/${m}: ${done ? 'completado' : missed ? '✕ no realizado' : has ? 'pendiente' : '—'}`;
-        html += `<td class="${cls}" data-date="${escHTML(dateStr)}" data-row="${escHTML(row.label)}" title="${escHTML(tooltip)}"></td>`;
+        if (done) {
+          const lvl = getDoneLevel(dateStr, row.keys);
+          cls += ` done lvl-${lvl}`;
+          statusText = 'realizada';
+        } else if (missed) {
+          cls += ' missed';
+          statusText = 'no realizada';
+        } else if (pending) {
+          cls += ' pending';
+          statusText = 'pendiente';
+        } else {
+          cls += ' empty';
+        }
+
+        if (isFuture) cls += ' is-future';
+        if (isToday)  {
+          cls += ' is-today-col';
+          statusText += ', hoy';
+        }
+
+        const ariaLabel = `${row.label}, ${d} ${monthName}: ${statusText}`;
+        const tooltip = `${row.label} – ${d} ${monthName}: ${statusText}`;
+        const tabIdx = isFuture ? '-1' : '0';
+
+        html += `<td class="${cls}" data-date="${escHTML(dateStr)}" data-row="${escHTML(row.label)}" title="${escHTML(tooltip)}" aria-label="${escHTML(ariaLabel)}" role="gridcell" tabindex="${tabIdx}"></td>`;
       });
       html += `</tr>`;
     });
 
     html += '</tbody>';
+    table.setAttribute('role', 'grid');
+    table.setAttribute('aria-label', 'Matriz del ciclo mensual de hábitos');
     table.innerHTML = html;
 
-    // ── Click to toggle: find matching activity and toggle it ──
+    // ── Click or Keyboard Enter/Space to toggle: find matching activity and toggle it ──
     table.querySelectorAll('.act-cell:not(.is-future)').forEach(cell => {
-      cell.addEventListener('click', () => {
+      const toggleAction = () => {
         const dateStr  = cell.dataset.date;
         const rowLabel = cell.dataset.row;
         const rowDef   = diarioRows.find(r => r.label === rowLabel);
@@ -868,6 +919,7 @@
         // Find matching activity for that day
         const matching = activities.find(a =>
           a.date === dateStr &&
+          !a.deleted_at &&
           rowDef.keys.some(k => a.title.toLowerCase().includes(k))
         );
 
@@ -880,17 +932,17 @@
           showToast(
             matching.completed ? `${matching.title}` : `${matching.title}`,
             matching.completed ? 'check_circle' : 'radio_button_unchecked',
-            matching.completed ? 'var(--accent-teal)' : 'var(--text-muted)'
+            matching.completed ? 'var(--accent-amber)' : 'var(--text-muted)'
           );
         } else {
-          // Create a new activity for that day and mark it completed (green)
+          // Create a new activity for that day and mark it completed (amber)
           const newAct = {
             id: uid(),
             title: rowDef.label,
             date: dateStr,
             startTime: '08:00',
             endTime: '09:00',
-            description: 'Registrado desde el panel mensual',
+            description: 'Registrado desde la matriz del ciclo mensual',
             priority: 'medium',
             tags: ['diario'],
             completed: true
@@ -900,7 +952,15 @@
           renderDiarioGrid();
           renderDashboard_stats();
           renderActivityList();
-          showToast(`${newAct.title}`, 'check_circle', 'var(--accent-teal)');
+          showToast(`${newAct.title}`, 'check_circle', 'var(--accent-amber)');
+        }
+      };
+
+      cell.addEventListener('click', toggleAction);
+      cell.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggleAction();
         }
       });
     });
@@ -5785,8 +5845,7 @@ SIEMPRE devuelve un JSON válido.
 
   // ── Window Exports for Tests & Integrations (Guarded strictly by ?e2e=1 or localStorage) ──
   const isTestMode = typeof window !== 'undefined' && (
-    (window.location && window.location.search && (window.location.search.includes('e2e=1') || window.location.search.includes('test=1'))) ||
-    (typeof localStorage !== 'undefined' && localStorage.getItem('diary_test_mode') === '1')
+    window.location && window.location.search && (window.location.search.includes('e2e=1') || window.location.search.includes('test=1'))
   );
 
   if (isTestMode) {

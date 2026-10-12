@@ -1298,29 +1298,26 @@ input:focus, select:focus, textarea:focus {
 
 /* ---------- Diario Grid (Monthly tracker) ---------- */
 .diario-wrapper {
-  background: linear-gradient(135deg, rgba(28,28,33,0.7), rgba(22,22,26,0.9));
-  border-radius: var(--radius-xl);
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
   border: 1px solid var(--border-medium);
-  padding: 24px 20px;
-  box-shadow: var(--shadow-lg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  padding: 20px 16px;
+  box-shadow: none;
 }
 .diario-title {
   text-align: center;
-  font-size: 1.45rem;
+  font-size: 1.25rem;
   font-weight: 800;
-  letter-spacing: 0.6em;
-  color: var(--accent-teal);
-  text-shadow: 0 0 10px rgba(3,218,197,0.3);
-  margin-bottom: 20px;
+  letter-spacing: 0.3em;
+  color: var(--text-primary);
+  margin-bottom: 16px;
   text-transform: uppercase;
 }
 .diario-month-nav {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
   gap: 12px;
 }
 .diario-month-nav h4 {
@@ -1331,32 +1328,36 @@ input:focus, select:focus, textarea:focus {
   text-align: center;
 }
 .diario-nav-btn {
-  width: 32px; height: 32px;
+  width: 30px; height: 30px;
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  background: var(--bg-elevated);
+  background: var(--bg-card);
   font-size: 18px;
   transition: all var(--transition);
   flex-shrink: 0;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-medium);
+  color: var(--text-secondary);
 }
 .diario-nav-btn:hover {
   background: var(--bg-card-hover);
-  color: var(--accent-teal);
-  border-color: var(--accent-teal);
+  color: var(--text-primary);
+  border-color: var(--text-primary);
 }
 .diario-table-wrap {
   overflow-x: auto;
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(255,255,255,0.06);
-  background: rgba(0,0,0,0.15);
-  box-shadow: inset 0 2px 8px rgba(0,0,0,0.4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-medium);
+  background: var(--bg-card);
+  box-shadow: none;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
 }
 .diario-table {
   border-collapse: separate;
-  border-spacing: 3px 4px;
+  border-spacing: 3px 3px;
   min-width: 100%;
   font-size: 0.72rem;
+  background: var(--bg-card);
 }
 .diario-table th,
 .diario-table td {
@@ -1365,117 +1366,258 @@ input:focus, select:focus, textarea:focus {
   vertical-align: middle;
   padding: 0;
 }
-/* Day number header cells */
+/* Day number header cells: gray by default, black and bolder on today, dimmed on weekends */
 .diario-table .day-head {
   width: 24px;
   min-width: 24px;
   height: 24px;
-  font-size: 0.65rem;
-  font-weight: 700;
+  font-size: 0.68rem;
+  font-weight: 500;
   color: var(--text-muted);
   background: transparent;
   position: sticky;
   top: 0;
-  transition: all var(--transition);
   border-radius: 4px;
+  user-select: none;
+}
+.diario-table .day-head.is-weekend {
+  opacity: 0.45;
 }
 .diario-table .day-head.is-today {
-  color: var(--accent-teal);
-  background: var(--accent-teal-dim);
+  color: var(--text-primary);
   font-weight: 800;
+  border-bottom: 2px solid var(--text-primary);
+  background: transparent;
 }
-/* Activity label cells */
+/* Activity label cells: fixed sticky column, black text on white background, no colored pills */
 .diario-table .act-label {
-  min-width: 120px;
-  max-width: 140px;
+  min-width: 130px;
+  max-width: 150px;
   text-align: left;
   padding: 0 10px;
-  height: 28px;
-  font-size: 0.72rem;
-  font-weight: 700;
+  height: 26px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-card);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   position: sticky;
   left: 0;
-  z-index: 2;
+  z-index: 5;
   cursor: default;
-  border-radius: 6px;
+  border-radius: 4px;
+  border-right: 1px solid var(--border-medium);
 }
-/* Activity data cells */
+.diario-table th.act-label {
+  z-index: 6;
+  background: var(--bg-card);
+}
+/* Activity data cells: compact and uniform (radius 4px, no shadows, no gradients) */
 .diario-table .act-cell {
   width: 24px;
   min-width: 24px;
-  height: 28px;
+  height: 26px;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  background: rgba(255,255,255,0.025);
+  background: #F4F4F6;
   border-radius: 4px;
+  border: 1px solid transparent;
+  box-shadow: none;
+  position: relative;
+  transition: transform 0.1s ease;
+}
+[data-theme="dark"] .diario-table .act-cell,
+body.dark-mode .diario-table .act-cell {
+  background: #27272A;
 }
 .diario-table .act-cell:hover {
-  background: rgba(255,255,255,0.1) !important;
-  transform: scale(1.15);
-  z-index: 3;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  transform: scale(1.08);
+  z-index: 4;
 }
-.diario-table .act-cell.done {
-  background: #10B981 !important; /* Premium Emerald green */
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 0 10px rgba(16,185,129,0.5);
+.diario-table .act-cell:focus-visible {
+  outline: 2px solid var(--accent-amber);
+  outline-offset: 1px;
+  z-index: 5;
 }
-.diario-table .act-cell.is-future {
-  background: rgba(255,255,255,0.008);
-  cursor: default;
+
+/* 1. Sin actividad (default) */
+.diario-table .act-cell.empty {
+  background: #F4F4F6;
 }
-.diario-table .act-cell.is-future:hover {
-  transform: none;
-  background: rgba(255,255,255,0.008) !important;
-  box-shadow: none;
+[data-theme="dark"] .diario-table .act-cell.empty,
+body.dark-mode .diario-table .act-cell.empty {
+  background: #27272A;
 }
-.diario-table .act-cell.is-today-col {
-  background: rgba(3,218,197,0.06);
+
+/* 2. Pendiente: contorno fino sin relleno */
+.diario-table .act-cell.pending {
+  background: transparent !important;
+  border: 1px dashed var(--text-muted);
 }
-.diario-table .act-cell.done.is-today-col {
-  background: #10B981 !important;
+[data-theme="dark"] .diario-table .act-cell.pending,
+body.dark-mode .diario-table .act-cell.pending {
+  background: transparent !important;
+  border: 1px dashed var(--text-muted);
 }
+
+/* 3. Realizada: amarillo ámbar (hasta 3 niveles de intensidad) */
+.diario-table .act-cell.done,
+.diario-table .act-cell.done.lvl-1 {
+  background: #FDE68A !important;
+  border: 1px solid #FCD34D;
+  box-shadow: none !important;
+}
+.diario-table .act-cell.done.lvl-2 {
+  background: #F5B82E !important;
+  border: 1px solid #EEA81B;
+  box-shadow: none !important;
+}
+.diario-table .act-cell.done.lvl-3 {
+  background: #D97706 !important;
+  border: 1px solid #B45309;
+  box-shadow: none !important;
+}
+[data-theme="dark"] .diario-table .act-cell.done,
+[data-theme="dark"] .diario-table .act-cell.done.lvl-1,
+body.dark-mode .diario-table .act-cell.done,
+body.dark-mode .diario-table .act-cell.done.lvl-1 {
+  background: rgba(245, 184, 46, 0.4) !important;
+  border: 1px solid rgba(245, 184, 46, 0.6);
+}
+[data-theme="dark"] .diario-table .act-cell.done.lvl-2,
+body.dark-mode .diario-table .act-cell.done.lvl-2 {
+  background: #F5B82E !important;
+  border: 1px solid #EEA81B;
+}
+[data-theme="dark"] .diario-table .act-cell.done.lvl-3,
+body.dark-mode .diario-table .act-cell.done.lvl-3 {
+  background: #EEA81B !important;
+  border: 1px solid #F5B82E;
+}
+
+/* 4. No ejecutada (día pasado): punto pequeño gris oscuro en el centro */
 .diario-table .act-cell.missed {
-  color: var(--text-muted) !important;
-  background: rgba(255,255,255,0.03) !important;
-  font-weight: 700;
-  font-size: 0.65rem;
+  background: #F4F4F6 !important;
+  border: 1px solid transparent;
   position: relative;
-  border-radius: 5px;
-  border: 1px dashed rgba(255,255,255,0.08);
+}
+[data-theme="dark"] .diario-table .act-cell.missed,
+body.dark-mode .diario-table .act-cell.missed {
+  background: #27272A !important;
 }
 .diario-table .act-cell.missed::after {
-  content: '✕';
+  content: '';
   position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #52525B;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-family: inherit;
-  font-weight: 900;
-  color: var(--text-muted) !important;
+}
+[data-theme="dark"] .diario-table .act-cell.missed::after,
+body.dark-mode .diario-table .act-cell.missed::after {
+  background: #A1A1AA;
+}
+
+/* 5. Hoy: borde negro de 2px (blanco/alto contraste en dark mode) */
+.diario-table .act-cell.is-today-col {
+  outline: 2px solid #111111;
+  outline-offset: -2px;
+  z-index: 2;
+}
+[data-theme="dark"] .diario-table .act-cell.is-today-col,
+body.dark-mode .diario-table .act-cell.is-today-col {
+  outline: 2px solid #F4F4F5;
+  outline-offset: -2px;
+}
+
+/* Future cells */
+.diario-table .act-cell.is-future {
+  background: #F8F8FA;
+  cursor: default;
+  opacity: 0.6;
+}
+[data-theme="dark"] .diario-table .act-cell.is-future,
+body.dark-mode .diario-table .act-cell.is-future {
+  background: #1F1F23;
   opacity: 0.5;
 }
-.diario-table tbody tr:hover .act-label {
-  filter: brightness(1.15);
+.diario-table .act-cell.is-future:hover {
+  transform: none;
+  box-shadow: none;
 }
-/* Zebra striping on data cells */
-.diario-table tbody tr:nth-child(odd) .act-cell:not(.done):not(.missed):not(.is-future) {
-  background: rgba(255,255,255,0.03);
+
+/* Minimal accessible legend */
+.diario-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 8px 4px 0 4px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
 }
-.diario-table tbody tr:hover .act-cell:not(.done):not(.missed):not(.is-future) {
-  background: rgba(255,255,255,0.06) !important;
+.diario-legend .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
-/* Month progress indicator line */
-.diario-table .day-head.is-today::before {
+.diario-legend .legend-box {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  display: inline-block;
+  position: relative;
+}
+.diario-legend .legend-box.is-empty {
+  background: #F4F4F6;
+}
+[data-theme="dark"] .diario-legend .legend-box.is-empty,
+body.dark-mode .diario-legend .legend-box.is-empty {
+  background: #27272A;
+}
+.diario-legend .legend-box.is-pending {
+  background: transparent;
+  border: 1px dashed var(--text-muted);
+}
+.diario-legend .legend-box.is-done {
+  background: #F5B82E;
+}
+.diario-legend .legend-box.is-missed {
+  background: #F4F4F6;
+}
+[data-theme="dark"] .diario-legend .legend-box.is-missed,
+body.dark-mode .diario-legend .legend-box.is-missed {
+  background: #27272A;
+}
+.diario-legend .legend-box.is-missed::after {
   content: '';
   position: absolute;
-  bottom: -1px;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: var(--accent-teal);
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #52525B;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+[data-theme="dark"] .diario-legend .legend-box.is-missed::after,
+body.dark-mode .diario-legend .legend-box.is-missed::after {
+  background: #A1A1AA;
+}
+.diario-legend .legend-box.is-today {
+  background: transparent;
+  outline: 2px solid #111111;
+  outline-offset: -2px;
+}
+[data-theme="dark"] .diario-legend .legend-box.is-today,
+body.dark-mode .diario-legend .legend-box.is-today {
+  outline: 2px solid #F4F4F5;
 }
 
 /* ---------- Notification Alarm Banner ---------- */

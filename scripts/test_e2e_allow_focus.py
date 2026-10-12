@@ -1,30 +1,11 @@
-import os
-import sys
-import time
 import json
-import subprocess
-import urllib.request
+import time
 from playwright.sync_api import sync_playwright
-
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-BACKEND_DIR = os.path.join(ROOT_DIR, "backend")
-
-def ensure_server():
-    try:
-        urllib.request.urlopen("http://127.0.0.1:8000/", timeout=1)
-        print("Server already running.")
-        return None
-    except Exception:
-        print("Starting server...")
-        env = os.environ.copy()
-        env["PYTHONPATH"] = BACKEND_DIR
-        proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"], cwd=BACKEND_DIR, env=env)
-        time.sleep(3)
-        return proc
+from test_server import TestServerRunner
 
 def run():
     print("Testing Point 2: allow_focus multi-context migration sync (Context A -> Context B)...")
-    proc = ensure_server()
+    server = TestServerRunner().start()
     
     try:
         with sync_playwright() as p:
@@ -37,8 +18,8 @@ def run():
             pageA = ctxA.new_page()
             pageB = ctxB.new_page()
             
-            pageA.goto('http://127.0.0.1:8000/?e2e=1')
-            pageB.goto('http://127.0.0.1:8000/?e2e=1')
+            pageA.goto(f"{server.url}/?e2e=1")
+            pageB.goto(f"{server.url}/?e2e=1")
             
             pageA.wait_for_load_state("networkidle")
             pageB.wait_for_load_state("networkidle")
@@ -53,7 +34,8 @@ def run():
             
             # 1. Seed 4 activities with specific tags on pageA
             script_seed_4 = """() => {
-                const today = (typeof toDateStr === 'function') ? toDateStr(new Date()) : new Date().toISOString().slice(0, 10);
+                const dt = new Date();
+                const today = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
                 const settings = { defaultFocusTags: ['estudio', 'proyectos', 'ia', 'idiomas', 'lectura', 'programación', 'programacion', 'study', 'projects'] };
                 localStorage.setItem('agenda_settings', JSON.stringify(settings));
 
@@ -108,7 +90,7 @@ def run():
                 if (window.renderActivityList) window.renderActivityList();
             }"""
             pageA.evaluate(script_seed_4)
-            pageA.goto('http://127.0.0.1:8000/?e2e=1')
+            pageA.goto(f"{server.url}/?e2e=1")
             pageA.wait_for_load_state("networkidle")
             time.sleep(0.5)
             
@@ -228,8 +210,7 @@ def run():
             browser.close()
             print("Point 2 allow_focus multi-context migration sync verification PASSED 100%!")
     finally:
-        if proc:
-            proc.terminate()
+        server.stop()
 
 if __name__ == '__main__':
     run()

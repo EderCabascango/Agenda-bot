@@ -1,35 +1,16 @@
-import os
-import sys
 import time
-import subprocess
-import urllib.request
 from playwright.sync_api import sync_playwright
-
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-BACKEND_DIR = os.path.join(ROOT_DIR, "backend")
-
-def ensure_server():
-    try:
-        urllib.request.urlopen("http://127.0.0.1:8000/", timeout=1)
-        print("Server already running.")
-        return None
-    except Exception:
-        print("Starting server...")
-        env = os.environ.copy()
-        env["PYTHONPATH"] = BACKEND_DIR
-        proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"], cwd=BACKEND_DIR, env=env)
-        time.sleep(3)
-        return proc
+from test_server import TestServerRunner
 
 def run():
     print("Testing Point 2: 'Sin materia' orphan sessions grouping (nonexistent, null, tombstone)...")
-    proc = ensure_server()
+    server = TestServerRunner().start()
     
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
-            page.goto('http://127.0.0.1:8000/?e2e=1')
+            page.goto(f"{server.url}/?e2e=1")
             page.wait_for_load_state("networkidle")
             
             # Seed 1 active subject + 1 deleted subject + 3 orphan sessions + 1 normal session
@@ -91,8 +72,7 @@ def run():
             browser.close()
             print("Point 2 verification PASSED 100%!")
     finally:
-        if proc:
-            proc.terminate()
+        server.stop()
 
 if __name__ == '__main__':
     run()
