@@ -4,7 +4,12 @@ import time
 import socket
 import tempfile
 import subprocess
+import json
+import secrets
 import urllib.request
+from datetime import datetime, timedelta, timezone
+
+import jwt
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BACKEND_DIR = os.path.join(ROOT_DIR, "backend")
@@ -18,6 +23,43 @@ def get_free_test_port():
         if port not in (8000, 8001):
             return port
     raise RuntimeError("Could not find free port for test server")
+
+def make_test_session(user_id: str, jwt_secret: str) -> dict:
+    """Emite una sesión JWT válida 24h, igual a la que devuelve /auth/google."""
+    expires = datetime.now(timezone.utc) + timedelta(days=1)
+    token = jwt.encode({"sub": user_id, "exp": int(expires.timestamp())}, jwt_secret, algorithm="HS256")
+    return {"token": token, "expires_at": expires.strftime("%Y-%m-%dT%H:%M:%SZ"), "profile": {}}
+
+
+def launch_authed_browser(playwright, session: dict, **launch_kwargs):
+    """Lanza Chromium y hace que cada página o contexto nuevo arranque con la sesión guardada en localStorage."""
+    launch_kwargs.setdefault("headless", True)
+    browser = playwright.chromium.launch(**launch_kwargs)
+    script = f"try {{ localStorage.setItem('diary_session', {json.dumps(json.dumps(session))}); }} catch (e) {{}}"
+    original_new_context = browser.new_context
+
+    def new_context(*args, **kwargs):
+        ctx = original_new_context(*args, **kwargs)
+        ctx.add_init_script(script)
+        return ctx
+
+    def new_page(*args, **kwargs):
+        ctx = new_context(*args, **kwargs)
+        page = ctx.new_page()
+
+        def close_context(_):
+            try:
+                ctx.close()
+            except Exception:
+                pass  # el navegador ya se cerró
+
+        page.on("close", close_context)
+        return page
+
+    browser.new_context = new_context
+    browser.new_page = new_page
+    return browser
+
 
 class TestServerRunner:
     def __init__(self, prefix="agenda_test_"):
@@ -34,11 +76,21 @@ class TestServerRunner:
         self.url = f"http://127.0.0.1:{self.port}"
         self.proc = None
 
+        # Autenticación de prueba: clave aleatoria por ejecución y sesión ya emitida para el usuario de test
+        self.user_id = "test_user"
+        self.jwt_secret = secrets.token_hex(32)
+        self.session = make_test_session(self.user_id, self.jwt_secret)
+        self.token = self.session["token"]
+        self.auth_headers = {"Authorization": f"Bearer {self.token}"}
+
     def start(self):
         env = os.environ.copy()
         env["AGENDA_DB"] = self.temp_db
         env["DATABASE_PATH"] = self.temp_db
-        env["DEFAULT_USER_ID"] = "test_user"
+        env["JWT_SECRET"] = self.jwt_secret
+        env["OWNER_USER_ID"] = self.user_id
+        env["GOOGLE_CLIENT_ID"] = "test-client.apps.googleusercontent.com"
+        env["ALLOWED_EMAIL"] = "test@example.com"
         env["PYTHONPATH"] = BACKEND_DIR
 
         self.proc = subprocess.Popen(
@@ -63,6 +115,9 @@ class TestServerRunner:
             raise RuntimeError(f"Test server failed to start on {self.url} within timeout.")
 
         return self
+
+    def launch_browser(self, playwright, **launch_kwargs):
+        return launch_authed_browser(playwright, self.session, **launch_kwargs)
 
     def stop(self):
         if self.proc:

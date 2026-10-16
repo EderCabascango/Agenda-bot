@@ -24,6 +24,7 @@ temp_dir = tempfile.mkdtemp()
 test_db_path = os.path.join(temp_dir, "integration_agenda.db")
 os.environ["AGENDA_DB"] = test_db_path
 os.environ["DATABASE_PATH"] = test_db_path
+os.environ.setdefault("JWT_SECRET", "test-secret-" + "x" * 32)
 
 assert "tmp" in test_db_path.lower() or "temp" in test_db_path.lower(), f"ERROR CRÍTICO: AGENDA_DB ({test_db_path}) debe ser temporal."
 assert os.path.abspath(test_db_path) != os.path.abspath("backend/agenda.db"), "ERROR: No se puede ejecutar tests contra la BD real."
@@ -31,10 +32,11 @@ assert os.path.abspath(test_db_path) != os.path.abspath("backend/agenda.db"), "E
 from fastapi.testclient import TestClient
 import db
 import main
+from auth import issue_session
 
 client = TestClient(main.app)
 USER = "integration_user"
-HEADERS = {"X-User-Id": USER}
+HEADERS = {"Authorization": f"Bearer {issue_session(USER)['token']}"}
 
 
 def run_integration_test():

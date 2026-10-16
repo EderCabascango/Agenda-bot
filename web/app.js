@@ -150,6 +150,40 @@
     safeStorageSet(SETTINGS_KEY, s);
   }
 
+  // ── Sesión (Google Sign-In + JWT del backend) ──
+  // Se guarda en el dispositivo para que la app siga funcionando offline mientras no caduque.
+  const SESSION_KEY = 'diary_session';
+  function loadSession() {
+    return safeStorageGet(SESSION_KEY, null);
+  }
+  function saveSession(session) {
+    safeStorageSet(SESSION_KEY, session);
+  }
+  function clearSession() {
+    try { localStorage.removeItem(SESSION_KEY); } catch (e) { /* almacenamiento no disponible */ }
+  }
+  function hasValidSession() {
+    const s = loadSession();
+    if (!s || !s.token || !s.expires_at) return false;
+    return new Date(s.expires_at).getTime() > Date.now();
+  }
+  function getProfile() {
+    const s = loadSession();
+    return (s && s.profile) || {};
+  }
+  function setProfile(profile) {
+    const s = loadSession();
+    if (!s) return;
+    s.profile = profile || {};
+    saveSession(s);
+  }
+  function profileInitials(p) {
+    const first = (p.first_name || '').trim();
+    const last = (p.last_name || '').trim();
+    const initials = (first.charAt(0) + last.charAt(0)).toUpperCase();
+    return initials || (p.email || '?').charAt(0).toUpperCase();
+  }
+
   function getSyncQueue() {
     return safeStorageGet(SYNC_QUEUE_KEY, []);
   }
@@ -308,139 +342,15 @@
     if (el('stat-high'))      el('stat-high').textContent      = high;
     if (el('stat-hours'))     el('stat-hours').textContent     = hours;
 
-    // ── Greeting Header ──
-    const userName = settings.username || 'Wladimir';
-    const greetEl = $('#greeting-text');
-    if (greetEl) greetEl.textContent = `¡Hola, ${userName}!`;
-
-    // Calculate total study minutes & subjects count this week
-    const activeSubjects = subjects.filter(s => !s.archived && !s.deleted_at);
-    let weeklyStudyMin = 0;
-    focusSessions.forEach(s => {
-      if (s && !s.deleted_at && s.created_at) {
-        const dt = new Date(s.created_at);
-        const now = new Date();
-        const diffDays = Math.abs(now - dt) / (1000 * 60 * 60 * 24);
-        if (diffDays <= 7) weeklyStudyMin += (s.duration_minutes || 0);
-      }
-    });
-
+    // ── Greeting Header (perfil + resumen del día; las materias viven en Estudio) ──
+    renderProfileUI();
     const subtextEl = $('#greeting-subtext');
-    if (subtextEl) subtextEl.textContent = `Tienes ${activeSubjects.length || 4} materias y ${weeklyStudyMin || 171} min de estudio registrados esta semana`;
-
-    if (el('db-summary-active-subjects')) el('db-summary-active-subjects').textContent = activeSubjects.length;
-    if (el('db-summary-weekly-hours')) el('db-summary-weekly-hours').textContent = (weeklyStudyMin / 60).toFixed(1) + 'h';
-
-    const topbarUser = $('#topbar-username');
-    if (topbarUser) topbarUser.textContent = userName + ' C.';
-
-    // ── Mis Materias Cards Render ──
-    const container = $('#db-subjects-container');
-    if (container) {
-      // Ensure seed default subjects if none present
-      let listToRender = activeSubjects;
-      if (listToRender.length === 0) {
-        listToRender = [
-          {
-            id: 'demo-1',
-            name: 'Álgebra Lineal y Matrices',
-            category_tag: 'Matemáticas',
-            weekly_goal_hours: 5.0,
-            subtopics: 'Espacios vectoriales, Transf. Lineales, Valores Propios.',
-            current_hours: 4.75,
-            progress_percent: 95,
-            theme: 'amber'
-          },
-          {
-            id: 'demo-2',
-            name: 'Modelos Supervisados & Redes',
-            category_tag: 'Machine Learning',
-            weekly_goal_hours: 4.0,
-            subtopics: 'Regresión Logística, Árboles, PyTorch Base.',
-            current_hours: 2.5,
-            progress_percent: 62,
-            theme: 'light'
-          },
-          {
-            id: 'demo-3',
-            name: 'Optimización SQL & Índices B-Tree',
-            category_tag: 'Bases de Datos',
-            weekly_goal_hours: 3.0,
-            subtopics: 'Transacciones ACID, WAL, Locks SQLite.',
-            current_hours: 3.0,
-            progress_percent: 100,
-            theme: 'dark'
-          }
-        ];
-      }
-
-      const cardThemes = ['amber', 'light', 'dark'];
-      container.innerHTML = listToRender.map((sub, idx) => {
-        const theme = sub.theme || cardThemes[idx % 3];
-        const goal = sub.weekly_goal_hours ? sub.weekly_goal_hours.toFixed(1) : '5.0';
-        
-        let currHours = sub.current_hours !== undefined ? sub.current_hours : 0;
-        let pct = sub.progress_percent !== undefined ? sub.progress_percent : 0;
-        
-        if (sub.id && !sub.id.startsWith('demo-')) {
-          const subTopics = topics.filter(t => t.subject_id === sub.id && !t.deleted_at);
-          const totalT = subTopics.length;
-          const masteredT = subTopics.filter(t => t.status === 'mastered').length;
-          pct = totalT > 0 ? Math.round((masteredT / totalT) * 100) : 0;
-          currHours = totalT > 0 ? ((pct / 100) * (sub.weekly_goal_hours || 5)).toFixed(1) : '0.0';
-          const subtopicsList = subTopics.map(t => t.title);
-          sub.subtopicsText = subtopicsList.length > 0 ? subtopicsList.join(', ') : 'Sin subtemas definidos.';
-        }
-
-        const subtopicsText = sub.subtopicsText || sub.subtopics || 'Sin subtemas definidos.';
-        const tag = sub.category_tag || sub.name.split(' ')[0];
-
-        return `
-          <div class="db-subject-card db-subject-card--${theme}" data-subject-id="${sub.id}">
-            <div class="card-top-row">
-              <span class="card-badge">${escHTML(tag)}</span>
-              <span class="card-goal">Meta: ${goal}h / sem</span>
-            </div>
-            <h3 class="card-title">${escHTML(sub.name)}</h3>
-            <p class="card-subtopics">Subtemas: ${escHTML(subtopicsText)}</p>
-            <div class="card-progress-section">
-              <div class="card-progress-meta">
-                <span>Progreso Semanal</span>
-                <span>${currHours} h (${pct}%)</span>
-              </div>
-              <div class="card-progress-track">
-                <div class="card-progress-fill" style="width: ${pct}%;"></div>
-              </div>
-            </div>
-            <div class="card-action-bar" style="margin-top: 14px; display: flex; gap: 8px;">
-              <button class="btn-card-study" data-study-subject="${escHTML(sub.name)}" style="flex:1; padding:8px 14px; border-radius:var(--radius-pill); font-size:0.8rem; font-weight:700; display:inline-flex; align-items:center; justify-content:center; gap:4px; border:none; cursor:pointer; background:var(--bg-primary); color:var(--text-primary);">
-                <span class="material-icons-round" style="font-size:16px;">timer</span> Estudiar
-              </button>
-              <button class="btn-card-detail" data-detail-subject="${sub.id}" style="padding:8px 14px; border-radius:var(--radius-pill); font-size:0.8rem; font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:4px; border:1px solid currentColor; background:transparent; cursor:pointer;">
-                <span class="material-icons-round" style="font-size:16px;">format_list_bulleted</span> Temas
-              </button>
-            </div>
-          </div>
-        `;
-      }).join('');
-
-      container.querySelectorAll('[data-study-subject]').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const subName = btn.dataset.studySubject;
-          const match = subjects.find(s => s.name === subName);
-          openFocusModal(match ? { subject_id: match.id, title: `Estudio: ${subName}` } : null);
-        });
-      });
-
-      container.querySelectorAll('[data-detail-subject]').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const sId = btn.dataset.detailSubject;
-          if (sId && !sId.startsWith('demo-')) openSubjectDetailModal(sId);
-          else switchView('study');
-        });
-      });
+    if (subtextEl) {
+      subtextEl.textContent = todayActs.length === 0
+        ? 'No tienes actividades programadas para hoy'
+        : pending === 0
+          ? `Completaste las ${todayActs.length} actividades de hoy`
+          : `Tienes ${pending} de ${todayActs.length} actividades pendientes hoy`;
     }
 
     // ── Agenda de Hoy Side Panel ──
@@ -1579,14 +1489,7 @@
 
   // ── Settings ──
   function initSettings() {
-    const usernameInput = $('#setting-username');
-    if (usernameInput) {
-      usernameInput.value = settings.username || '';
-      usernameInput.addEventListener('input', () => {
-        settings.username = usernameInput.value.trim();
-        saveSettings(settings);
-      });
-    }
+    initProfileSettings();
 
     const notifToggle = $('#setting-notifications');
     if (notifToggle) {
@@ -1644,9 +1547,8 @@
       });
     }
 
-    const bkUrl = $('#setting-backend-url'), bkTok = $('#setting-backend-token');
+    const bkUrl = $('#setting-backend-url');
     if (bkUrl) bkUrl.value = settings.backendUrl || '';
-    if (bkTok) bkTok.value = settings.backendToken || '';
 
     const n8nUrlInput = $('#setting-n8n-url');
     if (n8nUrlInput) {
@@ -1679,9 +1581,8 @@
         if (n8nUrlInput) {
           settings.n8nUrl = n8nUrlInput.value.trim();
         }
-        const bu = $('#setting-backend-url'), bt = $('#setting-backend-token');
+        const bu = $('#setting-backend-url');
         if (bu) settings.backendUrl = bu.value.trim();
-        if (bt) settings.backendToken = bt.value.trim();
         saveSettings(settings);
         const st = $('#settings-save-status');
         if (st) {
@@ -4697,13 +4598,15 @@ SIEMPRE devuelve un JSON válido.
   function backendHeaders() {
     settings = loadSettings();
     const h = { 'Content-Type': 'application/json' };
-    if (settings.backendToken) h['X-App-Token'] = settings.backendToken;
+    const session = loadSession();
+    if (session && session.token) h['Authorization'] = `Bearer ${session.token}`;
     return h;
   }
 
   async function backendPost(path, body) {
     const base = getBackendBaseUrl();
     const res = await fetch(base + path, { method: 'POST', headers: backendHeaders(), body: JSON.stringify(body) });
+    if (res.status === 401) handleUnauthorized();
     if (!res.ok) {
       let detail = '';
       try { detail = (await res.json()).detail; } catch (e) { detail = await res.text(); }
@@ -4749,6 +4652,7 @@ SIEMPRE devuelve un JSON válido.
         headers: backendHeaders(),
         body: JSON.stringify({ collections: collectionsPayload, since: lastSync })
       });
+      if (res.status === 401) { handleUnauthorized(); return false; }
       if (!res.ok) return false;
       const data = await res.json();
 
@@ -5129,9 +5033,255 @@ SIEMPRE devuelve un JSON válido.
     }
   }
 
+  // ── Login con Google ──
+  const GOOGLE_GSI_SRC = 'https://accounts.google.com/gsi/client';
+
+  function loadGoogleScript() {
+    if (window.google && window.google.accounts && window.google.accounts.id) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const existing = document.querySelector(`script[src="${GOOGLE_GSI_SRC}"]`);
+      const script = existing || document.createElement('script');
+      script.addEventListener('load', () => resolve());
+      script.addEventListener('error', () => reject(new Error('No se pudo cargar Google Sign-In.')));
+      if (!existing) {
+        script.src = GOOGLE_GSI_SRC;
+        script.async = true;
+        document.head.appendChild(script);
+      }
+    });
+  }
+
+  function setLoginError(msg) {
+    const el = $('#login-error');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.hidden = !msg;
+  }
+
+  async function showLoginScreen() {
+    const appWrapper = $('#app-wrapper');
+    if (appWrapper) appWrapper.style.display = 'none';
+    const loginScreen = $('#login-screen');
+    if (!loginScreen) return;
+    document.body.classList.add('is-logged-out');
+    loginScreen.hidden = false;
+    setLoginError('');
+
+    const urlInput = $('#login-backend-url');
+    if (urlInput && !urlInput.value) urlInput.value = loadSettings().backendUrl || '';
+    const retry = $('#login-retry');
+    if (retry && !retry.dataset.bound) {
+      retry.dataset.bound = '1';
+      retry.addEventListener('click', () => {
+        settings = loadSettings();
+        settings.backendUrl = (urlInput?.value || '').trim();
+        saveSettings(settings);
+        showLoginScreen();
+      });
+    }
+
+    const slot = $('#google-signin-btn');
+    let clientId = '';
+    try {
+      const res = await fetch(getBackendBaseUrl() + '/auth/config');
+      if (!res.ok) throw new Error(`(${res.status})`);
+      clientId = (await res.json()).google_client_id;
+    } catch (err) {
+      setLoginError(`No se pudo conectar con el servidor ${getBackendBaseUrl()}. Revisa la conexión o la dirección del servidor.`);
+      return;
+    }
+    if (!clientId) {
+      setLoginError('El servidor aún no tiene configurado el inicio de sesión con Google (GOOGLE_CLIENT_ID).');
+      return;
+    }
+    try {
+      await loadGoogleScript();
+      google.accounts.id.initialize({ client_id: clientId, callback: onGoogleCredential, auto_select: true });
+      if (slot) {
+        slot.innerHTML = '';
+        google.accounts.id.renderButton(slot, {
+          theme: document.documentElement.getAttribute('data-theme') === 'dark' ? 'filled_black' : 'outline',
+          size: 'large', shape: 'pill', text: 'continue_with', logo_alignment: 'left', width: 280
+        });
+      }
+    } catch (err) {
+      setLoginError('No se pudo cargar el botón de Google. Revisa tu conexión a internet.');
+    }
+  }
+
+  async function onGoogleCredential(response) {
+    setLoginError('');
+    try {
+      const res = await fetch(getBackendBaseUrl() + '/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: response.credential })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
+      saveSession({ token: data.token, expires_at: data.expires_at, profile: data.profile || {} });
+      startApp();
+    } catch (err) {
+      setLoginError(err.message);
+    }
+  }
+
+  function handleUnauthorized() {
+    // La sesión caducó o fue revocada: se pide login de nuevo sin tocar los datos locales ni la cola de sincronización.
+    clearSession();
+    if (appStarted) {
+      showToast('Tu sesión ha caducado. Vuelve a iniciar sesión.', 'lock', 'var(--accent-amber)');
+      setTimeout(() => window.location.reload(), 1200);
+    }
+  }
+
+  function logout() {
+    clearSession();
+    try { window.google?.accounts?.id?.disableAutoSelect(); } catch (e) { /* GSI no cargado */ }
+    window.location.reload();
+  }
+
+  // ── Perfil ──
+  async function backendRequest(method, path, body) {
+    const res = await fetch(getBackendBaseUrl() + path, {
+      method,
+      headers: backendHeaders(),
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    if (res.status === 401) handleUnauthorized();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
+    return data;
+  }
+
+  function renderProfileUI() {
+    const p = getProfile();
+    const first = (p.first_name || '').trim();
+    const fullName = [first, (p.last_name || '').trim()].filter(Boolean).join(' ');
+
+    const greetEl = $('#greeting-text');
+    if (greetEl) greetEl.textContent = first ? `¡Hola, ${first}!` : '¡Hola!';
+    const nameEl = $('#topbar-username');
+    if (nameEl) nameEl.textContent = fullName || p.email || '';
+    const roleEl = $('#topbar-role');
+    if (roleEl) {
+      roleEl.textContent = p.role || '';
+      roleEl.hidden = !p.role;
+    }
+
+    $$('.js-profile-avatar').forEach(avatar => {
+      avatar.textContent = '';
+      if (p.photo) {
+        const img = document.createElement('img');
+        img.src = p.photo;
+        img.alt = fullName ? `Foto de ${fullName}` : 'Foto de perfil';
+        img.referrerPolicy = 'no-referrer';
+        img.addEventListener('error', () => { avatar.textContent = profileInitials(p); });
+        avatar.appendChild(img);
+      } else {
+        avatar.textContent = profileInitials(p);
+      }
+    });
+  }
+
+  async function refreshProfileFromServer() {
+    try {
+      const profile = await backendRequest('GET', '/profile');
+      setProfile(profile);
+      renderProfileUI();
+      fillProfileForm();
+    } catch (e) {
+      // Offline o servidor caído: se usa el perfil guardado en el dispositivo.
+    }
+  }
+
+  function fillProfileForm() {
+    const p = getProfile();
+    const set = (id, v) => { const el = $(id); if (el) el.value = v || ''; };
+    set('#profile-first-name', p.first_name);
+    set('#profile-last-name', p.last_name);
+    set('#profile-role', p.role);
+    const email = $('#profile-email');
+    if (email) email.textContent = p.email || '—';
+  }
+
+  // Recorta al centro y comprime la foto a 256x256 JPEG para que pese poco al sincronizar.
+  function compressProfilePhoto(file) {
+    return new Promise((resolve, reject) => {
+      if (!file || !file.type.startsWith('image/')) return reject(new Error('Selecciona un archivo de imagen.'));
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('No se pudo leer la imagen.'));
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('La imagen no es válida.'));
+        img.onload = () => {
+          const size = 256;
+          const side = Math.min(img.width, img.height);
+          const canvas = document.createElement('canvas');
+          canvas.width = size;
+          canvas.height = size;
+          canvas.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, size, size);
+          resolve(canvas.toDataURL('image/jpeg', 0.85));
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function saveProfileChanges(changes, okMessage) {
+    try {
+      const profile = await backendRequest('PUT', '/profile', changes);
+      setProfile(profile);
+      renderProfileUI();
+      fillProfileForm();
+      showToast(okMessage, 'check_circle', 'var(--accent-amber)');
+    } catch (err) {
+      showToast(`No se pudo guardar el perfil: ${err.message}`, 'error', 'var(--accent-amber)');
+    }
+  }
+
+  function initProfileSettings() {
+    fillProfileForm();
+    $('#btn-save-profile')?.addEventListener('click', () => {
+      saveProfileChanges({
+        first_name: $('#profile-first-name')?.value.trim() || '',
+        last_name: $('#profile-last-name')?.value.trim() || '',
+        role: $('#profile-role')?.value.trim() || ''
+      }, 'Perfil guardado');
+    });
+    $('#profile-photo-input')?.addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      try {
+        const photo = await compressProfilePhoto(file);
+        await saveProfileChanges({ photo }, 'Foto actualizada');
+      } catch (err) {
+        showToast(err.message, 'error', 'var(--accent-amber)');
+      }
+    });
+    $('#btn-remove-photo')?.addEventListener('click', () => saveProfileChanges({ photo: '' }, 'Foto eliminada'));
+    $('#btn-logout')?.addEventListener('click', logout);
+  }
+
   // ── Initialize ──
   function init() {
     initTheme();
+    if (hasValidSession()) {
+      startApp();
+    } else {
+      showLoginScreen();
+    }
+  }
+
+  let appStarted = false;
+  function startApp() {
+    if (appStarted) return;
+    appStarted = true;
+    document.body.classList.remove('is-logged-out');
+    const loginScreen = $('#login-screen');
+    if (loginScreen) loginScreen.hidden = true;
     const appWrapper = $('#app-wrapper');
     if (appWrapper) appWrapper.style.display = '';
 
@@ -5501,10 +5651,8 @@ SIEMPRE devuelve un JSON válido.
     // Settings
     initSettings();
 
-    // User avatar initial
-    const name = settings.username || 'U';
-    const avatar = $('#user-avatar');
-    if (avatar) avatar.textContent = name.charAt(0).toUpperCase();
+    renderProfileUI();
+    refreshProfileFromServer();
 
     // Diario nav buttons
     $('#diario-prev')?.addEventListener('click', () => {

@@ -9,7 +9,7 @@ def run():
     server = TestServerRunner().start()
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = server.launch_browser(p)
             context = browser.new_context()
             page = context.new_page()
             

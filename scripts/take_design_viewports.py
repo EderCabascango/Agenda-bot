@@ -17,7 +17,7 @@ def run():
     
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = server.launch_browser(p)
             
             for vp_name, vp_size in viewports:
                 for theme in themes:

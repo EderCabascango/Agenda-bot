@@ -1,7 +1,7 @@
 # 📜 Biblia de Lineamientos y Hoja de Ruta Oficial: Mi Diario
 
 **Proyecto:** Mi Diario – Agenda Inteligente  
-**Fecha de actualización:** 9 de Octubre, 2026  
+**Fecha de actualización:** 16 de Octubre, 2026  
 **Estado del Sistema:** Desarrollo Congelado para Auditoría • 107 registros resguardados • 100% Pruebas Pasadas (`npm test`)
 
 ---
@@ -26,6 +26,8 @@ La aplicación **Mi Diario** es una agenda personal e inteligente orientada a la
 - **Fase C**: Temporizador de enfoque con 8 métodos, candado multi-pestaña y recuperación tras F5.
 - **Fase D**: Estadísticas y métricas (racha, meta diaria, matriz día × hora).
 - **Fase E**: Notas de aprendizaje post-sesión, exportación Markdown y tareas de repaso.
+- **Rediseño Visual Taskly**: aprobado por el usuario el 16-10-2026 (paleta negro, blanco y amarillo ámbar).
+- **Login y Perfil** (adelantado desde Seguridad): inicio de sesión con Google para un único dueño, sesión JWT y perfil editable.
 
 ---
 
@@ -38,21 +40,26 @@ El desarrollo seguirá **únicamente** el siguiente orden secuencial:
    - Eliminación de "Materia Desconocida" y ajuste de comparaciones de delta.
    - Barras de 7/30 días, mapa de calor del ciclo, editar sesión, línea Hoy en timeline.
    - Botón de enfoque configurable por tarea (`allow_focus` booleano explícito por defecto activado con regla de sugerencia por etiquetas).
-   - Restauración de tarjeta resumen de "Mis Materias" en el Dashboard.
+   - ~~Restauración de tarjeta resumen de "Mis Materias" en el Dashboard.~~ Revertido el 16-10-2026 a petición del usuario: las materias **no** aparecen en la pantalla de inicio, solo en Estudio.
 2. **Fase E (Notas de Aprendizaje)**:
    - Ajuste completo del modal post-sesión de enfoque (inclusión de ratings 1-5 de comprensión y concentración en el temporizador).
-3. **Rediseño Visual**:
-   - Aprobación previa de maquetas basadas en la referencia crema/negro/pastel enviada por el usuario.
+3. **Rediseño Visual** ✅:
+   - Aprobada la línea **Taskly** (`design/mockup.html`): negro, blanco y amarillo ámbar. Sustituye a la referencia crema/negro/pastel.
+   - Pendiente menor: llevar a la paleta los elementos que se salen (aviso rojo de vencidas, check verde, degradado verde del asistente) y corregir en móvil los botones flotantes superpuestos y el borde de la barra lateral.
 4. **Fase F (Extras)**:
    - Sonidos ambientales, modo no molestar, algoritmo de repaso espaciado (1, 3, 7, 21 días).
-5. **Seguridad (Antes de Desplegar)**:
-   - Autenticación que falla cerrado, rate limit, tokens JWT y confirmaciones de acciones críticas.
+5. **Seguridad (Antes de Desplegar)** — adelantada parcialmente a petición del usuario:
+   - ✅ Autenticación que falla cerrado: Google Sign-In → `POST /auth/google` verifica el ID token y exige `ALLOWED_EMAIL` → el backend emite su propio JWT (30 días). Sin `JWT_SECRET`, `GOOGLE_CLIENT_ID` o `ALLOWED_EMAIL` la API no se abre.
+   - ✅ Rate limit en el login (10 intentos/minuto por IP) y CORS sin comodín.
+   - ✅ Perfil (nombre, apellido, rol, foto) en `GET/PUT /profile`. Con Google no hay contraseña propia: se ofrece "Cerrar sesión" y el enlace a la seguridad de la cuenta de Google.
+   - ⏳ Login nativo en Android (Capacitor): Google bloquea el login dentro de WebViews; requiere plugin nativo y Client ID Android.
+   - ⏳ Confirmaciones de acciones críticas.
 
 ---
 
 ## ⛔ 4. Ideas Futuras, No Aprobadas (Bloqueadas)
 
-Las siguientes funcionalidades quedan **completamente congeladas y bloqueadas** hasta que exista autenticación que falla cerrado y aprobación explícita:
+Las siguientes funcionalidades quedan **completamente congeladas y bloqueadas** hasta su aprobación explícita (la autenticación que falla cerrado ya existe desde el 16-10-2026):
 
 - **Fase G (Segundo Cerebro)**:
   - Notas con Wikilinks (`[[Tema]]`).

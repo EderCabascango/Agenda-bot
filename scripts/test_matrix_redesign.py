@@ -35,11 +35,12 @@ def is_allowed_color(r, g, b, a):
 def run():
     server = TestServerRunner().start()
     try:
-        _run(server.url)
+        _run(server)
     finally:
         server.stop()
 
-def _run(base_url):
+def _run(server):
+    base_url = server.url
     print("\n============================================================")
     print("VERIFICACIÓN DE LA MATRIZ DEL CICLO MENSUAL (DASHBOARD)")
     print("============================================================\n")
@@ -47,7 +48,7 @@ def _run(base_url):
     os.makedirs('screenshots', exist_ok=True)
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = server.launch_browser(p)
         
         # ---------------------------------------------------------
         # 1. TEST DE PALETA DE COLORES PERMITIDA (CLARO Y OSCURO)

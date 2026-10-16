@@ -8,7 +8,7 @@ def run():
     
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = server.launch_browser(p)
             page = browser.new_page()
 
             dialogs_triggered = []

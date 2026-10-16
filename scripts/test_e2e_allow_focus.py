@@ -9,7 +9,7 @@ def run():
     
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = server.launch_browser(p)
             
             # Context A & Context B
             ctxA = browser.new_context()

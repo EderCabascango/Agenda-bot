@@ -8,7 +8,7 @@ def run():
     server = TestServerRunner().start()
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = server.launch_browser(p)
             
             # 1280px Desktop
             page1280 = browser.new_page(viewport={"width": 1280, "height": 800})

@@ -8,7 +8,7 @@ def run():
     
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = server.launch_browser(p)
             page = browser.new_page()
             page.goto(f"{server.url}/?e2e=1")
             page.wait_for_load_state("networkidle")

@@ -216,6 +216,15 @@ def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_learning_notes_user_session ON learning_notes (user_id, session_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_learning_notes_user_activity ON learning_notes (user_id, activity_id)")
 
+    # 6. Perfil del usuario (tabla nueva y aditiva: no toca datos existentes)
+    if "profiles" not in existing_tables:
+        conn.execute(
+            """CREATE TABLE profiles (
+                user_id TEXT PRIMARY KEY, email TEXT DEFAULT '', first_name TEXT DEFAULT '',
+                last_name TEXT DEFAULT '', role TEXT DEFAULT '', photo TEXT DEFAULT '',
+                updated_at TEXT DEFAULT '')"""
+        )
+
     # Migración de created_at para tablas existentes
     for tbl in ["subjects", "topics", "focus_sessions", "learning_notes"]:
         if tbl in existing_tables:
@@ -908,3 +917,52 @@ def sync_collections(
         "resync_required": resync_required,
         "results": results
     }
+
+
+PROFILE_FIELDS = {"first_name": 80, "last_name": 80, "role": 80, "photo": 300_000}
+
+
+def get_profile(user_id: str) -> dict:
+    with _conn() as conn:
+        r = conn.execute("SELECT * FROM profiles WHERE user_id=?", (user_id,)).fetchone()
+    if not r:
+        return {"email": "", "first_name": "", "last_name": "", "role": "", "photo": "", "updated_at": ""}
+    return {k: r[k] for k in ("email", "first_name", "last_name", "role", "photo", "updated_at")}
+
+
+def update_profile(user_id: str, changes: dict) -> dict:
+    """Actualiza solo los campos permitidos del perfil, validando longitud y formato de la foto."""
+    clean = {}
+    for field, max_len in PROFILE_FIELDS.items():
+        if field not in changes or changes[field] is None:
+            continue
+        value = str(changes[field]).strip()
+        if len(value) > max_len:
+            raise ValueError(f"El campo '{field}' supera el máximo permitido.")
+        if field == "photo" and value and not value.startswith(("data:image/", "https://lh3.googleusercontent.com/")):
+            raise ValueError("La foto debe ser una imagen en formato data URL o la foto de Google.")
+        clean[field] = value
+    with _conn() as conn:
+        conn.execute("INSERT OR IGNORE INTO profiles (user_id) VALUES (?)", (user_id,))
+        if clean:
+            sets = ", ".join(f"{k}=?" for k in clean)
+            conn.execute(f"UPDATE profiles SET {sets}, updated_at=? WHERE user_id=?",
+                         (*clean.values(), utc_now_iso(), user_id))
+        conn.commit()
+    return get_profile(user_id)
+
+
+def seed_profile_from_google(user_id: str, email: str, first_name: str, last_name: str, photo_url: str) -> dict:
+    """En cada login guarda el email y rellena nombre y foto solo si aún están vacíos."""
+    with _conn() as conn:
+        conn.execute("INSERT OR IGNORE INTO profiles (user_id) VALUES (?)", (user_id,))
+        conn.execute(
+            """UPDATE profiles SET email=?,
+                   first_name=CASE WHEN first_name='' THEN ? ELSE first_name END,
+                   last_name=CASE WHEN last_name='' THEN ? ELSE last_name END,
+                   photo=CASE WHEN photo='' THEN ? ELSE photo END,
+                   updated_at=? WHERE user_id=?""",
+            (email, first_name[:80], last_name[:80], photo_url[:2000], utc_now_iso(), user_id),
+        )
+        conn.commit()
+    return get_profile(user_id)

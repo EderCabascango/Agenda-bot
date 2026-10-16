@@ -38,6 +38,8 @@ E2E_TEST_DB = os.path.join(E2E_TEMP_DIR, "test_e2e_agenda.db")
 os.environ["AGENDA_DB"] = E2E_TEST_DB
 os.environ["DATABASE_PATH"] = E2E_TEST_DB
 os.environ["DEFAULT_USER_ID"] = "test_user"
+os.environ["JWT_SECRET"] = __import__("secrets").token_hex(32)
+os.environ["OWNER_USER_ID"] = "test_user"
 
 assert "tmp" in E2E_TEST_DB.lower() or "temp" in E2E_TEST_DB.lower(), f"ERROR CRÍTICO: AGENDA_DB ({E2E_TEST_DB}) debe ser temporal."
 assert os.path.abspath(E2E_TEST_DB) != os.path.abspath(os.path.join(BACKEND_DIR, "agenda.db")), "ERROR: El test E2E no puede usar la base de datos real."
@@ -46,6 +48,7 @@ import db
 import uvicorn
 from main import app
 from playwright.sync_api import sync_playwright
+from test_server import launch_authed_browser, make_test_session
 
 
 def get_free_port():
@@ -108,7 +111,7 @@ def test_playwright_e2e_full_sync():
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = launch_authed_browser(p, make_test_session("test_user", os.environ["JWT_SECRET"]))
 
             # Context A & Page A
             context_a = browser.new_context()

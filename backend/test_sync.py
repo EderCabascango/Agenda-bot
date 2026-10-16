@@ -24,15 +24,17 @@ import pytest
 temp_dir = tempfile.mkdtemp()
 test_db_path = os.path.join(temp_dir, "test_sync.db")
 os.environ["AGENDA_DB"] = test_db_path
+os.environ.setdefault("JWT_SECRET", "test-secret-" + "x" * 32)
 
 from fastapi.testclient import TestClient  # noqa: E402
 import db  # noqa: E402
 import main  # noqa: E402
 import tools  # noqa: E402
+from auth import issue_session  # noqa: E402
 
 client = TestClient(main.app)
 USER = "test_user_sync"
-AUTH_HEADERS = {"X-User-Id": USER}
+AUTH_HEADERS = {"Authorization": f"Bearer {issue_session(USER)['token']}"}
 RUNNABLE_CONFIG = {"configurable": {"user_id": USER, "thread_id": f"{USER}:test"}}
 
 
@@ -861,7 +863,7 @@ def test_orphan_tolerance_cross_collection():
 
 def test_multi_collection_sync_endpoint_full():
     """(Fase A2) Verifica endpoint unificado POST /sync operando atómicamente con las 5 colecciones."""
-    user_headers = {"Authorization": "Bearer test-token-123", "X-User-Id": "user_endpoint_multicoll"}
+    user_headers = {"Authorization": f"Bearer {issue_session('user_endpoint_multicoll')['token']}"}
 
     payload = {
         "since": None,

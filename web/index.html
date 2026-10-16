@@ -3,11 +3,32 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:8000;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; font-src 'self' data:; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client; frame-src https://accounts.google.com/gsi/; img-src 'self' data: https://lh3.googleusercontent.com; connect-src 'self' http://127.0.0.1:8000 https://accounts.google.com/gsi/;" />
   <link rel="stylesheet" href="fonts/material-icons-round.css" />
-  <link rel="stylesheet" href="style.css?v=7" />
+  <link rel="stylesheet" href="style.css?v=8" />
 </head>
 <body>
+
+  <!-- ========== LOGIN (Google Sign-In) ========== -->
+  <div class="login-screen" id="login-screen" hidden>
+    <div class="login-card">
+      <div class="logo">
+        <div class="logo-box">t.</div>
+        <span class="logo-text">Mi Diario</span>
+      </div>
+      <h1 class="login-title">Bienvenido de nuevo</h1>
+      <p class="login-sub">Inicia sesión con tu cuenta de Google para sincronizar tu agenda.</p>
+      <div class="login-google-slot" id="google-signin-btn"></div>
+      <p class="login-error" id="login-error" role="alert" hidden></p>
+      <details class="login-server">
+        <summary>Servidor</summary>
+        <div class="login-server-row">
+          <input type="url" class="setting-input" id="login-backend-url" placeholder="http://127.0.0.1:8000" aria-label="Dirección del servidor" />
+          <button type="button" class="btn-outline" id="login-retry">Reintentar</button>
+        </div>
+      </details>
+    </div>
+  </div>
 
   <!-- ========== MAIN APP ========== -->
   <div class="app-wrapper" id="app-wrapper">
@@ -59,8 +80,8 @@
         <button class="menu-toggle material-icons-round" id="menu-toggle">menu</button>
 
         <div class="topbar-greeting">
-          <h2 class="topbar-greeting-title" id="greeting-text">¡Hola, Wladimir!</h2>
-          <p class="topbar-greeting-sub" id="greeting-subtext">Tienes 4 materias y 171 min de estudio registrados esta semana</p>
+          <h2 class="topbar-greeting-title" id="greeting-text">¡Hola!</h2>
+          <p class="topbar-greeting-sub" id="greeting-subtext"></p>
         </div>
 
         <div class="topbar-actions">
@@ -90,10 +111,10 @@
 
           <!-- User Profile badge -->
           <div class="topbar-user-badge" id="topbar-user-profile">
-            <div class="user-avatar-circle" id="user-avatar">WC</div>
+            <div class="user-avatar-circle js-profile-avatar" id="user-avatar" aria-hidden="true"></div>
             <div class="user-meta">
-              <span class="user-name" id="topbar-username">Wladimir C.</span>
-              <span class="user-role">Estudiante</span>
+              <span class="user-name" id="topbar-username"></span>
+              <span class="user-role" id="topbar-role" hidden></span>
             </div>
           </div>
         </div>
@@ -162,27 +183,6 @@
                   <span class="db-panel-sub" id="db-habits-sub"></span>
                 </div>
                 <div id="db-habits-list" class="db-habits-list"></div>
-              </div>
-
-              <!-- Tarjeta Resumen: Mis Materias -->
-              <div class="db-panel" id="db-subjects-summary-card">
-                <div class="db-panel-header" style="display:flex; justify-content:space-between; align-items:center;">
-                  <div style="display:flex; align-items:center; gap:8px;">
-                    <span class="material-icons-round" style="color:var(--accent-purple);">menu_book</span>
-                    <h3 style="margin:0;">Mis Materias</h3>
-                  </div>
-                  <button type="button" class="btn-text" onclick="switchTab('study')" style="font-size:0.78rem; font-weight:700; color:var(--accent-primary); cursor:pointer; background:none; border:none;">Ver todas →</button>
-                </div>
-                <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 4px 4px 4px; flex-wrap:wrap;">
-                  <div>
-                    <span style="font-size:1.4rem; font-weight:800; color:var(--text-primary);" id="db-summary-active-subjects">0</span>
-                    <span style="font-size:0.8rem; color:var(--text-secondary); margin-left:6px;">materias activas</span>
-                  </div>
-                  <div>
-                    <span style="font-size:1.4rem; font-weight:800; color:var(--accent-teal);" id="db-summary-weekly-hours">0.0h</span>
-                    <span style="font-size:0.8rem; color:var(--text-secondary); margin-left:6px;">estudio esta semana</span>
-                  </div>
-                </div>
               </div>
 
             </div>
@@ -395,15 +395,44 @@
           <div class="settings-list">
             <div class="settings-group">
               <h4>Perfil</h4>
-              <div class="setting-item">
-                <div class="setting-info">
-                  <span class="material-icons-round">person</span>
-                  <div>
-                    <p class="setting-title">Tu nombre</p>
-                    <p class="setting-desc">Aparece en el saludo del dashboard</p>
+              <div class="profile-card">
+                <div class="profile-photo-row">
+                  <div class="profile-avatar-lg js-profile-avatar" aria-hidden="true"></div>
+                  <div class="profile-photo-actions">
+                    <label class="btn-outline profile-photo-btn">
+                      <span class="material-icons-round">photo_camera</span> Cambiar foto
+                      <input type="file" id="profile-photo-input" accept="image/*" hidden />
+                    </label>
+                    <button type="button" class="btn-text" id="btn-remove-photo">Quitar foto</button>
                   </div>
                 </div>
-                <input type="text" class="setting-input" id="setting-username" placeholder="Escribe tu nombre..." />
+                <div class="profile-fields">
+                  <label class="profile-field">
+                    <span>Nombre</span>
+                    <input type="text" class="setting-input" id="profile-first-name" maxlength="80" autocomplete="given-name" />
+                  </label>
+                  <label class="profile-field">
+                    <span>Apellido</span>
+                    <input type="text" class="setting-input" id="profile-last-name" maxlength="80" autocomplete="family-name" />
+                  </label>
+                  <label class="profile-field profile-field--wide">
+                    <span>Rol o subtítulo</span>
+                    <input type="text" class="setting-input" id="profile-role" maxlength="80" placeholder="Ej.: Estudiante" />
+                  </label>
+                </div>
+                <div class="profile-account">
+                  <div>
+                    <p class="setting-title">Cuenta de Google</p>
+                    <p class="setting-desc" id="profile-email">—</p>
+                  </div>
+                  <a class="btn-text" href="https://myaccount.google.com/security" target="_blank" rel="noopener noreferrer">Seguridad de la cuenta</a>
+                </div>
+                <div class="profile-actions">
+                  <button type="button" class="btn-outline" id="btn-logout">
+                    <span class="material-icons-round">logout</span> Cerrar sesión
+                  </button>
+                  <button type="button" class="btn-primary" id="btn-save-profile">Guardar perfil</button>
+                </div>
               </div>
             </div>
             <div class="settings-group">
@@ -533,11 +562,10 @@
                   <span class="material-icons-round">smart_toy</span>
                   <div>
                     <p class="setting-title">Agente LangGraph (backend)</p>
-                    <p class="setting-desc">URL del backend y token. Tiene prioridad sobre Groq directo y n8n.</p>
+                    <p class="setting-desc">URL del backend. La sesión de Google se usa para autenticarse. Tiene prioridad sobre Groq directo y n8n.</p>
                   </div>
                 </div>
                 <input type="text" class="setting-input" id="setting-backend-url" placeholder="http://localhost:8000" />
-                <input type="password" class="setting-input" id="setting-backend-token" placeholder="Token (APP_TOKEN, opcional)" />
               </div>
               <div class="setting-item" style="justify-content: space-between; align-items: center; gap: 12px; background: rgba(3,218,197,0.04); border-color: rgba(3,218,197,0.15);">
                 <div style="display: flex; align-items: center; gap: 8px;">
@@ -1342,6 +1370,6 @@
   <script src="focus-core.js?v=9"></script>
   <script src="timer-core.js?v=9"></script>
   <script src="stats-core.js?v=9"></script>
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

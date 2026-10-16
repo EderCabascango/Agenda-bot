@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import Depends, FastAPI, Header, HTTPException  # noqa: E402
+from fastapi import Depends, FastAPI, HTTPException, Request  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from langchain_core.messages import AIMessage, HumanMessage  # noqa: E402
@@ -15,6 +15,7 @@ from pydantic import BaseModel  # noqa: E402
 import asyncio
 from contextlib import asynccontextmanager
 import db
+from auth import client_ip, issue_session, login_limiter, owner_user_id, require_user, verify_google_token
 
 async def _periodic_purge_tombstones_task():
     try:
@@ -48,8 +49,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Mi Diario - Agente", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
-    allow_methods=["*"], allow_headers=["*"],
+    allow_origins=[o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()],
+    allow_methods=["GET", "POST", "PUT"], allow_headers=["Authorization", "Content-Type"],
 )
 
 _graph = None
@@ -81,13 +82,7 @@ def graph():
     return _graph
 
 
-DEFAULT_USER = os.getenv("DEFAULT_USER_ID", "me")
-
-def auth(x_app_token: str | None = Header(default=None), x_user_id: str = Header(default=DEFAULT_USER)) -> str:
-    expected = os.getenv("APP_TOKEN")
-    if expected and x_app_token != expected:
-        raise HTTPException(401, "Token inválido.")
-    return x_user_id
+auth = require_user
 
 
 class Chat(BaseModel):
@@ -105,6 +100,53 @@ def _result(res: dict) -> dict:
         return {"reply": "", "pending": res["__interrupt__"][0].value}
     last = next((m for m in reversed(res["messages"]) if isinstance(m, AIMessage) and m.content), None)
     return {"reply": last.content if last else "", "pending": None}
+
+
+class GoogleLogin(BaseModel):
+    credential: str
+
+
+class ProfileUpdate(BaseModel):
+    first_name: str | None = None
+    last_name: str | None = None
+    role: str | None = None
+    photo: str | None = None
+
+
+@app.get("/auth/config")
+def auth_config():
+    """Datos públicos que el frontend necesita para mostrar el botón de Google."""
+    return {"google_client_id": os.getenv("GOOGLE_CLIENT_ID", "")}
+
+
+@app.post("/auth/google")
+def auth_google(body: GoogleLogin, request: Request):
+    login_limiter.check(client_ip(request))
+    claims = verify_google_token(body.credential)
+    user = owner_user_id()
+    email = str(claims.get("email", "")).lower()
+    profile = db.seed_profile_from_google(
+        user, email, claims.get("given_name", ""), claims.get("family_name", ""), claims.get("picture", "")
+    )
+    return {**issue_session(user, email), "profile": profile}
+
+
+@app.get("/auth/me")
+def auth_me(user: str = Depends(auth)):
+    return {"user_id": user, "profile": db.get_profile(user)}
+
+
+@app.get("/profile")
+def get_profile(user: str = Depends(auth)):
+    return db.get_profile(user)
+
+
+@app.put("/profile")
+def put_profile(body: ProfileUpdate, user: str = Depends(auth)):
+    try:
+        return db.update_profile(user, body.model_dump(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/health")
