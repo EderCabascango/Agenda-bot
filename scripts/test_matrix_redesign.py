@@ -2,6 +2,7 @@ import os
 import re
 import time
 from playwright.sync_api import sync_playwright
+from test_server import TestServerRunner
 
 def parse_rgba(rgb_str):
     m = re.match(r'rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)', rgb_str)
@@ -32,6 +33,13 @@ def is_allowed_color(r, g, b, a):
     return False, f"Forbidden color (R:{r}, G:{g}, B:{b}, A:{a})"
 
 def run():
+    server = TestServerRunner().start()
+    try:
+        _run(server.url)
+    finally:
+        server.stop()
+
+def _run(base_url):
     print("\n============================================================")
     print("VERIFICACIÓN DE LA MATRIZ DEL CICLO MENSUAL (DASHBOARD)")
     print("============================================================\n")
@@ -47,7 +55,7 @@ def run():
         print(">>> 1. Verificando paleta de colores de relleno en celdas (.act-cell y .act-label)...")
         for theme in ['light', 'dark']:
             page = browser.new_page(viewport={'width': 1280, 'height': 900})
-            page.goto('http://127.0.0.1:8000/?e2e=1')
+            page.goto(f'{base_url}/?e2e=1')
             page.evaluate(f"() => {{ document.documentElement.setAttribute('data-theme', '{theme}'); localStorage.setItem('diary_theme', '{theme}'); if (window.renderDashboard) window.renderDashboard(); }}")
             page.wait_for_selector('#diario-table')
             time.sleep(0.5)
@@ -101,7 +109,7 @@ def run():
         # ---------------------------------------------------------
         print("\n>>> 2. Verificando accesibilidad (aria-labels, roles y teclado)...")
         page = browser.new_page(viewport={'width': 1280, 'height': 900})
-        page.goto('http://127.0.0.1:8000/?e2e=1')
+        page.goto(f'{base_url}/?e2e=1')
         page.wait_for_selector('#diario-table')
 
         acc_check = page.evaluate("""() => {
@@ -140,7 +148,7 @@ def run():
 
         for w, h, label in test_viewports:
             vp_page = browser.new_page(viewport={'width': w, 'height': h})
-            vp_page.goto('http://127.0.0.1:8000/?e2e=1')
+            vp_page.goto(f'{base_url}/?e2e=1')
             vp_page.wait_for_selector('#diario-table')
             time.sleep(0.5)
 
@@ -176,7 +184,7 @@ def run():
 
         # 1280 Light
         p1280_l = browser.new_page(viewport={'width': 1280, 'height': 900})
-        p1280_l.goto('http://127.0.0.1:8000/?e2e=1')
+        p1280_l.goto(f'{base_url}/?e2e=1')
         p1280_l.evaluate("() => { document.documentElement.setAttribute('data-theme', 'light'); localStorage.setItem('diary_theme', 'light'); if (window.renderDashboard) window.renderDashboard(); }")
         p1280_l.wait_for_selector('#diario-table')
         time.sleep(0.5)
@@ -186,7 +194,7 @@ def run():
 
         # 1280 Dark
         p1280_d = browser.new_page(viewport={'width': 1280, 'height': 900})
-        p1280_d.goto('http://127.0.0.1:8000/?e2e=1')
+        p1280_d.goto(f'{base_url}/?e2e=1')
         p1280_d.evaluate("() => { document.documentElement.setAttribute('data-theme', 'dark'); localStorage.setItem('diary_theme', 'dark'); if (window.renderDashboard) window.renderDashboard(); }")
         p1280_d.wait_for_selector('#diario-table')
         time.sleep(0.5)
@@ -196,7 +204,7 @@ def run():
 
         # 390 Light
         p390_l = browser.new_page(viewport={'width': 390, 'height': 844})
-        p390_l.goto('http://127.0.0.1:8000/?e2e=1')
+        p390_l.goto(f'{base_url}/?e2e=1')
         p390_l.evaluate("() => { document.documentElement.setAttribute('data-theme', 'light'); localStorage.setItem('diary_theme', 'light'); if (window.renderDashboard) window.renderDashboard(); }")
         p390_l.wait_for_selector('#diario-table')
         time.sleep(0.5)
@@ -206,7 +214,7 @@ def run():
 
         # 390 Dark
         p390_d = browser.new_page(viewport={'width': 390, 'height': 844})
-        p390_d.goto('http://127.0.0.1:8000/?e2e=1')
+        p390_d.goto(f'{base_url}/?e2e=1')
         p390_d.evaluate("() => { document.documentElement.setAttribute('data-theme', 'dark'); localStorage.setItem('diary_theme', 'dark'); if (window.renderDashboard) window.renderDashboard(); }")
         p390_d.wait_for_selector('#diario-table')
         time.sleep(0.5)
