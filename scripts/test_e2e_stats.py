@@ -83,7 +83,8 @@ def run():
             # Take 390px screenshots
             page390 = browser.new_page(viewport={'width': 390, 'height': 844})
             page390.goto(f"{server.url}/?e2e=1")
-            page390.click('button[data-view="study"]')
+            # En móvil la barra lateral está oculta: se navega con la barra inferior
+            page390.click('.bottom-nav button[data-view="study"]')
             page390.wait_for_selector('#subtab-btn-stats')
             page390.click('#subtab-btn-stats')
             page390.wait_for_selector('#study-stats-container')

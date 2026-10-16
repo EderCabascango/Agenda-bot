@@ -561,7 +561,7 @@
           html += `
             <div class="overdue-banner" id="btn-toggle-overdue">
               <div style="display:flex; align-items:center; gap:6px; flex:1; min-width:0;">
-                <span class="material-icons-round" style="color:var(--accent-red); font-size:18px;">history_toggle_off</span>
+                <span class="material-icons-round overdue-banner-icon" style="font-size:18px;">history_toggle_off</span>
                 <span style="font-size:0.78rem; font-weight:700; color:var(--text-primary);">
                   ${overdueActs.length} pasadas sin registrar
                 </span>
