@@ -88,7 +88,7 @@ const steps = [
     args: [path.join(ROOT_DIR, 'scripts/test_e2e_allow_focus.py')]
   },
   {
-    name: '5.f E2E Login con Google, Perfil y Dashboard sin Materias',
+    name: '5.f E2E Login con Correo y Contraseña, Perfil y Dashboard sin Materias',
     cmd: PYTHON,
     args: [path.join(ROOT_DIR, 'scripts/test_e2e_profile_login.py')]
   },

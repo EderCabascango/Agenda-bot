@@ -15,7 +15,10 @@ from pydantic import BaseModel  # noqa: E402
 import asyncio
 from contextlib import asynccontextmanager
 import db
-from auth import client_ip, issue_session, login_limiter, owner_user_id, require_user, verify_google_token
+from auth import (  # noqa: E402
+    authenticate, client_ip, hash_password, issue_session, login_limiter, owner_email,
+    require_user, validate_new_password, verify_password,
+)
 
 async def _periodic_purge_tombstones_task():
     try:
@@ -102,8 +105,14 @@ def _result(res: dict) -> dict:
     return {"reply": last.content if last else "", "pending": None}
 
 
-class GoogleLogin(BaseModel):
-    credential: str
+class Login(BaseModel):
+    email: str
+    password: str
+
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
 
 
 class ProfileUpdate(BaseModel):
@@ -113,22 +122,27 @@ class ProfileUpdate(BaseModel):
     photo: str | None = None
 
 
-@app.get("/auth/config")
-def auth_config():
-    """Datos públicos que el frontend necesita para mostrar el botón de Google."""
-    return {"google_client_id": os.getenv("GOOGLE_CLIENT_ID", "")}
-
-
-@app.post("/auth/google")
-def auth_google(body: GoogleLogin, request: Request):
+@app.post("/auth/login")
+def auth_login(body: Login, request: Request):
     login_limiter.check(client_ip(request))
-    claims = verify_google_token(body.credential)
-    user = owner_user_id()
-    email = str(claims.get("email", "")).lower()
-    profile = db.seed_profile_from_google(
-        user, email, claims.get("given_name", ""), claims.get("family_name", ""), claims.get("picture", "")
-    )
-    return {**issue_session(user, email), "profile": profile}
+    user = authenticate(body.email, body.password)
+    profile = db.set_profile_email(user, owner_email())
+    return {**issue_session(user, owner_email()), "profile": profile}
+
+
+@app.post("/auth/change-password")
+def auth_change_password(body: PasswordChange, request: Request, user: str = Depends(auth)):
+    login_limiter.check(client_ip(request))
+    stored = db.get_password_hash(user)
+    if not stored or not verify_password(body.current_password, stored):
+        raise HTTPException(400, "La contraseña actual no es correcta.")
+    try:
+        validate_new_password(body.new_password)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    db.set_password_hash(user, hash_password(body.new_password))
+    # Nueva sesión para este dispositivo; las demás quedan cerradas.
+    return issue_session(user, owner_email())
 
 
 @app.get("/auth/me")

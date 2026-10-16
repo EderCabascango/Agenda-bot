@@ -150,7 +150,7 @@
     safeStorageSet(SETTINGS_KEY, s);
   }
 
-  // ── Sesión (Google Sign-In + JWT del backend) ──
+  // ── Sesión (login con correo y contraseña + JWT del backend) ──
   // Se guarda en el dispositivo para que la app siga funcionando offline mientras no caduque.
   const SESSION_KEY = 'diary_session';
   function loadSession() {
@@ -5033,24 +5033,7 @@ SIEMPRE devuelve un JSON válido.
     }
   }
 
-  // ── Login con Google ──
-  const GOOGLE_GSI_SRC = 'https://accounts.google.com/gsi/client';
-
-  function loadGoogleScript() {
-    if (window.google && window.google.accounts && window.google.accounts.id) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      const existing = document.querySelector(`script[src="${GOOGLE_GSI_SRC}"]`);
-      const script = existing || document.createElement('script');
-      script.addEventListener('load', () => resolve());
-      script.addEventListener('error', () => reject(new Error('No se pudo cargar Google Sign-In.')));
-      if (!existing) {
-        script.src = GOOGLE_GSI_SRC;
-        script.async = true;
-        document.head.appendChild(script);
-      }
-    });
-  }
-
+  // ── Login con correo y contraseña ──
   function setLoginError(msg) {
     const el = $('#login-error');
     if (!el) return;
@@ -5058,7 +5041,7 @@ SIEMPRE devuelve un JSON válido.
     el.hidden = !msg;
   }
 
-  async function showLoginScreen() {
+  function showLoginScreen() {
     const appWrapper = $('#app-wrapper');
     if (appWrapper) appWrapper.style.display = 'none';
     const loginScreen = $('#login-screen');
@@ -5069,60 +5052,58 @@ SIEMPRE devuelve un JSON válido.
 
     const urlInput = $('#login-backend-url');
     if (urlInput && !urlInput.value) urlInput.value = loadSettings().backendUrl || '';
-    const retry = $('#login-retry');
-    if (retry && !retry.dataset.bound) {
-      retry.dataset.bound = '1';
-      retry.addEventListener('click', () => {
-        settings = loadSettings();
-        settings.backendUrl = (urlInput?.value || '').trim();
-        saveSettings(settings);
-        showLoginScreen();
-      });
-    }
 
-    const slot = $('#google-signin-btn');
-    let clientId = '';
-    try {
-      const res = await fetch(getBackendBaseUrl() + '/auth/config');
-      if (!res.ok) throw new Error(`(${res.status})`);
-      clientId = (await res.json()).google_client_id;
-    } catch (err) {
-      setLoginError(`No se pudo conectar con el servidor ${getBackendBaseUrl()}. Revisa la conexión o la dirección del servidor.`);
-      return;
+    const form = $('#login-form');
+    if (form && !form.dataset.bound) {
+      form.dataset.bound = '1';
+      form.addEventListener('submit', onLoginSubmit);
     }
-    if (!clientId) {
-      setLoginError('El servidor aún no tiene configurado el inicio de sesión con Google (GOOGLE_CLIENT_ID).');
-      return;
-    }
-    try {
-      await loadGoogleScript();
-      google.accounts.id.initialize({ client_id: clientId, callback: onGoogleCredential, auto_select: true });
-      if (slot) {
-        slot.innerHTML = '';
-        google.accounts.id.renderButton(slot, {
-          theme: document.documentElement.getAttribute('data-theme') === 'dark' ? 'filled_black' : 'outline',
-          size: 'large', shape: 'pill', text: 'continue_with', logo_alignment: 'left', width: 280
-        });
-      }
-    } catch (err) {
-      setLoginError('No se pudo cargar el botón de Google. Revisa tu conexión a internet.');
-    }
+    const lastEmail = loadSettings().lastLoginEmail;
+    const emailInput = $('#login-email');
+    if (emailInput && !emailInput.value && lastEmail) emailInput.value = lastEmail;
+    (emailInput && emailInput.value ? $('#login-password') : emailInput)?.focus();
   }
 
-  async function onGoogleCredential(response) {
+  async function onLoginSubmit(e) {
+    e.preventDefault();
     setLoginError('');
+    const email = ($('#login-email')?.value || '').trim();
+    const password = $('#login-password')?.value || '';
+    if (!email || !password) {
+      setLoginError('Escribe tu correo y tu contraseña.');
+      return;
+    }
+
+    // La dirección del servidor es opcional y se guarda antes de intentar entrar.
+    settings = loadSettings();
+    const urlInput = $('#login-backend-url');
+    if (urlInput) settings.backendUrl = urlInput.value.trim();
+    settings.lastLoginEmail = email;
+    saveSettings(settings);
+
+    const submit = $('#login-submit');
+    if (submit) submit.disabled = true;
     try {
-      const res = await fetch(getBackendBaseUrl() + '/auth/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential: response.credential })
-      });
+      let res;
+      try {
+        res = await fetch(getBackendBaseUrl() + '/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+      } catch (err) {
+        throw new Error(`No se pudo conectar con el servidor ${getBackendBaseUrl()}. Revisa la conexión o la dirección del servidor.`);
+      }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
       saveSession({ token: data.token, expires_at: data.expires_at, profile: data.profile || {} });
+      const pw = $('#login-password');
+      if (pw) pw.value = '';
       startApp();
     } catch (err) {
       setLoginError(err.message);
+    } finally {
+      if (submit) submit.disabled = false;
     }
   }
 
@@ -5137,8 +5118,28 @@ SIEMPRE devuelve un JSON válido.
 
   function logout() {
     clearSession();
-    try { window.google?.accounts?.id?.disableAutoSelect(); } catch (e) { /* GSI no cargado */ }
     window.location.reload();
+  }
+
+  async function changePassword() {
+    const current = $('#password-current')?.value || '';
+    const next = $('#password-new')?.value || '';
+    const confirm = $('#password-confirm')?.value || '';
+    const status = $('#password-status');
+    const setStatus = (msg) => { if (status) { status.textContent = msg; status.hidden = !msg; } };
+    setStatus('');
+    if (!current || !next) return setStatus('Completa la contraseña actual y la nueva.');
+    if (next.length < 8) return setStatus('La nueva contraseña debe tener al menos 8 caracteres.');
+    if (next !== confirm) return setStatus('La confirmación no coincide con la nueva contraseña.');
+    try {
+      const data = await backendRequest('POST', '/auth/change-password', { current_password: current, new_password: next });
+      const session = loadSession() || {};
+      saveSession({ ...session, token: data.token, expires_at: data.expires_at });
+      ['#password-current', '#password-new', '#password-confirm'].forEach(id => { const el = $(id); if (el) el.value = ''; });
+      showToast('Contraseña cambiada. Se cerraron las sesiones en otros dispositivos.', 'check_circle', 'var(--accent-amber)');
+    } catch (err) {
+      setStatus(err.message);
+    }
   }
 
   // ── Perfil ──
@@ -5263,6 +5264,7 @@ SIEMPRE devuelve un JSON válido.
     });
     $('#btn-remove-photo')?.addEventListener('click', () => saveProfileChanges({ photo: '' }, 'Foto eliminada'));
     $('#btn-logout')?.addEventListener('click', logout);
+    $('#btn-change-password')?.addEventListener('click', changePassword);
   }
 
   // ── Initialize ──

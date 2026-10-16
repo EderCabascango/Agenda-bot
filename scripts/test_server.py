@@ -24,10 +24,10 @@ def get_free_test_port():
             return port
     raise RuntimeError("Could not find free port for test server")
 
-def make_test_session(user_id: str, jwt_secret: str) -> dict:
-    """Emite una sesión JWT válida 24h, igual a la que devuelve /auth/google."""
+def make_test_session(user_id: str, jwt_secret: str, session_version: int = 0) -> dict:
+    """Emite una sesión JWT válida 24h, igual a la que devuelve /auth/login."""
     expires = datetime.now(timezone.utc) + timedelta(days=1)
-    token = jwt.encode({"sub": user_id, "exp": int(expires.timestamp())}, jwt_secret, algorithm="HS256")
+    token = jwt.encode({"sub": user_id, "sv": session_version, "exp": int(expires.timestamp())}, jwt_secret, algorithm="HS256")
     return {"token": token, "expires_at": expires.strftime("%Y-%m-%dT%H:%M:%SZ"), "profile": {}}
 
 
@@ -76,10 +76,13 @@ class TestServerRunner:
         self.url = f"http://127.0.0.1:{self.port}"
         self.proc = None
 
-        # Autenticación de prueba: clave aleatoria por ejecución y sesión ya emitida para el usuario de test
+        # Autenticación de prueba: clave y contraseña aleatorias por ejecución y sesión ya emitida.
+        # start() fija la contraseña en una BD nueva, lo que deja session_version en 1.
         self.user_id = "test_user"
+        self.email = "test@example.com"
+        self.password = secrets.token_urlsafe(12)
         self.jwt_secret = secrets.token_hex(32)
-        self.session = make_test_session(self.user_id, self.jwt_secret)
+        self.session = make_test_session(self.user_id, self.jwt_secret, session_version=1)
         self.token = self.session["token"]
         self.auth_headers = {"Authorization": f"Bearer {self.token}"}
 
@@ -89,9 +92,13 @@ class TestServerRunner:
         env["DATABASE_PATH"] = self.temp_db
         env["JWT_SECRET"] = self.jwt_secret
         env["OWNER_USER_ID"] = self.user_id
-        env["GOOGLE_CLIENT_ID"] = "test-client.apps.googleusercontent.com"
-        env["ALLOWED_EMAIL"] = "test@example.com"
+        env["OWNER_EMAIL"] = self.email
         env["PYTHONPATH"] = BACKEND_DIR
+
+        subprocess.run(
+            [sys.executable, "set_password.py", "--stdin"],
+            input=self.password + "\n", text=True, cwd=BACKEND_DIR, env=env, check=True, capture_output=True
+        )
 
         self.proc = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(self.port)],

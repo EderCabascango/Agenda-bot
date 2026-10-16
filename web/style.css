@@ -2470,7 +2470,7 @@ body.dark-mode .diario-legend .legend-box.is-today {
 
 
 
-/* ---------- Login (Google Sign-In) ---------- */
+/* ---------- Login (correo y contraseña) ---------- */
 .login-screen {
   min-height: 100vh;
   min-height: 100dvh;
@@ -2503,7 +2503,10 @@ body.dark-mode .diario-legend .legend-box.is-today {
   margin-top: 8px;
 }
 .login-sub { font-size: 0.88rem; color: var(--text-secondary); max-width: 300px; }
-.login-google-slot { min-height: 44px; display: flex; justify-content: center; margin-top: 6px; }
+.login-field { width: 100%; display: flex; flex-direction: column; gap: 6px; text-align: left; font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); }
+.login-field .setting-input { max-width: none; width: 100%; }
+.login-submit { width: 100%; margin-top: 4px; }
+.login-submit:disabled { opacity: 0.6; cursor: wait; }
 .login-error {
   width: 100%;
   font-size: 0.82rem;
@@ -2517,8 +2520,7 @@ body.dark-mode .diario-legend .legend-box.is-today {
 .login-error[hidden] { display: none; }
 .login-server { width: 100%; font-size: 0.8rem; color: var(--text-muted); text-align: left; }
 .login-server summary { cursor: pointer; text-align: center; }
-.login-server-row { display: flex; gap: 8px; margin-top: 10px; }
-.login-server-row .setting-input { max-width: none; flex: 1; min-width: 0; }
+.login-server .setting-input { max-width: none; width: 100%; margin-top: 10px; }
 
 /* ---------- Perfil ---------- */
 .user-avatar-circle { overflow: hidden; flex-shrink: 0; }
@@ -2570,6 +2572,10 @@ body.dark-mode .diario-legend .legend-box.is-today {
 .profile-actions { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .profile-actions .btn-outline { display: inline-flex; align-items: center; gap: 6px; }
 .profile-actions .btn-outline .material-icons-round { font-size: 18px; }
+.profile-actions--end { justify-content: flex-end; }
+.profile-account .btn-outline { display: inline-flex; align-items: center; gap: 6px; }
+.profile-account .btn-outline .material-icons-round { font-size: 18px; }
+.profile-password { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
 @media (max-width: 480px) {
   .profile-fields { grid-template-columns: 1fr; }
   .profile-actions { flex-direction: column-reverse; }

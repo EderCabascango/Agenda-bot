@@ -29,7 +29,8 @@ Las acciones destructivas (`delete_activity`) pausan el grafo con `interrupt()` 
 
 ## Despliegue (Render / Railway)
 - Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-- Variables: `GROQ_API_KEY`, `CORS_ORIGINS` (tu dominio de Vercel) y las de login: `GOOGLE_CLIENT_ID`, `ALLOWED_EMAIL`, `JWT_SECRET` (ver `.env.example`).
-- Todas las rutas salvo `/health` y `/auth/*` exigen `Authorization: Bearer <jwt>`, que se obtiene con `POST /auth/google`. Si falta la configuración de login, la API responde 401/503 (falla cerrado).
+- Variables: `GROQ_API_KEY`, `CORS_ORIGINS` (tu dominio de Vercel) y las de login: `OWNER_EMAIL`, `JWT_SECRET` (ver `.env.example`).
+- La contraseña del dueño se fija (o restablece) en el servidor con `python set_password.py`; no hay registro público.
+- Todas las rutas salvo `/health` y `/auth/login` exigen `Authorization: Bearer <jwt>`, que se obtiene con `POST /auth/login`. `POST /auth/change-password` cambia la clave y cierra las demás sesiones. Si falta la configuración de login, la API responde 401/503 (falla cerrado).
 - Importante: SQLite y `MemorySaver` son efímeros en planes gratuitos. Para persistir, cambia `db.py` a Postgres/Supabase y usa `PostgresSaver` en `agent.py`.
 - La web en Vercel (https) solo puede llamar a un backend https.

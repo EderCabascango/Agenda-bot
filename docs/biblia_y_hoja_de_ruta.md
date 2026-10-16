@@ -27,7 +27,7 @@ La aplicación **Mi Diario** es una agenda personal e inteligente orientada a la
 - **Fase D**: Estadísticas y métricas (racha, meta diaria, matriz día × hora).
 - **Fase E**: Notas de aprendizaje post-sesión, exportación Markdown y tareas de repaso.
 - **Rediseño Visual Taskly**: aprobado por el usuario el 16-10-2026 (paleta negro, blanco y amarillo ámbar).
-- **Login y Perfil** (adelantado desde Seguridad): inicio de sesión con Google para un único dueño, sesión JWT y perfil editable.
+- **Login y Perfil** (adelantado desde Seguridad): inicio de sesión con correo y contraseña para un único dueño, sesión JWT y perfil editable.
 
 ---
 
@@ -49,10 +49,9 @@ El desarrollo seguirá **únicamente** el siguiente orden secuencial:
 4. **Fase F (Extras)**:
    - Sonidos ambientales, modo no molestar, algoritmo de repaso espaciado (1, 3, 7, 21 días).
 5. **Seguridad (Antes de Desplegar)** — adelantada parcialmente a petición del usuario:
-   - ✅ Autenticación que falla cerrado: Google Sign-In → `POST /auth/google` verifica el ID token y exige `ALLOWED_EMAIL` → el backend emite su propio JWT (30 días). Sin `JWT_SECRET`, `GOOGLE_CLIENT_ID` o `ALLOWED_EMAIL` la API no se abre.
+   - ✅ Autenticación que falla cerrado: `POST /auth/login` con correo (`OWNER_EMAIL`) y contraseña (hash scrypt, fijada con `python set_password.py`) → el backend emite su propio JWT (30 días). Sin `JWT_SECRET`, `OWNER_EMAIL` o contraseña fijada, la API no se abre. El login con Google se descartó el 16-10-2026 a petición del usuario.
    - ✅ Rate limit en el login (10 intentos/minuto por IP) y CORS sin comodín.
-   - ✅ Perfil (nombre, apellido, rol, foto) en `GET/PUT /profile`. Con Google no hay contraseña propia: se ofrece "Cerrar sesión" y el enlace a la seguridad de la cuenta de Google.
-   - ⏳ Login nativo en Android (Capacitor): Google bloquea el login dentro de WebViews; requiere plugin nativo y Client ID Android.
+   - ✅ Perfil (nombre, apellido, rol, foto) en `GET/PUT /profile`, "Cambiar contraseña" (cierra las sesiones de otros dispositivos) y "Cerrar sesión".
    - ⏳ Confirmaciones de acciones críticas.
 
 ---

@@ -225,6 +225,14 @@ def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
                 updated_at TEXT DEFAULT '')"""
         )
 
+    # 7. Credenciales del dueño (solo hash scrypt; session_version invalida sesiones al cambiar la clave)
+    if "credentials" not in existing_tables:
+        conn.execute(
+            """CREATE TABLE credentials (
+                user_id TEXT PRIMARY KEY, password_hash TEXT NOT NULL,
+                session_version INTEGER DEFAULT 0, updated_at TEXT DEFAULT '')"""
+        )
+
     # Migración de created_at para tablas existentes
     for tbl in ["subjects", "topics", "focus_sessions", "learning_notes"]:
         if tbl in existing_tables:
@@ -939,8 +947,8 @@ def update_profile(user_id: str, changes: dict) -> dict:
         value = str(changes[field]).strip()
         if len(value) > max_len:
             raise ValueError(f"El campo '{field}' supera el máximo permitido.")
-        if field == "photo" and value and not value.startswith(("data:image/", "https://lh3.googleusercontent.com/")):
-            raise ValueError("La foto debe ser una imagen en formato data URL o la foto de Google.")
+        if field == "photo" and value and not value.startswith("data:image/"):
+            raise ValueError("La foto debe ser una imagen en formato data URL.")
         clean[field] = value
     with _conn() as conn:
         conn.execute("INSERT OR IGNORE INTO profiles (user_id) VALUES (?)", (user_id,))
@@ -952,17 +960,34 @@ def update_profile(user_id: str, changes: dict) -> dict:
     return get_profile(user_id)
 
 
-def seed_profile_from_google(user_id: str, email: str, first_name: str, last_name: str, photo_url: str) -> dict:
-    """En cada login guarda el email y rellena nombre y foto solo si aún están vacíos."""
+def set_profile_email(user_id: str, email: str) -> dict:
+    """Guarda en el perfil el correo con el que inicia sesión el dueño."""
     with _conn() as conn:
         conn.execute("INSERT OR IGNORE INTO profiles (user_id) VALUES (?)", (user_id,))
-        conn.execute(
-            """UPDATE profiles SET email=?,
-                   first_name=CASE WHEN first_name='' THEN ? ELSE first_name END,
-                   last_name=CASE WHEN last_name='' THEN ? ELSE last_name END,
-                   photo=CASE WHEN photo='' THEN ? ELSE photo END,
-                   updated_at=? WHERE user_id=?""",
-            (email, first_name[:80], last_name[:80], photo_url[:2000], utc_now_iso(), user_id),
-        )
+        conn.execute("UPDATE profiles SET email=? WHERE user_id=?", (email, user_id))
         conn.commit()
     return get_profile(user_id)
+
+
+def get_password_hash(user_id: str) -> str | None:
+    with _conn() as conn:
+        r = conn.execute("SELECT password_hash FROM credentials WHERE user_id=?", (user_id,)).fetchone()
+    return r["password_hash"] if r else None
+
+
+def get_session_version(user_id: str) -> int:
+    with _conn() as conn:
+        r = conn.execute("SELECT session_version FROM credentials WHERE user_id=?", (user_id,)).fetchone()
+    return int(r["session_version"]) if r else 0
+
+
+def set_password_hash(user_id: str, password_hash: str) -> int:
+    """Guarda el nuevo hash y sube session_version para cerrar las sesiones anteriores. Devuelve la nueva versión."""
+    with _conn() as conn:
+        conn.execute("INSERT OR IGNORE INTO credentials (user_id, password_hash) VALUES (?, '')", (user_id,))
+        conn.execute(
+            "UPDATE credentials SET password_hash=?, session_version=session_version+1, updated_at=? WHERE user_id=?",
+            (password_hash, utc_now_iso(), user_id),
+        )
+        conn.commit()
+    return get_session_version(user_id)

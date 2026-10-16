@@ -1,8 +1,10 @@
-"""Tests de autenticación (Google + JWT propio) y perfil.
-Verifica que la API falla cerrado, que solo el email autorizado entra,
-el límite de intentos de login y el CRUD del perfil.
+"""Tests de autenticación (correo + contraseña con JWT propio) y perfil.
+Verifica que la API falla cerrado, el login del dueño, el cambio de contraseña
+(que cierra las demás sesiones), el límite de intentos y el CRUD del perfil.
 """
 import os
+import subprocess
+import sys
 import tempfile
 import time
 
@@ -14,30 +16,39 @@ os.environ.setdefault("JWT_SECRET", "test-secret-" + "x" * 32)
 
 from fastapi.testclient import TestClient  # noqa: E402
 import auth  # noqa: E402
+import db  # noqa: E402
 import main  # noqa: E402
 
 client = TestClient(main.app)
-ALLOWED = "dueno@example.com"
+OWNER = "dueno@example.com"
+PASSWORD = "clave-segura-123"
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 @pytest.fixture(autouse=True)
-def google_env(monkeypatch):
-    monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client.apps.googleusercontent.com")
-    monkeypatch.setenv("ALLOWED_EMAIL", ALLOWED)
+def owner_env(monkeypatch):
+    monkeypatch.setenv("OWNER_EMAIL", OWNER)
     monkeypatch.setenv("OWNER_USER_ID", "owner_test")
+    db.set_password_hash("owner_test", auth.hash_password(PASSWORD))
     auth.login_limiter.reset()
     yield
     auth.login_limiter.reset()
 
 
-def _fake_google(monkeypatch, email=ALLOWED, verified=True):
-    claims = {"email": email, "email_verified": verified, "given_name": "Ana", "family_name": "Pérez",
-              "picture": "https://lh3.googleusercontent.com/a/foto"}
-    monkeypatch.setattr("google.oauth2.id_token.verify_oauth2_token", lambda *a, **k: claims)
+def _login(email=OWNER, password=PASSWORD):
+    return client.post("/auth/login", json={"email": email, "password": password})
 
 
 def _bearer(user="owner_test"):
     return {"Authorization": f"Bearer {auth.issue_session(user)['token']}"}
+
+
+def test_password_hashing_roundtrip():
+    stored = auth.hash_password("secreto-largo")
+    assert stored.startswith("scrypt$") and "secreto-largo" not in stored
+    assert auth.verify_password("secreto-largo", stored)
+    assert not auth.verify_password("otra-cosa", stored)
+    assert not auth.verify_password("x", "formato-invalido")
 
 
 def test_protected_routes_reject_missing_token():
@@ -66,41 +77,57 @@ def test_fails_closed_without_jwt_secret(monkeypatch):
     assert client.get("/activities", headers=headers).status_code == 503
 
 
-def test_fails_closed_without_google_config(monkeypatch):
-    monkeypatch.delenv("ALLOWED_EMAIL")
-    _fake_google(monkeypatch)
-    assert client.post("/auth/google", json={"credential": "x"}).status_code == 503
+def test_fails_closed_without_owner_email(monkeypatch):
+    monkeypatch.delenv("OWNER_EMAIL")
+    assert _login().status_code == 503
 
 
-def test_google_login_issues_session_for_owner(monkeypatch):
-    _fake_google(monkeypatch, email="Dueno@Example.com")
-    res = client.post("/auth/google", json={"credential": "token-google"})
+def test_fails_closed_without_password_set(monkeypatch):
+    monkeypatch.setenv("OWNER_USER_ID", "sin_clave")
+    res = _login()
+    assert res.status_code == 503 and "set_password" in res.json()["detail"]
+
+
+def test_login_issues_session_for_owner():
+    res = _login(email="  Dueno@Example.com ")
     assert res.status_code == 200
     data = res.json()
-    assert data["profile"]["first_name"] == "Ana" and data["profile"]["email"] == ALLOWED
+    assert data["profile"]["email"] == OWNER
     me = client.get("/auth/me", headers={"Authorization": f"Bearer {data['token']}"})
     assert me.status_code == 200 and me.json()["user_id"] == "owner_test"
 
 
-def test_google_login_rejects_other_or_unverified_email(monkeypatch):
-    _fake_google(monkeypatch, email="intruso@example.com")
-    assert client.post("/auth/google", json={"credential": "x"}).status_code == 403
-    _fake_google(monkeypatch, verified=False)
-    assert client.post("/auth/google", json={"credential": "x"}).status_code == 403
+def test_login_rejects_wrong_email_or_password_with_same_message():
+    wrong_pass = _login(password="incorrecta")
+    wrong_mail = _login(email="intruso@example.com")
+    assert wrong_pass.status_code == wrong_mail.status_code == 401
+    assert wrong_pass.json()["detail"] == wrong_mail.json()["detail"]
 
 
-def test_google_login_rejects_invalid_google_token(monkeypatch):
-    def boom(*a, **k):
-        raise ValueError("bad token")
-    monkeypatch.setattr("google.oauth2.id_token.verify_oauth2_token", boom)
-    assert client.post("/auth/google", json={"credential": "x"}).status_code == 401
-
-
-def test_login_rate_limit(monkeypatch):
-    _fake_google(monkeypatch, email="intruso@example.com")
-    codes = [client.post("/auth/google", json={"credential": "x"}).status_code for _ in range(auth.LOGIN_RATE_LIMIT + 1)]
-    assert codes[:-1] == [403] * auth.LOGIN_RATE_LIMIT
+def test_login_rate_limit():
+    codes = [_login(password="mal").status_code for _ in range(auth.LOGIN_RATE_LIMIT + 1)]
+    assert codes[:-1] == [401] * auth.LOGIN_RATE_LIMIT
     assert codes[-1] == 429
+
+
+def test_change_password_closes_other_sessions():
+    other_device = {"Authorization": f"Bearer {_login().json()['token']}"}
+    this_device = {"Authorization": f"Bearer {_login().json()['token']}"}
+
+    bad = client.post("/auth/change-password", json={"current_password": "mal", "new_password": "nueva-clave-456"}, headers=this_device)
+    assert bad.status_code == 400
+    short = client.post("/auth/change-password", json={"current_password": PASSWORD, "new_password": "corta"}, headers=this_device)
+    assert short.status_code == 400
+
+    res = client.post("/auth/change-password", json={"current_password": PASSWORD, "new_password": "nueva-clave-456"}, headers=this_device)
+    assert res.status_code == 200
+    new_headers = {"Authorization": f"Bearer {res.json()['token']}"}
+
+    assert client.get("/profile", headers=new_headers).status_code == 200
+    assert client.get("/profile", headers=other_device).status_code == 401
+    assert client.get("/profile", headers=this_device).status_code == 401
+    assert _login(password=PASSWORD).status_code == 401
+    assert _login(password="nueva-clave-456").status_code == 200
 
 
 def test_profile_update_and_validation():
@@ -112,17 +139,17 @@ def test_profile_update_and_validation():
     photo = "data:image/jpeg;base64," + "A" * 100
     assert client.put("/profile", json={"photo": photo}, headers=h).json()["photo"] == photo
     assert client.put("/profile", json={"photo": "javascript:alert(1)"}, headers=h).status_code == 400
+    assert client.put("/profile", json={"photo": "https://example.com/x.png"}, headers=h).status_code == 400
     assert client.put("/profile", json={"first_name": "x" * 200}, headers=h).status_code == 400
 
 
-def test_second_login_keeps_edited_profile(monkeypatch):
-    h = _bearer()
-    client.put("/profile", json={"first_name": "Nombre Propio"}, headers=h)
-    _fake_google(monkeypatch)
-    res = client.post("/auth/google", json={"credential": "x"})
-    assert res.json()["profile"]["first_name"] == "Nombre Propio"
-
-
-def test_auth_config_is_public():
-    res = client.get("/auth/config")
-    assert res.status_code == 200 and res.json()["google_client_id"].endswith("googleusercontent.com")
+def test_set_password_cli(tmp_path):
+    env = {**os.environ, "AGENDA_DB": str(tmp_path / "cli.db"), "OWNER_EMAIL": OWNER, "OWNER_USER_ID": "cli_user"}
+    run = lambda pw: subprocess.run([sys.executable, "set_password.py", "--stdin"], input=pw + "\n",  # noqa: E731
+                                    capture_output=True, text=True, cwd=BACKEND_DIR, env=env)
+    assert run("corta").returncode == 1
+    ok = run("clave-de-prueba-789")
+    assert ok.returncode == 0, ok.stderr
+    with db._conn(str(tmp_path / "cli.db")) as conn:
+        stored = conn.execute("SELECT password_hash FROM credentials WHERE user_id='cli_user'").fetchone()[0]
+    assert auth.verify_password("clave-de-prueba-789", stored)
