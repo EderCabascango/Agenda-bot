@@ -111,6 +111,11 @@ const steps = [
     name: '5.j E2E Excel: Plantilla e Importación con SheetJS Local (sin CDN)',
     cmd: PYTHON,
     args: [path.join(ROOT_DIR, 'scripts/test_e2e_excel.py')]
+  },
+  {
+    name: '5.k E2E Rutina Base bajo Demanda (Sincronizada) y Materias en la Paleta',
+    cmd: PYTHON,
+    args: [path.join(ROOT_DIR, 'scripts/test_e2e_routine_palette.py')]
   }
 ];
 

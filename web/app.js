@@ -177,6 +177,15 @@
     s.profile = profile || {};
     saveSession(s);
   }
+  // Tono fijo de la paleta Taskly para cada materia (ámbar, tinta o gris), estable según su id.
+  const SUBJECT_TONES = ['amber', 'ink', 'gray'];
+  function subjectTone(sub) {
+    const key = String((sub && (sub.id || sub.subject_id || sub.name)) || '');
+    let hash = 0;
+    for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+    return SUBJECT_TONES[hash % SUBJECT_TONES.length];
+  }
+
   function profileInitials(p) {
     const first = (p.first_name || '').trim();
     const last = (p.last_name || '').trim();
@@ -582,16 +591,15 @@
 
   // Helper: return a colour for a known category tag
   function getCategoryColor(tag) {
+    // Paleta Taskly: estudio/proyectos en ámbar, salud y trabajo en tinta, el resto en gris.
+    const AMBER = '#F5B82E', INK = '#3F3F46', GRAY = '#A1A1AA';
     const map = {
-      'calistenia': '#3B82F6', 'ejercicio': '#3B82F6',
-      'correr':     '#F97316',
-      'ai-300':     '#8B5CF6', 'mlops': '#8B5CF6', 'desarrollo': '#8B5CF6',
-      'inglés':     '#06B6D4', 'ingles': '#06B6D4',
-      'fuyu':       '#EC4899',
-      'personal':   '#10B981',
-      'estudio':    '#F59E0B', 'proyectos': '#F59E0B',
+      'estudio': AMBER, 'proyectos': AMBER, 'inglés': AMBER, 'ingles': AMBER,
+      'ai-300': AMBER, 'mlops': AMBER, 'desarrollo': AMBER,
+      'calistenia': INK, 'ejercicio': INK, 'correr': INK, 'fuyu': INK,
+      'personal': GRAY,
     };
-    return map[tag.toLowerCase()] || '#9CA3AF';
+    return map[tag.toLowerCase()] || GRAY;
   }
 
 
@@ -1775,10 +1783,8 @@
     const btnRestoreRoutine = $('#btn-restore-routine');
     if (btnRestoreRoutine) {
       btnRestoreRoutine.addEventListener('click', () => {
-        if (confirm('¿Cargar la rutina base de la semana actual? Se borrarán todos los datos actuales.')) {
-          activities = [];
-          saveActivities(activities);
-          seedSampleData();
+        if (confirm('¿Cargar la rutina base en la semana actual? Se reemplazarán las actividades de esta semana en todos tus dispositivos.')) {
+          loadBaseRoutine();
           renderActivityList();
           renderCalendar();
           showToast('Rutina base cargada ✓', 'restart_alt', 'var(--accent-teal)');
@@ -2299,7 +2305,7 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
         const sec = heatmap[d][h];
         const mins = Math.round(sec / 60);
         const ratio = sec > 0 ? Math.min(1, Math.max(0.2, sec / maxCellSec)) : 0;
-        const fill = sec === 0 ? 'var(--bg-primary)' : `rgba(20, 184, 166, ${ratio.toFixed(2)})`;
+        const fill = sec === 0 ? 'var(--bg-primary)' : `rgba(245, 184, 46, ${ratio.toFixed(2)})`;
         const border = sec === 0 ? 'var(--border-color)' : 'transparent';
         heatmapCellsSvg += `
           <rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" rx="3" fill="${fill}" stroke="${border}" stroke-width="1">
@@ -2317,9 +2323,9 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     const cycleDaysHtml = (cycleHeat && cycleHeat.days) ? cycleHeat.days.map(d => {
       const levelColors = [
         'var(--bg-primary)',
-        'rgba(20, 184, 166, 0.35)',
-        'rgba(20, 184, 166, 0.65)',
-        'rgba(20, 184, 166, 0.85)',
+        'rgba(245, 184, 46, 0.35)',
+        'rgba(245, 184, 46, 0.65)',
+        'rgba(245, 184, 46, 0.85)',
         'var(--accent-teal)'
       ];
       const fill = levelColors[d.level] || levelColors[0];
@@ -2513,9 +2519,9 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
           <div class="cycle-heat-legend">
             <span>0m</span>
             <span style="display:inline-block; width:12px; height:12px; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:2px;" title="0 min"></span>
-            <span style="display:inline-block; width:12px; height:12px; background:rgba(20, 184, 166, 0.35); border-radius:2px;" title="1-30 min"></span>
-            <span style="display:inline-block; width:12px; height:12px; background:rgba(20, 184, 166, 0.65); border-radius:2px;" title="31-60 min"></span>
-            <span style="display:inline-block; width:12px; height:12px; background:rgba(20, 184, 166, 0.85); border-radius:2px;" title="61-120 min"></span>
+            <span style="display:inline-block; width:12px; height:12px; background:rgba(245, 184, 46, 0.35); border-radius:2px;" title="1-30 min"></span>
+            <span style="display:inline-block; width:12px; height:12px; background:rgba(245, 184, 46, 0.65); border-radius:2px;" title="31-60 min"></span>
+            <span style="display:inline-block; width:12px; height:12px; background:rgba(245, 184, 46, 0.85); border-radius:2px;" title="61-120 min"></span>
             <span style="display:inline-block; width:12px; height:12px; background:var(--accent-teal); border-radius:2px;" title=">120 min"></span>
             <span>>2h</span>
           </div>
@@ -2564,13 +2570,13 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
                 <div class="subject-dist-item">
                   <div class="subject-dist-header">
                     <span class="subject-dist-name">
-                      <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${escHTML(sub.color)};"></span>
+                      <span class="tone-dot tone-${subjectTone(sub)}"></span>
                       <span>${escHTML(sub.name)}</span>
                     </span>
                     <span class="subject-dist-pct">${sub.hours}h (${sub.percentage}%)</span>
                   </div>
                   <div class="subject-dist-bar-track">
-                    <div class="subject-dist-bar-fill" style="width:${sub.percentage}%; background:${escHTML(sub.color)};"></div>
+                    <div class="subject-dist-bar-fill tone-${subjectTone(sub)}" style="width:${sub.percentage}%;"></div>
                   </div>
                 </div>
               `).join('')}
@@ -2586,21 +2592,21 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
           <div style="display:flex; flex-direction:column; gap:16px;">
             <div>
               <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:6px;">
-                <span style="color:#10B981; font-weight:700;">✓ Completadas: ${report.session_status.completed_percent}%</span>
-                <span style="color:#EF4444; font-weight:700;">✕ Abandonadas: ${report.session_status.abandoned_percent}%</span>
+                <span style="color:var(--text-primary); font-weight:700;">✓ Completadas: ${report.session_status.completed_percent}%</span>
+                <span style="color:var(--text-muted); font-weight:700;">✕ Abandonadas: ${report.session_status.abandoned_percent}%</span>
               </div>
               <div style="height:12px; display:flex; border-radius:6px; overflow:hidden; background:var(--bg-primary);">
-                <div style="width:${report.session_status.completed_percent}%; background:#10B981; transition:width 0.3s ease;"></div>
-                <div style="width:${report.session_status.abandoned_percent}%; background:#EF4444; transition:width 0.3s ease;"></div>
+                <div style="width:${report.session_status.completed_percent}%; background:var(--accent-amber); transition:width 0.3s ease;"></div>
+                <div style="width:${report.session_status.abandoned_percent}%; background:var(--text-muted); transition:width 0.3s ease;"></div>
               </div>
             </div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; text-align:center;">
               <div style="background:var(--bg-primary); padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
-                <div style="font-size:1.3rem; font-weight:800; color:#10B981;">${report.session_status.completed_count}</div>
+                <div style="font-size:1.3rem; font-weight:800; color:var(--text-primary);">${report.session_status.completed_count}</div>
                 <div style="font-size:0.75rem; color:var(--text-muted);">Completadas</div>
               </div>
               <div style="background:var(--bg-primary); padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
-                <div style="font-size:1.3rem; font-weight:800; color:#EF4444;">${report.session_status.abandoned_count}</div>
+                <div style="font-size:1.3rem; font-weight:800; color:var(--text-muted);">${report.session_status.abandoned_count}</div>
                 <div style="font-size:0.75rem; color:var(--text-muted);">Abandonadas</div>
               </div>
             </div>
@@ -2701,15 +2707,15 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
             topic_count: topics.filter(t => t.subject_id === sub.id && !t.deleted_at).length
           };
 
-      const color = sub.color || '#3B82F6';
+      const tone = subjectTone(sub);
       const isArchived = !!sub.archived;
       const weeklyGoalHours = ((sub.weekly_goal_minutes || 0) / 60).toFixed(1);
 
       return `
-        <div class="subject-card ${isArchived ? 'is-archived' : ''}" data-id="${escHTML(sub.id)}" style="border-top: 4px solid ${escHTML(color)};">
+        <div class="subject-card subject-card--tone-${tone} ${isArchived ? 'is-archived' : ''}" data-id="${escHTML(sub.id)}">
           <div class="subject-card-header">
             <div class="subject-card-title-wrap">
-              <div class="subject-card-icon" style="background: ${escHTML(color)};">
+              <div class="subject-card-icon tone-${tone}">
                 <span class="material-icons-round">${escHTML(sub.icon || 'school')}</span>
               </div>
               <div>
@@ -2737,7 +2743,7 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
                 <span>${summary.week_hours}h esta semana / ${weeklyGoalHours}h</span>
               </div>
               <div class="subject-progress-bar">
-                <div class="subject-progress-fill" style="width: ${Math.min(100, summary.goal_progress_percent)}%; background: ${escHTML(color)};"></div>
+                <div class="subject-progress-fill tone-${tone}" style="width: ${Math.min(100, summary.goal_progress_percent)}%;"></div>
               </div>
             </div>
           ` : ''}
@@ -2809,8 +2815,6 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     const titleEl = $('#modal-subject-title');
     const idInput = $('#subject-id-input');
     const nameInput = $('#subject-name-input');
-    const colorPicker = $('#subject-color-picker');
-    const colorInput = $('#subject-color-input');
     const iconInput = $('#subject-icon-input');
     const goalInput = $('#subject-goal-input');
     const errorsDiv = $('#subject-form-errors');
@@ -2826,8 +2830,6 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
         if (titleEl) titleEl.textContent = 'Editar Materia';
         if (idInput) idInput.value = sub.id;
         if (nameInput) nameInput.value = sub.name || '';
-        if (colorPicker) colorPicker.value = sub.color || '#3B82F6';
-        if (colorInput) colorInput.value = sub.color || '#3B82F6';
         if (iconInput) iconInput.value = sub.icon || 'school';
         if (goalInput) goalInput.value = sub.weekly_goal_minutes !== undefined ? sub.weekly_goal_minutes : 180;
       }
@@ -2835,8 +2837,6 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
       if (titleEl) titleEl.textContent = 'Nueva Materia';
       if (idInput) idInput.value = '';
       if (nameInput) nameInput.value = '';
-      if (colorPicker) colorPicker.value = '#3B82F6';
-      if (colorInput) colorInput.value = '#3B82F6';
       if (iconInput) iconInput.value = 'school';
       if (goalInput) goalInput.value = '180';
     }
@@ -2852,14 +2852,15 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
   function handleSaveSubject() {
     const idInput = $('#subject-id-input');
     const nameInput = $('#subject-name-input');
-    const colorInput = $('#subject-color-input');
     const iconInput = $('#subject-icon-input');
     const goalInput = $('#subject-goal-input');
     const errorsDiv = $('#subject-form-errors');
 
     const subjectId = idInput?.value ? idInput.value : null;
     const name = nameInput ? nameInput.value.trim() : '';
-    const color = colorInput ? colorInput.value.trim() : '#3B82F6';
+    // El color ya no se elige (paleta fija); se conserva el guardado para no reescribir datos.
+    const previous = subjectId ? loadSubjects().find(s => s.id === subjectId) : null;
+    const color = (previous && previous.color) || '#F5B82E';
     const icon = iconInput ? iconInput.value : 'school';
     const weeklyGoal = goalInput ? parseInt(goalInput.value, 10) : 0;
 
@@ -2964,7 +2965,11 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     if (titleEl) titleEl.textContent = sub.name;
     if (badgeEl) badgeEl.textContent = sub.archived ? 'Archivada' : 'Activa';
     if (iconEl) iconEl.textContent = sub.icon || 'school';
-    if (iconBoxEl) iconBoxEl.style.background = sub.color || 'var(--accent-teal)';
+    if (iconBoxEl) {
+      iconBoxEl.style.background = '';
+      iconBoxEl.classList.remove(...SUBJECT_TONES.map(t => `tone-${t}`));
+      iconBoxEl.classList.add(`tone-${subjectTone(sub)}`);
+    }
 
     const summary = (typeof FocusCore !== 'undefined' && FocusCore.summarizeSubject)
       ? FocusCore.summarizeSubject(sub, topics, focusSessions)
@@ -3711,8 +3716,8 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
       if (sub) {
         subTag.textContent = sub.name;
         subTag.style.display = 'inline-block';
-        subTag.style.backgroundColor = `${sub.color || '#3B82F6'}22`;
-        subTag.style.color = sub.color || '#3B82F6';
+        subTag.style.backgroundColor = 'var(--accent-amber-soft)';
+        subTag.style.color = 'var(--text-primary)';
       } else {
         subTag.style.display = 'none';
       }
@@ -5406,16 +5411,6 @@ SIEMPRE devuelve un JSON válido.
     $('#subject-modal-overlay')?.addEventListener('click', (e) => {
       if (e.target === e.currentTarget) closeSubjectModal();
     });
-    $('#subject-color-picker')?.addEventListener('input', (e) => {
-      const txt = $('#subject-color-input');
-      if (txt) txt.value = e.target.value;
-    });
-    $('#subject-color-input')?.addEventListener('input', (e) => {
-      const picker = $('#subject-color-picker');
-      if (picker && /^#[0-9A-Fa-f]{6}$/.test(e.target.value)) {
-        picker.value = e.target.value;
-      }
-    });
 
     // Topic modal
     $('#modal-topic-close')?.addEventListener('click', closeTopicModal);
@@ -5803,25 +5798,7 @@ SIEMPRE devuelve un JSON válido.
     // Initial render
     switchView('dashboard');
 
-    // Seed sample data if empty or if there are no activities in the current week
-    const now = new Date();
-    const dayOfWeek = now.getDay(); // 0=Dom, 1=Lun, ..., 6=Sab
-    const diffToMonday = (dayOfWeek === 0) ? -6 : 1 - dayOfWeek;
-    const mondayDate = new Date(now);
-    mondayDate.setDate(now.getDate() + diffToMonday);
-    mondayDate.setHours(0,0,0,0);
-    const sundayDate = new Date(mondayDate);
-    sundayDate.setDate(mondayDate.getDate() + 6);
-    sundayDate.setHours(23,59,59,999);
-
-    const hasCurrentWeekActs = activities.some(a => {
-      const d = new Date(a.date + 'T12:00:00');
-      return d >= mondayDate && d <= sundayDate;
-    });
-
-    if (activities.length === 0 || !hasCurrentWeekActs) {
-      seedSampleData();
-    }
+    // La rutina base ya no se carga sola: se carga desde Ajustes → "Cargar rutina base" y se sincroniza.
 
     // Schedule web alarms for today
     scheduleWebAlarms();
@@ -5839,7 +5816,7 @@ SIEMPRE devuelve un JSON válido.
     setInterval(refreshActiveView, 30000);
   }
 
-  function seedSampleData() {
+  function buildBaseRoutine() {
     // ── Obtener lunes de la semana actual ──
     const now = new Date();
     const dayOfWeek = now.getDay(); // 0=Dom, 1=Lun, ..., 6=Sab
@@ -5867,11 +5844,12 @@ SIEMPRE devuelve un JSON válido.
     // Dormir: 23:00 del día anterior → 06:30
     // Nota: lo registramos como actividad de inicio el mismo día
 
+    const nowIso = new Date().toISOString();
     function block(date, startTime, endTime, title, priority, tags, description) {
-      return { id: uid(), title, date, startTime, endTime, description: description || '', priority, tags, completed: false };
+      return { id: uid(), title, date, startTime, endTime, description: description || '', priority, tags, completed: false, updated_at: nowIso, version: 1 };
     }
 
-    activities = [
+    return [
       // ══ LUNES ══
       block(lun, '00:00', '06:30', 'Dormir', 'high', ['salud'], 'Sueño reparador'),
       block(lun, '06:30', '07:30', 'Calistenia', 'high', ['salud','ejercicio'], ''),
@@ -5990,8 +5968,23 @@ SIEMPRE devuelve un JSON válido.
       block(dom, '14:00', '22:00', 'Entretenimiento', 'low', ['personal'], ''),
       block(dom, '22:00', '23:00', 'Planificación', 'high', ['personal'], ''),
     ];
+  }
+
+  // Reemplaza las actividades de la semana actual por la rutina base y lo sincroniza con el servidor
+  // (los reemplazos viajan como tombstones). Las demás semanas no se tocan.
+  function loadBaseRoutine() {
+    const routine = buildBaseRoutine();
+    const weekDates = new Set(routine.map(a => a.date));
+    const nowIso = new Date().toISOString();
+    activities.filter(a => !a.deleted_at && weekDates.has(a.date)).forEach(a => {
+      enqueueChange({ ...a, collection: 'activities', deleted_at: nowIso, updated_at: nowIso, base_version: a.version || 1, version: (a.version || 1) + 1 });
+    });
+    routine.forEach(a => enqueueChange({ ...a, collection: 'activities' }));
+    activities = activities.filter(a => !weekDates.has(a.date)).concat(routine);
     saveActivities(activities);
     renderDashboard();
+    if (loadSession()) syncWithBackend();
+    return routine.length;
   }
 
   // ── Window Exports for Tests & Integrations (Guarded strictly by ?e2e=1 or localStorage) ──
