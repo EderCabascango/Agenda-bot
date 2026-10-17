@@ -33,6 +33,11 @@
   --sidebar-w: 240px;
   --topbar-h: 64px;
   --bnav-h: 64px;
+  /* Botones flotantes (asistente, +, Enfoque): columna en escritorio, fila sobre la barra inferior en móvil */
+  --float-base: 24px;
+  --float-right: 24px;
+  --float-size: 56px;
+  --float-gap: 14px;
   --radius-sm: 10px;
   --radius-md: 16px;
   --radius-lg: 20px;
@@ -210,7 +215,8 @@ input:focus, select:focus, textarea:focus {
 }
 
 /* ---------- Content ---------- */
-.content { padding: 28px; max-width: 1400px; margin: 0 auto; padding-bottom: 100px; }
+/* El padding derecho reserva un canal para la columna de botones flotantes */
+.content { padding: 28px; max-width: 1400px; margin: 0 auto; padding-bottom: 100px; padding-right: calc(var(--float-right) + var(--float-size) + 20px); }
 .view { display: none; animation: fadeIn 0.3s ease; }
 .view.active { display: block; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -732,7 +738,7 @@ input:focus, select:focus, textarea:focus {
   color: var(--accent-amber);
 }
 .agenda-item--completed .agenda-check-btn {
-  color: #10B981;
+  color: var(--accent-amber);
 }
 .agenda-item--completed {
   opacity: 0.75;
@@ -743,11 +749,11 @@ input:focus, select:focus, textarea:focus {
   color: var(--text-muted);
 }
 .agenda-item--overdue {
-  border-left: 3px solid var(--accent-red) !important;
-  background: rgba(239, 68, 68, 0.05);
+  border-left: 3px solid var(--accent-amber) !important;
+  background: var(--accent-amber-soft);
 }
 .agenda-item--overdue .status-text {
-  color: var(--accent-red);
+  color: var(--text-primary);
   font-weight: 700;
 }
 .btn-agenda-focus {
@@ -771,8 +777,8 @@ input:focus, select:focus, textarea:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  background: var(--accent-amber-soft);
+  border: 1px solid rgba(245, 184, 46, 0.45);
   border-radius: var(--radius-md);
   padding: 10px 14px;
   margin-bottom: 14px;
@@ -780,8 +786,9 @@ input:focus, select:focus, textarea:focus {
   transition: background var(--transition);
 }
 .overdue-banner:hover {
-  background: rgba(239, 68, 68, 0.12);
+  border-color: var(--accent-amber);
 }
+.overdue-banner-icon { color: var(--text-primary); }
 .db-panel--wide { min-width: 0; }
 .db-panel-header {
   display: flex; align-items: center; gap: 10px; margin-bottom: 18px;
@@ -1179,8 +1186,10 @@ input:focus, select:focus, textarea:focus {
 
 /* ---------- FAB ---------- */
 .fab {
-  position: fixed; bottom: 90px; right: 28px;
-  width: 56px; height: 56px; border-radius: 50%;
+  position: fixed;
+  bottom: calc(var(--float-base) + var(--float-size) + var(--float-gap));
+  right: var(--float-right);
+  width: var(--float-size); height: var(--float-size); border-radius: 50%;
   background: var(--accent-amber);
   color: #111111; box-shadow: 0 6px 24px rgba(245, 184, 46, 0.4);
   display: flex; align-items: center; justify-content: center;
@@ -1696,15 +1705,17 @@ body.dark-mode .diario-legend .legend-box.is-today {
 
 /* ---------- Responsive ---------- */
 @media (max-width: 768px) {
-  .sidebar { transform: translateX(-100%); }
+  /* -100% más el offset izquierdo (16px) y la sombra para que no asome ningún borde */
+  .sidebar { transform: translateX(calc(-100% - 40px)); box-shadow: none; }
   .sidebar.open { transform: translateX(0); box-shadow: var(--shadow-lg); }
   .sidebar-close { display: block; }
   .main-wrapper { margin-left: 0; }
   .menu-toggle { display: block; }
-  .content { padding: 20px 16px 120px; }
+  :root { --float-base: calc(var(--bnav-h) + 12px); --float-right: 16px; --float-size: 52px; --float-gap: 12px; }
+  /* En móvil los botones flotantes van en fila; el padding inferior deja el final del contenido por encima */
+  .content { padding: 20px 16px calc(var(--float-base) + var(--float-size) + 20px); }
   .bottom-nav { display: flex; }
-  .fab { bottom: 90px; right: 20px; }
-  .focus-fab { bottom: 90px; right: 16px; padding: 10px 16px; font-size: 0.82rem; }
+  .fab { bottom: var(--float-base); right: calc(var(--float-right) + var(--float-size) + var(--float-gap)); }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .form-row { grid-template-columns: 1fr; }
   .calendar-nav h3 { min-width: 140px; font-size: 1rem; }
@@ -1747,17 +1758,17 @@ body.dark-mode .diario-legend .legend-box.is-today {
 /* ---------- Chat Widget ---------- */
 .chat-widget {
   position: fixed;
-  bottom: 24px;
-  right: 24px;
+  bottom: var(--float-base);
+  right: var(--float-right);
   z-index: 1000;
   font-family: var(--font);
 }
 .chat-toggle {
-  width: 56px;
-  height: 56px;
+  width: var(--float-size);
+  height: var(--float-size);
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent-teal), #00A38E);
-  color: #0D0D0F;
+  background: #111111;
+  color: var(--accent-amber);
   border: none;
   cursor: pointer;
   box-shadow: var(--shadow-lg);
@@ -1769,7 +1780,11 @@ body.dark-mode .diario-legend .legend-box.is-today {
 }
 .chat-toggle:hover {
   transform: scale(1.05);
-  box-shadow: 0 10px 25px rgba(3, 218, 197, 0.4);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+}
+[data-theme="dark"] .chat-toggle, body.dark-mode .chat-toggle {
+  background: #FFFFFF;
+  color: #111111;
 }
 .chat-toggle .material-icons-round {
   font-size: 28px;
@@ -1890,18 +1905,11 @@ body.dark-mode .diario-legend .legend-box.is-today {
 
 /* Adjust FAB and Chat position on mobile */
 @media (max-width: 768px) {
-  .chat-widget {
-    bottom: 140px;
-    right: 20px;
-  }
   .chat-window {
     bottom: 64px;
     right: 0;
     width: calc(100vw - 40px);
     height: 400px;
-  }
-  .fab {
-    bottom: 210px !important;
   }
 }
 .file-drop-area.dragover {
@@ -2085,27 +2093,33 @@ body.dark-mode .diario-legend .legend-box.is-today {
   justify-content: center;
 }
 
-/* Floating Action Button (FAB) para Enfoque */
+/* Floating Action Button (FAB) para Enfoque: compacto (icono + etiqueta) para alinearse con +/asistente */
 .focus-fab {
   position: fixed;
-  bottom: 24px;
-  right: 90px;
+  bottom: calc(var(--float-base) + (var(--float-size) + var(--float-gap)) * 2);
+  right: var(--float-right);
   z-index: 990;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 12px 20px;
+  justify-content: center;
+  gap: 1px;
+  width: var(--float-size);
+  height: var(--float-size);
+  padding: 0;
   background: var(--accent-amber);
   color: #111111;
   border: none;
-  border-radius: 28px;
+  border-radius: 18px;
   box-shadow: 0 4px 14px rgba(245, 184, 46, 0.35);
   cursor: pointer;
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 0.62rem;
+  line-height: 1;
   transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
-  min-height: 48px;
 }
+.focus-fab .material-icons-round { font-size: 22px; }
+.focus-fab-label { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .focus-fab:hover {
   transform: translateY(-2px);
@@ -2125,14 +2139,10 @@ body.dark-mode .diario-legend .legend-box.is-today {
   100% { transform: scale(1); }
 }
 
-@media (max-width: 600px) {
-  .focus-fab {
-    bottom: 80px;
-    right: 16px;
-    padding: 10px 14px;
-    font-size: 0.8rem;
-  }
+@media (max-width: 768px) {
+  .focus-fab { bottom: var(--float-base); right: calc(var(--float-right) + (var(--float-size) + var(--float-gap)) * 2); }
 }
+
 
 /* ==========================================================================
    STUDY SUB-TABS & FOCUS STATS (FASE D2)
