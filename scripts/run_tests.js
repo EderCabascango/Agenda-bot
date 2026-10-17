@@ -106,6 +106,11 @@ const steps = [
     name: '5.i E2E Rediseño Matriz Mensual: Paleta Ámbar/Grises, Desbordes y Accesibilidad',
     cmd: PYTHON,
     args: [path.join(ROOT_DIR, 'scripts/test_matrix_redesign.py')]
+  },
+  {
+    name: '5.j E2E Excel: Plantilla e Importación con SheetJS Local (sin CDN)',
+    cmd: PYTHON,
+    args: [path.join(ROOT_DIR, 'scripts/test_e2e_excel.py')]
   }
 ];
 
