@@ -181,6 +181,7 @@ class SyncRequest(BaseModel):
 class MultiCollectionSyncRequest(BaseModel):
     collections: dict[str, list[dict]] = {}
     since: str | None = None
+    full_pull: bool = False  # el cliente nunca ha sincronizado: devolver todo
 
 
 @app.get("/activities")
@@ -205,7 +206,7 @@ def sync_activities_endpoint(body: SyncRequest, user: str = Depends(auth)):
 @app.post("/sync")
 def sync_all_collections_endpoint(body: MultiCollectionSyncRequest, user: str = Depends(auth)):
     try:
-        return db.sync_collections(user, body.collections, since=body.since)
+        return db.sync_collections(user, body.collections, since=body.since, full_pull=body.full_pull)
     except ValueError as e:
         raise HTTPException(400, str(e))
 

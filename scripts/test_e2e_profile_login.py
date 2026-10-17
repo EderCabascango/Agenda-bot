@@ -110,6 +110,13 @@ def run():
             assert not page.is_visible('#app-wrapper')
             print("  [OK] Sin sesión y con sesión caducada se muestra el login.")
 
+            # Datos que ya existen en el servidor (creados desde "otro dispositivo")
+            today = datetime.now().strftime('%Y-%m-%d')
+            api(server, "POST", "/sync", {"since": None, "collections": {
+                "subjects": [{"id": "sub-servidor", "name": "Materia del servidor"}],
+                "activities": [{"id": "act-servidor", "title": "Actividad del servidor", "date": today}],
+            }})
+
             # ── 5. Login con el formulario ──
             login_via_form(page, server.email, 'contraseña-incorrecta')
             page.wait_for_selector('#login-error:not([hidden])')
@@ -122,6 +129,15 @@ def run():
             page.wait_for_function("() => document.querySelector('#user-avatar').textContent.trim() === 'AL'")
             assert page.input_value('#login-password') == '', "La contraseña no debe quedarse en el formulario"
             print(f"  [OK] Contraseña incorrecta: {error!r}. Contraseña correcta: entra a la app.")
+
+            # Primera sincronización de este navegador nuevo: debe traer lo que ya había en el servidor
+            page.wait_for_function("""() => {
+                const subs = JSON.parse(localStorage.getItem('diary_subjects') || '[]');
+                const acts = JSON.parse(localStorage.getItem('diary_activities') || '[]');
+                return subs.some(s => s.id === 'sub-servidor') && acts.some(a => a.id === 'act-servidor');
+            }""", timeout=10000)
+            assert page.evaluate("() => !!localStorage.getItem('diary_last_sync')"), "Tras la primera sincronización debe quedar fecha"
+            print("  [OK] Dispositivo nuevo: la primera sincronización trae materias y actividades del servidor.")
 
             # ── 6. Cambiar contraseña cierra la sesión del otro dispositivo ──
             other_device = {"Authorization": f"Bearer {api(server, 'POST', '/auth/login', {'email': server.email, 'password': server.password}, headers={})['token']}"}

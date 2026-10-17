@@ -1424,3 +1424,44 @@ def test_created_at_schema_and_migration():
 
 
 
+
+
+def test_new_device_full_pull_receives_all_server_data():
+    """Un dispositivo sin fecha de última sincronización (full_pull) recibe todo lo del servidor,
+    tombstones incluidos, sin que since=None cambie su comportamiento para los envíos normales."""
+    user = "user_new_device"
+    headers = {"Authorization": f"Bearer {issue_session(user)['token']}"}
+    seed = {
+        "since": None,
+        "collections": {
+            "activities": [{"id": "act_nd_1", "title": "Leer", "date": "2026-10-16"},
+                           {"id": "act_nd_2", "title": "Borrada", "date": "2026-10-16"}],
+            "subjects": [{"id": "sub_nd_1", "name": "Inglés"}],
+            "focus_sessions": [{"id": "foc_nd_1", "subject_id": "sub_nd_1", "source": "manual", "effective_seconds": 600}],
+        },
+    }
+    assert client.post("/sync", json=seed, headers=headers).status_code == 200
+    delete = {"since": None, "collections": {"activities": [{"id": "act_nd_2", "title": "Borrada", "date": "2026-10-16",
+                                                            "base_version": 1, "deleted_at": "2026-10-16T10:00:00Z"}]}}
+    assert client.post("/sync", json=delete, headers=headers).status_code == 200
+
+    # Sin full_pull y sin since: comportamiento anterior (no devuelve nada)
+    empty = client.post("/sync", json={"since": None, "collections": {"activities": []}}, headers=headers).json()
+    assert empty["results"]["activities"]["changes"] == []
+
+    # Dispositivo nuevo: full_pull devuelve todo, sin pedir resync destructivo
+    new_device = {"since": None, "full_pull": True,
+                  "collections": {"activities": [], "subjects": [], "topics": [], "focus_sessions": [], "learning_notes": []}}
+    data = client.post("/sync", json=new_device, headers=headers).json()
+    assert data["resync_required"] is False
+    acts = {a["id"]: a for a in data["results"]["activities"]["changes"]}
+    assert set(acts) == {"act_nd_1", "act_nd_2"}
+    assert acts["act_nd_1"]["deleted_at"] is None
+    assert acts["act_nd_2"]["deleted_at"] is not None, "Los tombstones también llegan para limpiar copias locales"
+    assert [s["id"] for s in data["results"]["subjects"]["changes"]] == ["sub_nd_1"]
+    assert [f["id"] for f in data["results"]["focus_sessions"]["changes"]] == ["foc_nd_1"]
+
+    # Aislamiento: otro usuario con full_pull no ve estos datos
+    other = {"Authorization": f"Bearer {issue_session('otro_usuario_nd')['token']}"}
+    other_data = client.post("/sync", json=new_device, headers=other).json()
+    assert all(not r["changes"] for r in other_data["results"].values())

@@ -740,9 +740,15 @@ def sync_collection(
     changes: list[dict],
     since: str | None = None,
     purge_days: int = PURGE_DAYS_DEFAULT,
-    conn: sqlite3.Connection | None = None
+    conn: sqlite3.Connection | None = None,
+    full_pull: bool = False
 ) -> dict:
-    """Sincronización transaccional genérica por colección."""
+    """Sincronización transaccional genérica por colección.
+
+    full_pull=True (cliente sin fecha de última sincronización, p. ej. un dispositivo nuevo):
+    devuelve todo lo que hay en el servidor, tombstones incluidos, para que el cliente lo mezcle
+    por versión sin descartar lo que tenga en local.
+    """
     if collection_name not in WHITELISTED_COLLECTIONS:
         raise ValueError(f"Colección no permitida: '{collection_name}'")
 
@@ -859,6 +865,8 @@ def sync_collection(
             remote_changes = list_collection(user_id, collection_name, include_deleted=False, conn=c)
         elif since:
             remote_changes = list_collection(user_id, collection_name, since=since, include_deleted=True, conn=c)
+        elif full_pull:
+            remote_changes = list_collection(user_id, collection_name, include_deleted=True, conn=c)
         else:
             remote_changes = []
 
@@ -899,7 +907,8 @@ def sync_collections(
     user_id: str,
     collections_payload: dict[str, list[dict]],
     since: str | None = None,
-    purge_days: int = PURGE_DAYS_DEFAULT
+    purge_days: int = PURGE_DAYS_DEFAULT,
+    full_pull: bool = False
 ) -> dict:
     """Sincronización multi-colección dentro de una única transacción atómica."""
     for col_name in collections_payload.keys():
@@ -914,7 +923,7 @@ def sync_collections(
         conn.execute("BEGIN IMMEDIATE")
         now = monotonic_utc_now_iso()
         for col_name, changes in collections_payload.items():
-            res = sync_collection(user_id, col_name, changes, since=since, purge_days=purge_days, conn=conn)
+            res = sync_collection(user_id, col_name, changes, since=since, purge_days=purge_days, conn=conn, full_pull=full_pull)
             results[col_name] = res
             if res.get("resync_required"):
                 resync_required = True

@@ -4650,7 +4650,8 @@ SIEMPRE devuelve un JSON válido.
       const res = await fetch(base + '/sync', {
         method: 'POST',
         headers: backendHeaders(),
-        body: JSON.stringify({ collections: collectionsPayload, since: lastSync })
+        // Sin fecha de última sincronización (dispositivo nuevo o datos locales borrados) se pide todo al servidor.
+        body: JSON.stringify({ collections: collectionsPayload, since: lastSync, full_pull: !lastSync })
       });
       if (res.status === 401) { handleUnauthorized(); return false; }
       if (!res.ok) return false;
