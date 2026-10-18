@@ -472,9 +472,36 @@
     );
   }
 
+  // Repaso espaciado (Fase F): intervalos en días desde la fecha de la nota.
+  const SPACED_REVIEW_INTERVALS = [1, 3, 7, 21];
+
+  function addDaysToDateStr(dateStr, days) {
+    const [y, m, d] = String(dateStr).split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d + days));
+    return dt.toISOString().substring(0, 10);
+  }
+
+  /**
+   * Planifica las tareas de repaso de una nota. Puro: no crea actividades, devuelve
+   * [{ step, total, days, date, title }] para que la app las guarde y sincronice.
+   */
+  function planSpacedReviews(baseDateStr, label, intervals = SPACED_REVIEW_INTERVALS) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(baseDateStr || ''))) return [];
+    const cleanLabel = String(label || 'Nota de aprendizaje').trim() || 'Nota de aprendizaje';
+    return intervals.map((days, i) => ({
+      step: i + 1,
+      total: intervals.length,
+      days,
+      date: addDaysToDateStr(baseDateStr, days),
+      title: `Repaso ${i + 1}/${intervals.length}: ${cleanLabel}`
+    }));
+  }
+
   return {
     SUGGESTED_SEEDS,
     DEFAULT_FOCUS_TAGS,
+    SPACED_REVIEW_INTERVALS,
+    planSpacedReviews,
     shouldAllowFocusDefault,
     planSeedCreation,
     decideSubjectRemoval,

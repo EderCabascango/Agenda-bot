@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:8000;" />
   <link rel="stylesheet" href="fonts/material-icons-round.css" />
-  <link rel="stylesheet" href="style.css?v=10" />
+  <link rel="stylesheet" href="style.css?v=11" />
 </head>
 <body>
 
@@ -97,9 +97,9 @@
           </div>
 
           <!-- Active Timer widget pill -->
-          <div class="topbar-timer-widget" id="btn-focus-timer">
+          <div class="topbar-timer-widget is-idle" id="btn-focus-timer">
             <span class="timer-badge-label">TIMER ACTIVO</span>
-            <span class="timer-badge-value" id="topbar-focus-badge">Pomodoro (25 min)</span>
+            <span class="timer-badge-value" id="topbar-focus-badge">Iniciar enfoque</span>
             <button class="timer-play-btn material-icons-round" id="topbar-timer-play">play_arrow</button>
           </div>
 
@@ -511,6 +511,35 @@
               </div>
             </div>
             <div class="settings-group">
+              <h4>Enfoque y Estudio</h4>
+              <div class="setting-item">
+                <div class="setting-info">
+                  <span class="material-icons-round">do_not_disturb_on</span>
+                  <div>
+                    <p class="setting-title">Modo no molestar</p>
+                    <p class="setting-desc">Silencia alarmas y notificaciones mientras corre una sesión de enfoque; los avisos se muestran al terminar</p>
+                  </div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="setting-focus-dnd" checked />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-item">
+                <div class="setting-info">
+                  <span class="material-icons-round">event_repeat</span>
+                  <div>
+                    <p class="setting-title">Repaso espaciado</p>
+                    <p class="setting-desc">Al guardar una nota de aprendizaje crea repasos a 1, 3, 7 y 21 días</p>
+                  </div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="setting-spaced-review" checked />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="settings-group">
               <h4>Datos</h4>
               <div class="setting-item">
                 <div class="setting-info">
@@ -547,8 +576,8 @@
                 <div class="setting-info">
                   <span class="material-icons-round">delete_forever</span>
                   <div>
-                    <p class="setting-title">Borrar todos los datos</p>
-                    <p class="setting-desc">Esta acción no se puede deshacer</p>
+                    <p class="setting-title">Borrar todas las actividades</p>
+                    <p class="setting-desc">En todos tus dispositivos. Antes se descarga un respaldo JSON</p>
                   </div>
                 </div>
                 <button class="btn-danger" id="btn-clear-data">Borrar</button>
@@ -693,6 +722,27 @@
           <div class="modal-actions">
             <button class="btn-secondary" id="delete-cancel">Cancelar</button>
             <button class="btn-danger" id="delete-confirm">Eliminar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirmación de acciones críticas (reemplaza los confirm() del navegador) -->
+    <div class="modal-overlay" id="confirm-action-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-action-title">
+      <div class="modal modal-sm">
+        <div class="modal-header">
+          <h3 id="confirm-action-title">Confirmar</h3>
+          <button type="button" class="modal-close material-icons-round" id="confirm-action-close" aria-label="Cerrar">close</button>
+        </div>
+        <div class="modal-body">
+          <p id="confirm-action-message" class="confirm-action-message"></p>
+          <label class="confirm-action-typed" id="confirm-action-typed-wrap" hidden>
+            <span id="confirm-action-typed-label"></span>
+            <input type="text" class="setting-input" id="confirm-action-typed" autocomplete="off" spellcheck="false" />
+          </label>
+          <div class="modal-actions">
+            <button type="button" class="btn-secondary" id="confirm-action-cancel">Cancelar</button>
+            <button type="button" class="btn-danger" id="confirm-action-ok">Confirmar</button>
           </div>
         </div>
       </div>
@@ -1094,6 +1144,18 @@
           <span id="focus-active-goal-text" style="font-size:0.85rem; color:var(--text-secondary);"></span>
         </div>
 
+        <!-- Sonido ambiental y modo no molestar (Fase F) -->
+        <div class="focus-ambient-row">
+          <label class="focus-ambient-field">
+            <span class="material-icons-round" aria-hidden="true">graphic_eq</span>
+            <select id="focus-ambient-select" aria-label="Sonido ambiental"></select>
+          </label>
+          <input type="range" id="focus-ambient-volume" min="0" max="100" step="5" aria-label="Volumen del sonido ambiental" />
+          <span class="focus-dnd-badge" id="focus-dnd-badge" hidden>
+            <span class="material-icons-round" aria-hidden="true">do_not_disturb_on</span> No molestar
+          </span>
+        </div>
+
         <!-- Registro rápido de distracciones -->
         <div style="margin:16px 0; text-align:left; background:var(--bg-primary); padding:12px; border-radius:var(--radius-md);">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
@@ -1392,6 +1454,7 @@
   <script src="focus-core.js?v=9"></script>
   <script src="timer-core.js?v=9"></script>
   <script src="stats-core.js?v=9"></script>
-  <script src="app.js?v=13"></script>
+  <script src="ambient-core.js?v=1"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>

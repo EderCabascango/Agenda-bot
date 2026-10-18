@@ -60,6 +60,8 @@ def run():
             # ── 2. Cargar con el botón y sincronizar ──
             page.click('.nav-item[data-view="settings"]')
             page.click('#btn-restore-routine')
+            page.wait_for_selector('#confirm-action-overlay.open')
+            page.click('#confirm-action-ok')
             page.wait_for_function("() => JSON.parse(localStorage.getItem('diary_sync_queue') || '[]').length === 0", timeout=15000)
             first = server_week_activities(server)
             titles = {a['title'] for a in first}
@@ -68,6 +70,8 @@ def run():
 
             # ── 3. Recargar reemplaza, no duplica ──
             page.click('#btn-restore-routine')
+            page.wait_for_selector('#confirm-action-overlay.open')
+            page.click('#confirm-action-ok')
             page.wait_for_function("() => JSON.parse(localStorage.getItem('diary_sync_queue') || '[]').length === 0", timeout=15000)
             second = server_week_activities(server)
             assert len(second) == len(first), f"Recargar debe reemplazar ({len(first)}), no duplicar ({len(second)})"

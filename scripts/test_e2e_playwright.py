@@ -715,7 +715,10 @@ def test_playwright_e2e_full_sync():
                 const tops = JSON.parse(localStorage.getItem('diary_topics') || '[]');
                 const top = tops.find(t => t.name === 'Listening Avanzado C1');
                 if (top) {
-                    window.handleDeleteTopic(top.id);
+                    // Borrar un tema ahora pide confirmación: se acepta el aviso propio de la app.
+                    const pending = window.handleDeleteTopic(top.id);
+                    document.getElementById('confirm-action-ok').click();
+                    await pending;
                 }
                 await window.syncWithBackend();
             }""")
@@ -889,6 +892,9 @@ def test_playwright_e2e_full_sync():
             # Pausar y Finalizar sesión
             page_a.click("#btn-pause-resume-focus")
             page_a.click("#btn-finish-focus")
+            # Sesión de menos de 1 minuto: la app pregunta si descartarla; se conserva con "Cancelar".
+            page_a.wait_for_selector("#confirm-action-overlay.open", timeout=3000)
+            page_a.click("#confirm-action-cancel")
             page_a.wait_for_selector("#focus-summary-view", state="visible", timeout=3000)
 
             # Rellenar notas de aprendizaje

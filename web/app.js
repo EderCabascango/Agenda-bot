@@ -267,6 +267,50 @@
   let editingId = null;
   let deletingId = null;
 
+  // ── Confirmación de acciones críticas ──
+  // Devuelve una promesa que resuelve true solo si el usuario confirma. Con requireText,
+  // el botón se activa cuando escribe exactamente esa palabra (para lo irreversible).
+  function confirmAction({ title = 'Confirmar', message = '', confirmLabel = 'Confirmar', requireText = '' } = {}) {
+    const overlay = $('#confirm-action-overlay');
+    if (!overlay) return Promise.resolve(false);
+    const okBtn = $('#confirm-action-ok');
+    const typedWrap = $('#confirm-action-typed-wrap');
+    const typedInput = $('#confirm-action-typed');
+
+    $('#confirm-action-title').textContent = title;
+    $('#confirm-action-message').textContent = message;
+    okBtn.textContent = confirmLabel;
+    typedWrap.hidden = !requireText;
+    typedInput.value = '';
+    $('#confirm-action-typed-label').textContent = requireText ? `Escribe ${requireText} para confirmar` : '';
+    okBtn.disabled = !!requireText;
+
+    return new Promise(resolve => {
+      const onTyped = () => { okBtn.disabled = typedInput.value.trim() !== requireText; };
+      const finish = (result) => {
+        overlay.classList.remove('open');
+        okBtn.removeEventListener('click', onOk);
+        ['#confirm-action-cancel', '#confirm-action-close'].forEach(id => $(id).removeEventListener('click', onCancel));
+        overlay.removeEventListener('click', onBackdrop);
+        typedInput.removeEventListener('input', onTyped);
+        document.removeEventListener('keydown', onKey);
+        resolve(result);
+      };
+      const onOk = () => { if (!okBtn.disabled) finish(true); };
+      const onCancel = () => finish(false);
+      const onBackdrop = (e) => { if (e.target === overlay) finish(false); };
+      const onKey = (e) => { if (e.key === 'Escape') finish(false); };
+
+      okBtn.addEventListener('click', onOk);
+      ['#confirm-action-cancel', '#confirm-action-close'].forEach(id => $(id).addEventListener('click', onCancel));
+      overlay.addEventListener('click', onBackdrop);
+      typedInput.addEventListener('input', onTyped);
+      document.addEventListener('keydown', onKey);
+      overlay.classList.add('open');
+      (requireText ? typedInput : $('#confirm-action-cancel')).focus();
+    });
+  }
+
   // ── Toast ──
   function showToast(msg, icon = 'check_circle', color = 'var(--accent-teal)') {
     const toast = $('#toast');
@@ -1403,6 +1447,67 @@
   // ── Web Notification System ──
   let scheduledAlarms = [];
 
+  // ── Modo no molestar y sonido ambiental durante el enfoque (Fase F) ──
+  let dndQueue = [];
+  const ambientPlayer = (typeof AmbientCore !== 'undefined') ? AmbientCore.createAmbientPlayer() : null;
+
+  function isFocusInProgress() {
+    return !!activeFocusTimer && ['running', 'paused', 'break', 'waiting'].includes(activeFocusTimer.status);
+  }
+  function isDndActive() {
+    return loadSettings().focusDnd !== false && isFocusInProgress();
+  }
+
+  // Se llama en cada tick y en cada cambio del temporizador: arranca/para el sonido y,
+  // al terminar el enfoque, entrega los avisos que se guardaron en silencio.
+  function syncFocusSideEffects() {
+    const s = loadSettings();
+    if (ambientPlayer) {
+      const wanted = (activeFocusTimer && activeFocusTimer.status === 'running') ? (s.ambientSound || 'none') : 'none';
+      if (wanted === 'none') ambientPlayer.stop(); else ambientPlayer.play(wanted);
+    }
+    const badge = $('#focus-dnd-badge');
+    if (badge) badge.hidden = !isDndActive();
+    if (!isDndActive() && dndQueue.length) flushDndQueue();
+  }
+
+  function flushDndQueue() {
+    const pending = dndQueue;
+    dndQueue = [];
+    pending.forEach(({ act, minuteLabel }) => addNotifToPanel(act, minuteLabel));
+    const titles = pending.map(p => p.act.title).join(', ');
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      try { new Notification('Mi Diario – Avisos durante tu enfoque', { body: titles, tag: 'dnd-summary' }); } catch (e) {}
+    }
+    playAlarmSound();
+    // Después del toast de cierre de la sesión, para que no lo pise.
+    setTimeout(() => showToast(`Mientras te enfocabas: ${pending.length} aviso(s) — ${titles}`, 'notifications', 'var(--accent-amber)'), 2500);
+  }
+
+  function initAmbientControls() {
+    const select = $('#focus-ambient-select');
+    const volume = $('#focus-ambient-volume');
+    if (!select || !volume || typeof AmbientCore === 'undefined') return;
+    const s = loadSettings();
+    select.innerHTML = AmbientCore.SOUNDS.map(o => `<option value="${o.id}">${escHTML(o.label)}</option>`).join('');
+    select.value = AmbientCore.SOUND_IDS.includes(s.ambientSound) ? s.ambientSound : 'none';
+    volume.value = Math.round((typeof s.ambientVolume === 'number' ? s.ambientVolume : 0.4) * 100);
+    if (ambientPlayer) ambientPlayer.setVolume(volume.value / 100);
+    select.addEventListener('change', () => {
+      settings = loadSettings();
+      settings.ambientSound = select.value;
+      saveSettings(settings);
+      syncFocusSideEffects();
+    });
+    document.addEventListener('pointerdown', () => ambientPlayer && ambientPlayer.unlock());
+    volume.addEventListener('input', () => {
+      settings = loadSettings();
+      settings.ambientVolume = volume.value / 100;
+      saveSettings(settings);
+      if (ambientPlayer) ambientPlayer.setVolume(settings.ambientVolume);
+    });
+  }
+
   function requestNotifPermission() {
     if (!('Notification' in window)) {
       showToast('Tu navegador no soporta notificaciones', 'warning', 'var(--accent-amber)');
@@ -1454,6 +1559,10 @@
       if (delay > 0) {
         const timerId = setTimeout(() => {
           const minuteLabel = advance > 0 ? `en ${advance} min` : 'ahora';
+          if (isDndActive()) {
+            dndQueue.push({ act, minuteLabel });
+            return;
+          }
           const body = `"${act.title}" comienza ${minuteLabel} (${act.startTime}${act.endTime ? ' – ' + act.endTime : ''})`;
 
           if (Notification.permission === 'granted') {
@@ -1535,6 +1644,21 @@
       });
     }
 
+    const bindToggle = (selector, key, onMsg, offMsg) => {
+      const el = $(selector);
+      if (!el) return;
+      el.checked = settings[key] !== false;
+      el.addEventListener('change', (e) => {
+        settings = loadSettings();
+        settings[key] = e.target.checked;
+        saveSettings(settings);
+        showToast(e.target.checked ? onMsg : offMsg);
+        syncFocusSideEffects();
+      });
+    };
+    bindToggle('#setting-focus-dnd', 'focusDnd', 'Modo no molestar activado', 'Modo no molestar desactivado');
+    bindToggle('#setting-spaced-review', 'spacedReview', 'Repaso espaciado activado', 'Repaso espaciado desactivado');
+
     const advanceSelect = $('#setting-alarm-advance');
     if (advanceSelect) {
       advanceSelect.value = settings.alarmAdvance || '5';
@@ -1609,24 +1733,7 @@
     const btnExport = $('#btn-export');
     if (btnExport) {
       btnExport.addEventListener('click', () => {
-        let exportObj;
-        if (typeof SyncCore !== 'undefined' && SyncCore.exportAllCollections) {
-          exportObj = SyncCore.exportAllCollections({
-            activities,
-            subjects,
-            topics,
-            focus_sessions: focusSessions,
-            learning_notes: learningNotes
-          });
-        } else {
-          exportObj = activities;
-        }
-        const data = JSON.stringify(exportObj, null, 2);
-        const blob = new Blob([data], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = `mi-diario-backup-${todayStr()}.json`;
-        a.click(); URL.revokeObjectURL(url);
+        downloadBackup('mi-diario-backup');
         showToast('Datos exportados');
       });
     }
@@ -1697,9 +1804,11 @@
             }
 
             const totalItems = Object.values(val.sanitized).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0);
-            const proceed = confirm(
-              `¿Deseas restaurar ${totalItems} elementos de datos?\nSe creará un respaldo automático de tu agenda actual antes de importar.`
-            );
+            const proceed = await confirmAction({
+              title: 'Restaurar respaldo',
+              message: `Se restaurarán ${totalItems} elementos. Antes se guarda un respaldo automático de tu agenda actual.`,
+              confirmLabel: 'Restaurar'
+            });
             if (!proceed) {
               importFile.value = '';
               return;
@@ -1768,29 +1877,73 @@
 
     const btnClear = $('#btn-clear-data');
     if (btnClear) {
-      btnClear.addEventListener('click', () => {
-        if (confirm('¿Estás seguro? Se borrarán todas las actividades.')) {
-          activities = [];
-          saveActivities(activities);
-          renderDashboard();
-          renderActivityList();
-          renderCalendar();
-          showToast('Todos los datos borrados', 'delete_forever', 'var(--accent-red)');
-        }
+      btnClear.addEventListener('click', async () => {
+        const total = activities.filter(a => a && !a.deleted_at).length;
+        const ok = await confirmAction({
+          title: 'Borrar todas las actividades',
+          message: `Se borrarán tus ${total} actividades en este dispositivo, en el servidor y en tus otros dispositivos. Antes se descargará un respaldo JSON para que puedas recuperarlas.`,
+          confirmLabel: 'Borrar todo',
+          requireText: 'BORRAR'
+        });
+        if (!ok) return;
+        downloadBackup('mi-diario-respaldo-antes-de-borrar');
+        deleteAllActivitiesEverywhere();
+        showToast('Actividades borradas en todos tus dispositivos', 'delete_forever', 'var(--accent-red)');
       });
     }
 
     const btnRestoreRoutine = $('#btn-restore-routine');
     if (btnRestoreRoutine) {
-      btnRestoreRoutine.addEventListener('click', () => {
-        if (confirm('¿Cargar la rutina base en la semana actual? Se reemplazarán las actividades de esta semana en todos tus dispositivos.')) {
-          loadBaseRoutine();
-          renderActivityList();
-          renderCalendar();
-          showToast('Rutina base cargada ✓', 'restart_alt', 'var(--accent-teal)');
-        }
+      btnRestoreRoutine.addEventListener('click', async () => {
+        const ok = await confirmAction({
+          title: 'Cargar rutina base',
+          message: 'Se reemplazarán las actividades de esta semana por tu rutina base, en todos tus dispositivos. Las demás semanas no cambian.',
+          confirmLabel: 'Cargar rutina'
+        });
+        if (!ok) return;
+        loadBaseRoutine();
+        renderActivityList();
+        renderCalendar();
+        showToast('Rutina base cargada ✓', 'restart_alt', 'var(--accent-teal)');
       });
     }
+  }
+
+  // Descarga un respaldo JSON de todas las colecciones (también se usa antes de borrar todo).
+  function downloadBackup(prefix) {
+    let exportObj;
+    if (typeof SyncCore !== 'undefined' && SyncCore.exportAllCollections) {
+      exportObj = SyncCore.exportAllCollections({
+        activities,
+        subjects,
+        topics,
+        focus_sessions: focusSessions,
+        learning_notes: learningNotes
+      });
+    } else {
+      exportObj = activities;
+    }
+    const data = JSON.stringify(exportObj, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${prefix}-${todayStr()}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // Borra todas las actividades aquí, en el servidor y en los demás dispositivos (viajan como tombstones).
+  function deleteAllActivitiesEverywhere() {
+    const nowIso = new Date().toISOString();
+    activities.filter(a => a && !a.deleted_at).forEach(a => {
+      enqueueChange({ ...a, collection: 'activities', deleted_at: nowIso, updated_at: nowIso, base_version: a.version || 1, version: (a.version || 1) + 1 });
+    });
+    activities = [];
+    saveActivities(activities);
+    renderDashboard();
+    renderActivityList();
+    renderCalendar();
+    if (loadSession()) syncWithBackend();
   }
 
   // ── HTML Escaping (XSS Prevention) ──
@@ -2113,7 +2266,8 @@
       learningNotes.push(newNote);
       saveLearningNotes(learningNotes);
       enqueueChange({ ...newNote, collection: 'learning_notes' });
-      showToast('Nota de aprendizaje creada ✓');
+      const reviews = scheduleSpacedReviewsForNote(newNote);
+      showToast(reviews ? `Nota creada ✓ · ${reviews} repasos programados (1, 3, 7 y 21 días)` : 'Nota de aprendizaje creada ✓');
     }
 
     closeNoteModal();
@@ -2121,7 +2275,10 @@
     syncWithBackend();
   }
 
-  function handleDeleteNote(noteId) {
+  async function handleDeleteNote(noteId) {
+    learningNotes = loadLearningNotes();
+    if (!learningNotes.some(n => n.id === noteId)) return;
+    if (!await confirmAction({ title: 'Eliminar nota', message: 'La nota de aprendizaje se eliminará en todos tus dispositivos.', confirmLabel: 'Eliminar' })) return;
     learningNotes = loadLearningNotes();
     const idx = learningNotes.findIndex(n => n.id === noteId);
     if (idx === -1) return;
@@ -2200,46 +2357,67 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     showToast('Nota descargada como Markdown (.md) ✓', 'download', 'var(--accent-teal)');
   }
 
-  function handleCreateReviewTaskFromNote(noteId) {
-    learningNotes = loadLearningNotes();
+  // "Materia - temas" (o la fecha de la nota si no tiene temas) para titular sus repasos.
+  function noteReviewLabel(note) {
     subjects = loadSubjects();
     topics = loadTopics();
-    const note = learningNotes.find(n => n.id === noteId || n.activity_id === noteId);
-    if (!note) return;
-
     const sub = subjects.find(s => s.id === note.subject_id);
     const subName = sub ? sub.name : 'Sin materia';
-
     let subtopicOrDate = (note.created_at || new Date().toISOString()).substring(0, 10);
     if (note.topic_ids && note.topic_ids.length > 0) {
       const matched = topics.filter(t => note.topic_ids.includes(t.id));
-      if (matched.length > 0) {
-        subtopicOrDate = matched.map(t => t.name).join(', ');
-      }
+      if (matched.length > 0) subtopicOrDate = matched.map(t => t.name).join(', ');
     }
+    return `${subName} - ${subtopicOrDate}`;
+  }
 
-    const taskTitle = `Repaso: ${subName} - ${subtopicOrDate}`;
-
-    // Fecha programada: mañana
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const dateStr = tomorrow.toISOString().substring(0, 10);
-
+  function buildReviewActivity(note, title, dateStr) {
     const cleanLearned = stripHtmlTags(note.learned_text || '');
     const cleanQuestions = stripHtmlTags(note.questions_text || 'Ninguna');
-
-    activities = loadActivities();
-    const newAct = {
+    return {
       id: uid(),
-      title: taskTitle,
+      title,
       date: dateStr,
       startTime: '09:00',
       endTime: '10:00',
       description: `Repaso de nota de aprendizaje.\n\nPuntos a revisar:\n${cleanLearned}\n\nDudas pendientes:\n${cleanQuestions}`,
       priority: 'high',
       tags: ['repaso', 'estudio'],
-      completed: false
+      completed: false,
+      updated_at: new Date().toISOString(),
+      version: 1
     };
+  }
+
+  // Repaso espaciado automático (1, 3, 7 y 21 días). Se desactiva en Ajustes → "Repaso espaciado".
+  function scheduleSpacedReviewsForNote(note) {
+    settings = loadSettings();
+    if (settings.spacedReview === false || typeof FocusCore === 'undefined' || !FocusCore.planSpacedReviews) return 0;
+    const plan = FocusCore.planSpacedReviews(todayStr(), noteReviewLabel(note));
+    if (!plan.length) return 0;
+    activities = loadActivities();
+    plan.forEach(r => {
+      const act = buildReviewActivity(note, r.title, r.date);
+      activities.push(act);
+      enqueueChange({ ...act, collection: 'activities' });
+    });
+    saveActivities(activities);
+    renderActivityList();
+    return plan.length;
+  }
+
+  function handleCreateReviewTaskFromNote(noteId) {
+    learningNotes = loadLearningNotes();
+    const note = learningNotes.find(n => n.id === noteId || n.activity_id === noteId);
+    if (!note) return;
+
+    // Fecha programada: mañana
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const dateStr = toDateStr(tomorrow);
+
+    activities = loadActivities();
+    const newAct = buildReviewActivity(note, `Repaso: ${noteReviewLabel(note)}`, dateStr);
 
     activities.push(newAct);
     saveActivities(activities);
@@ -3204,7 +3382,10 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     syncWithBackend();
   }
 
-  function handleDeleteFocusSession(sessionId) {
+  async function handleDeleteFocusSession(sessionId) {
+    focusSessions = loadFocusSessions();
+    if (!focusSessions.some(s => s.id === sessionId)) return;
+    if (!await confirmAction({ title: 'Eliminar sesión', message: 'La sesión de estudio y su tiempo se eliminarán de tus estadísticas en todos tus dispositivos.', confirmLabel: 'Eliminar' })) return;
     focusSessions = loadFocusSessions();
     const idx = focusSessions.findIndex(s => s.id === sessionId);
     if (idx === -1) return;
@@ -3343,7 +3524,11 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     syncWithBackend();
   }
 
-  function handleDeleteTopic(topicId) {
+  async function handleDeleteTopic(topicId) {
+    topics = loadTopics();
+    const target = topics.find(t => t.id === topicId);
+    if (!target) return;
+    if (!await confirmAction({ title: 'Eliminar tema', message: `Se eliminará el tema "${target.name || ''}" en todos tus dispositivos.`, confirmLabel: 'Eliminar' })) return;
     topics = loadTopics();
     const idx = topics.findIndex(t => t.id === topicId);
     if (idx === -1) return;
@@ -3368,7 +3553,7 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     syncWithBackend();
   }
 
-  function handleDeleteOrArchiveSubject(subjectId) {
+  async function handleDeleteOrArchiveSubject(subjectId) {
     subjects = loadSubjects();
     topics = loadTopics();
     focusSessions = loadFocusSessions();
@@ -3401,6 +3586,11 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     const decision = (typeof FocusCore !== 'undefined' && FocusCore.decideSubjectRemoval)
       ? FocusCore.decideSubjectRemoval(sub, focusSessions, learningNotes, childTopics)
       : { action: 'delete' };
+
+    const ok = await confirmAction(decision.action === 'archive'
+      ? { title: 'Archivar materia', message: `"${sub.name}" tiene historial de estudio, así que se archivará (no se pierden sus sesiones ni notas).`, confirmLabel: 'Archivar' }
+      : { title: 'Eliminar materia', message: `Se eliminará "${sub.name}" y sus ${childTopics.length} tema(s) en todos tus dispositivos.`, confirmLabel: 'Eliminar' });
+    if (!ok) return;
 
     const idx = subjects.findIndex(s => s.id === subjectId);
     if (idx === -1) return;
@@ -3597,12 +3787,18 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
   }
 
   function updateFocusUIBadges() {
+    syncFocusSideEffects();
     const topBadge = $('#topbar-focus-badge');
     const fab = $('#btn-focus-fab');
     const fabLabel = $('#focus-fab-label');
 
+    const topWidget = $('#btn-focus-timer');
     if (!activeFocusTimer || activeFocusTimer.status === 'idle' || activeFocusTimer.status === 'completed' || activeFocusTimer.status === 'abandoned') {
-      if (topBadge) topBadge.style.display = 'none';
+      if (topWidget) topWidget.classList.add('is-idle');
+      if (topBadge) {
+        topBadge.textContent = 'Iniciar enfoque';
+        topBadge.style.display = 'inline-block';
+      }
       if (fab) {
         fab.classList.remove('active-session');
         if (fabLabel) fabLabel.textContent = 'Enfoque';
@@ -3617,6 +3813,7 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     const dispSec = activeFocusTimer.config.isCountdown ? metrics.remainingSeconds : metrics.currentPhaseElapsedSeconds;
     const timeText = formatTimeDisplay(dispSec);
 
+    if (topWidget) topWidget.classList.remove('is-idle');
     if (topBadge) {
       topBadge.textContent = timeText;
       topBadge.style.display = 'inline-block';
@@ -3922,6 +4119,7 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
         learningNotes.push(noteRecord);
         saveLearningNotes(learningNotes);
         enqueueChange({ ...noteRecord, collection: 'learning_notes' });
+        scheduleSpacedReviewsForNote(noteRecord);
       }
     }
 
@@ -4168,7 +4366,7 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
   }
 
   // ── Excel Routine File Handler ──
-  function handleRoutineFile(file) {
+  async function handleRoutineFile(file) {
     const startDateVal = $('#routine-start-date').value;
     const endDateVal = $('#routine-end-date').value;
     if (!startDateVal || !endDateVal) {
@@ -4182,6 +4380,15 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     if (end < start) {
       alert('La fecha de fin debe ser posterior a la fecha de inicio.');
       return;
+    }
+
+    if ($('#routine-clear-existing')?.checked) {
+      const ok = await confirmAction({
+        title: 'Importar y reemplazar',
+        message: `Se borrarán las actividades existentes entre ${startDateVal} y ${endDateVal} antes de importar la rutina.`,
+        confirmLabel: 'Reemplazar'
+      });
+      if (!ok) return;
     }
 
     const reader = new FileReader();
@@ -5478,11 +5685,11 @@ SIEMPRE devuelve un JSON válido.
       renderFocusTimerUI();
     });
 
-    $('#btn-finish-focus')?.addEventListener('click', () => {
+    $('#btn-finish-focus')?.addEventListener('click', async () => {
       if (!activeFocusTimer || typeof TimerCore === 'undefined') return;
       const finRes = TimerCore.finish(activeFocusTimer);
       if (finRes && finRes.action === 'ask_discard') {
-        if (confirm('La sesión duró menos de 1 minuto. ¿Deseas descartarla sin guardar?')) {
+        if (await confirmAction({ title: 'Sesión muy corta', message: 'La sesión duró menos de 1 minuto. ¿Descartarla sin guardar?', confirmLabel: 'Descartar' })) {
           clearActiveFocusSession();
           closeFocusModal();
           showToast('Sesión corta descartada');
@@ -5494,8 +5701,8 @@ SIEMPRE devuelve un JSON válido.
       renderFocusTimerUI();
     });
 
-    $('#btn-abandon-focus')?.addEventListener('click', () => {
-      if (confirm('¿Deseas descartar esta sesión de enfoque?')) {
+    $('#btn-abandon-focus')?.addEventListener('click', async () => {
+      if (await confirmAction({ title: 'Descartar sesión', message: 'Se perderá el tiempo registrado en esta sesión de enfoque.', confirmLabel: 'Descartar' })) {
         clearActiveFocusSession();
         closeFocusModal();
         showToast('Sesión descartada');
@@ -5648,6 +5855,8 @@ SIEMPRE devuelve un JSON válido.
 
     // Settings
     initSettings();
+    initAmbientControls();
+    updateFocusUIBadges();
 
     renderProfileUI();
     refreshProfileFromServer();

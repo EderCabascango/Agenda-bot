@@ -55,6 +55,8 @@ def run():
             page.evaluate("() => { const c = document.getElementById('routine-clear-existing'); if (c) c.checked = true; }")
             page.on("dialog", lambda d: d.accept())
             page.set_input_files('#routine-file-input', template_path)
+            page.wait_for_selector('#confirm-action-overlay.open')
+            page.click('#confirm-action-ok')
             page.wait_for_function("""() => {
                 const acts = JSON.parse(localStorage.getItem('diary_activities') || '[]');
                 return acts.some(a => a.date >= '2026-11-02' && a.date <= '2026-11-08');

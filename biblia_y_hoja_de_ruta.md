@@ -46,13 +46,15 @@ El desarrollo seguirá **únicamente** el siguiente orden secuencial:
 3. **Rediseño Visual** ✅:
    - Aprobada la línea **Taskly** (`design/mockup.html`): negro, blanco y amarillo ámbar. Sustituye a la referencia crema/negro/pastel.
    - Pendiente menor: llevar a la paleta los elementos que se salen (aviso rojo de vencidas, check verde, degradado verde del asistente) y corregir en móvil los botones flotantes superpuestos y el borde de la barra lateral.
-4. **Fase F (Extras)**:
-   - Sonidos ambientales, modo no molestar, algoritmo de repaso espaciado (1, 3, 7, 21 días).
+4. **Fase F (Extras)** ✅ (17-10-2026):
+   - Sonidos ambientales generados con WebAudio (ruido blanco, rosa, marrón y lluvia), sin archivos ni internet; suenan solo mientras corre el enfoque.
+   - Modo no molestar: durante el enfoque las alarmas se guardan en silencio y se entregan al terminar (activable en Ajustes).
+   - Repaso espaciado automático: al guardar una nota se crean repasos a 1, 3, 7 y 21 días (activable en Ajustes).
 5. **Seguridad (Antes de Desplegar)** — adelantada parcialmente a petición del usuario:
    - ✅ Autenticación que falla cerrado: `POST /auth/login` con correo (`OWNER_EMAIL`) y contraseña (hash scrypt, fijada con `python set_password.py`) → el backend emite su propio JWT (30 días). Sin `JWT_SECRET`, `OWNER_EMAIL` o contraseña fijada, la API no se abre. El login con Google se descartó el 16-10-2026 a petición del usuario.
    - ✅ Rate limit en el login (10 intentos/minuto por IP) y CORS sin comodín.
    - ✅ Perfil (nombre, apellido, rol, foto) en `GET/PUT /profile`, "Cambiar contraseña" (cierra las sesiones de otros dispositivos) y "Cerrar sesión".
-   - ⏳ Confirmaciones de acciones críticas.
+   - ✅ Confirmaciones de acciones críticas con un aviso propio: borrar notas, temas, materias, sesiones, descartar enfoque, restaurar respaldo, cargar rutina e importar reemplazando. "Borrar todas las actividades" borra en todos los dispositivos, exige escribir BORRAR y descarga antes un respaldo JSON.
 
 ---
 

@@ -2623,3 +2623,25 @@ body.is-logged-out > *:not(.login-screen):not(#toast) { display: none !important
 .subject-card--tone-amber { border-top: 4px solid var(--accent-amber); }
 .subject-card--tone-ink   { border-top: 4px solid var(--text-primary); }
 .subject-card--tone-gray  { border-top: 4px solid var(--text-muted); }
+
+/* Confirmación de acciones críticas */
+.confirm-action-message { color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5; margin-bottom: 14px; }
+.confirm-action-typed { display: flex; flex-direction: column; gap: 6px; font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 14px; }
+.confirm-action-typed[hidden] { display: none; }
+.confirm-action-typed .setting-input { max-width: none; width: 100%; letter-spacing: 1px; }
+#confirm-action-ok:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Sonido ambiental y no molestar en el temporizador (Fase F) */
+.focus-ambient-row { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; margin: 14px 0 4px; }
+.focus-ambient-field { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); }
+.focus-ambient-field .material-icons-round { font-size: 20px; }
+.focus-ambient-field select { height: 36px; min-width: 150px; }
+#focus-ambient-volume { width: 120px; accent-color: var(--accent-amber); }
+.focus-dnd-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; font-weight: 700; color: var(--text-primary); background: var(--accent-amber-soft); border: 1px solid var(--accent-amber); border-radius: var(--radius-pill); padding: 4px 10px; }
+.focus-dnd-badge[hidden] { display: none; }
+.focus-dnd-badge .material-icons-round { font-size: 16px; }
+
+/* Temporizador del topbar: sin sesión invita a empezar; con sesión muestra el tiempo */
+.topbar-timer-widget.is-idle .timer-badge-label { display: none; }
+/* La confirmación siempre por encima de cualquier otro modal (temporizador, materias, etc.) */
+#confirm-action-overlay { z-index: 2000; }

@@ -326,4 +326,17 @@ test('FocusCore - Suite de Lógica Pura de Materias y Temas (Fase B1)', async (t
     assert.equal(FocusCore.shouldAllowFocusDefault({ tags: ['estudio'], allow_focus: false }), false);
   });
 
+  await t.test('10. planSpacedReviews programa repasos a 1, 3, 7 y 21 días cruzando meses y años', () => {
+    const plan = FocusCore.planSpacedReviews('2026-12-28', 'Inglés - Phrasal verbs');
+    assert.deepEqual(plan.map(r => r.days), [1, 3, 7, 21]);
+    assert.deepEqual(plan.map(r => r.date), ['2026-12-29', '2026-12-31', '2027-01-04', '2027-01-18']);
+    assert.equal(plan[0].title, 'Repaso 1/4: Inglés - Phrasal verbs');
+    assert.equal(plan[3].title, 'Repaso 4/4: Inglés - Phrasal verbs');
+
+    assert.equal(FocusCore.planSpacedReviews('2026-02-27', '')[1].date, '2026-03-02', 'Febrero no bisiesto');
+    assert.equal(FocusCore.planSpacedReviews('2026-02-27', '')[0].title, 'Repaso 1/4: Nota de aprendizaje');
+    assert.deepEqual(FocusCore.planSpacedReviews('fecha-mala', 'x'), []);
+    assert.deepEqual(FocusCore.planSpacedReviews('2026-10-17', 'x', [2]).map(r => r.date), ['2026-10-19']);
+  });
+
 });

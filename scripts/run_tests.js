@@ -48,6 +48,11 @@ const steps = [
     args: ['--test', path.join(ROOT_DIR, 'web/test_stats_core.js')]
   },
   {
+    name: '1.e Tests Unitarios Frontend (AmbientCore)',
+    cmd: process.execPath,
+    args: ['--test', path.join(ROOT_DIR, 'web/test_ambient_core.js')]
+  },
+  {
     name: '2. Tests Unitarios e Integración Backend (Pytest)',
     cmd: PYTEST,
     args: [path.join(ROOT_DIR, 'backend')]
@@ -116,6 +121,11 @@ const steps = [
     name: '5.k E2E Rutina Base bajo Demanda (Sincronizada) y Materias en la Paleta',
     cmd: PYTHON,
     args: [path.join(ROOT_DIR, 'scripts/test_e2e_routine_palette.py')]
+  },
+  {
+    name: '5.l E2E Fase F (Repaso Espaciado, No Molestar, Sonido Ambiental) y Confirmaciones Críticas',
+    cmd: PYTHON,
+    args: [path.join(ROOT_DIR, 'scripts/test_e2e_fase_f.py')]
   }
 ];
 
