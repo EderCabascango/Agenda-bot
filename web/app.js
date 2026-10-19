@@ -250,6 +250,17 @@
           return q;
         })();
     saveSyncQueue(updatedQ);
+    scheduleSoonSync();
+  }
+
+  // Sube los cambios poco después de hacerlos (agrupa ráfagas) para que PC y teléfono vayan a la par.
+  let soonSyncTimer = null;
+  function scheduleSoonSync() {
+    if (typeof syncWithBackend !== 'function') return;
+    clearTimeout(soonSyncTimer);
+    soonSyncTimer = setTimeout(() => {
+      if (hasBackend() && loadSession() && navigator.onLine !== false) syncWithBackend();
+    }, 1500);
   }
 
   let activities = loadActivities();
@@ -4798,13 +4809,24 @@ SIEMPRE devuelve un JSON válido.
   }
 
   // ── Backend LangGraph agent ──
+  // En el APK (Capacitor) la app corre en https://localhost dentro del teléfono: ahí el servidor
+  // no se puede adivinar y hay que configurarlo (la dirección de Tailscale de tu PC).
+  function isNativeApp() {
+    return !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
+  }
+
   function getBackendBaseUrl() {
     settings = loadSettings();
     if (settings.backendUrl) return settings.backendUrl.replace(/\/+$/, '');
+    if (isNativeApp()) return '';
     if (window.location.protocol.startsWith('http') && (window.location.port === '8000' || window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost')) {
       return window.location.origin;
     }
     return 'http://127.0.0.1:8000';
+  }
+
+  function hasBackend() {
+    return !!getBackendBaseUrl();
   }
 
   function backendHeaders() {
@@ -4835,7 +4857,25 @@ SIEMPRE devuelve un JSON válido.
     learning_notes: 'Nota de Aprendizaje'
   };
 
-  async function syncWithBackend() {
+  // Una sola sincronización a la vez: si llega otra petición mientras hay una en curso,
+  // se repite al terminar para subir lo que se haya encolado entretanto.
+  let syncPromise = null;
+  let syncAgain = false;
+  function syncWithBackend() {
+    if (syncPromise) { syncAgain = true; return syncPromise; }
+    syncPromise = (async () => {
+      try {
+        let result;
+        do { syncAgain = false; result = await runSyncWithBackend(); } while (syncAgain);
+        return result;
+      } finally {
+        syncPromise = null;
+      }
+    })();
+    return syncPromise;
+  }
+
+  async function runSyncWithBackend() {
     activities = loadActivities();
     subjects = loadSubjects();
     topics = loadTopics();
@@ -5265,6 +5305,11 @@ SIEMPRE devuelve un JSON válido.
 
     const urlInput = $('#login-backend-url');
     if (urlInput && !urlInput.value) urlInput.value = loadSettings().backendUrl || '';
+    if (!hasBackend()) {
+      const details = $('.login-server');
+      if (details) details.open = true;
+      setLoginError('Escribe la dirección de tu servidor en "Servidor" (la de Tailscale, por ejemplo https://mi-pc.tu-red.ts.net).');
+    }
 
     const form = $('#login-form');
     if (form && !form.dataset.bound) {
@@ -5293,6 +5338,13 @@ SIEMPRE devuelve un JSON válido.
     if (urlInput) settings.backendUrl = urlInput.value.trim();
     settings.lastLoginEmail = email;
     saveSettings(settings);
+
+    if (!hasBackend()) {
+      setLoginError('Falta la dirección del servidor: ábrela en "Servidor" y escríbela (https://...ts.net).');
+      const details = $('.login-server');
+      if (details) details.open = true;
+      return;
+    }
 
     const submit = $('#login-submit');
     if (submit) submit.disabled = true;
@@ -5973,9 +6025,7 @@ SIEMPRE devuelve un JSON válido.
           return d >= rangeStart && d <= rangeEnd;
         });
 
-        const isLocal = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
-
-        if (settings.backendUrl || isLocal) {
+        if (hasBackend()) {
           addTypingIndicator();
           callBackendAgent(text);
         } else if (settings.groqKey) {
@@ -6016,10 +6066,16 @@ SIEMPRE devuelve un JSON válido.
     updateConflictsBadge();
 
     // Sincronización inicial no bloqueante con el backend
-    const isLocal = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
-    if (settings.backendUrl || isLocal) {
+    if (hasBackend()) {
       syncWithBackend();
     }
+
+    // PC y teléfono se mantienen al día: se sincroniza al volver a la app, al recuperar la red
+    // y cada minuto mientras está abierta (la cola offline se sube en cuanto hay conexión).
+    const syncIfPossible = () => { if (hasBackend() && loadSession() && navigator.onLine !== false) syncWithBackend(); };
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncIfPossible(); });
+    window.addEventListener('online', syncIfPossible);
+    setInterval(syncIfPossible, 60000);
 
     // Auto-refresh the active view every 30 seconds to update missed status
     setInterval(refreshActiveView, 30000);

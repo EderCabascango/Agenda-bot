@@ -126,6 +126,11 @@ const steps = [
     name: '5.l E2E Fase F (Repaso Espaciado, No Molestar, Sonido Ambiental) y Confirmaciones Críticas',
     cmd: PYTHON,
     args: [path.join(ROOT_DIR, 'scripts/test_e2e_fase_f.py')]
+  },
+  {
+    name: '5.m E2E APK (Capacitor) y Sincronización PC <-> Teléfono',
+    cmd: PYTHON,
+    args: [path.join(ROOT_DIR, 'scripts/test_e2e_native_sync.py')]
   }
 ];
 
