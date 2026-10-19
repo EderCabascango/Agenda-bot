@@ -509,6 +509,25 @@ describe('SyncCore - Complete Client Sync Logic Test Suite (Fase 1, 1.5, 1.6)', 
       assert.equal(exp.collections.learning_notes.length, 1);
     });
 
+    test('Respaldo e importación incluyen rutinas y entrenos de ejercicio', () => {
+      assert.deepEqual(SyncCore.SYNC_COLLECTIONS.slice(-2), ['workout_routines', 'workouts']);
+      const exp = SyncCore.exportAllCollections({
+        workout_routines: [{ id: 'rut-1', name: 'Empuje', exercises: [] }],
+        workouts: [{ id: 'ent-1', date: '2026-10-19', exercises: [] }]
+      });
+      assert.equal(exp.collections.workout_routines.length, 1);
+      assert.equal(exp.collections.workouts.length, 1);
+      assert.deepEqual(exp.collections.activities, []);
+      const val = SyncCore.validateMultiCollectionImportPayload(JSON.stringify(exp));
+      assert.equal(val.valid, true);
+      assert.equal(val.sanitized.workouts[0].id, 'ent-1');
+      const legacy = SyncCore.validateMultiCollectionImportPayload([{ id: 'a1', title: 'Vieja', date: '2026-10-10' }]);
+      assert.deepEqual(legacy.sanitized.workouts, []);
+      const merged = SyncCore.prepareMultiCollectionImportChanges(val.sanitized, {}, () => 'uuid');
+      assert.ok(merged.changesToEnqueue.some(c => c.collection === 'workouts' && c.id === 'ent-1'));
+      assert.ok(merged.changesToEnqueue.some(c => c.collection === 'workout_routines' && c.id === 'rut-1'));
+    });
+
     test('validateMultiCollectionImportPayload valida formato v2 y mantiene compatibilidad v1 legacy', () => {
       // V2 payload
       const v2Payload = {

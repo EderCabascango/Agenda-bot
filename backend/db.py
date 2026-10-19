@@ -216,6 +216,28 @@ def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_learning_notes_user_session ON learning_notes (user_id, session_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_learning_notes_user_activity ON learning_notes (user_id, activity_id)")
 
+    # 6b. Ejercicio (calistenia): plantillas de rutina y entrenos registrados
+    if "workout_routines" not in existing_tables:
+        conn.execute(
+            """CREATE TABLE workout_routines (
+                user_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT DEFAULT '',
+                exercises TEXT DEFAULT '[]', notes TEXT DEFAULT '',
+                created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
+                PRIMARY KEY (user_id, id))"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workout_routines_user_sync ON workout_routines (user_id, updated_at)")
+    if "workouts" not in existing_tables:
+        conn.execute(
+            """CREATE TABLE workouts (
+                user_id TEXT NOT NULL, id TEXT NOT NULL, routine_id TEXT DEFAULT NULL, activity_id TEXT DEFAULT NULL,
+                date TEXT DEFAULT '', started_at TEXT DEFAULT '', duration_minutes INTEGER DEFAULT 0,
+                exercises TEXT DEFAULT '[]', notes TEXT DEFAULT '',
+                created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
+                PRIMARY KEY (user_id, id))"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workouts_user_sync ON workouts (user_id, updated_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workouts_user_date ON workouts (user_id, date)")
+
     # 6. Perfil del usuario (tabla nueva y aditiva: no toca datos existentes)
     if "profiles" not in existing_tables:
         conn.execute(
@@ -326,7 +348,80 @@ COLLECTION_SCHEMAS = {
         "order_by": "updated_at DESC"
     }
 }
+COLLECTION_SCHEMAS["workout_routines"] = {
+    "table": "workout_routines",
+    "primary_key": ["user_id", "id"],
+    "columns": {
+        "name": {"type": str, "max_length": 80, "default": "", "sql_col": "name"},
+        "exercises": {"type": list, "default": [], "sql_col": "exercises", "serialize": json.dumps, "deserialize": lambda v: json.loads(v or "[]")},
+        "notes": {"type": str, "max_length": 2000, "default": "", "sql_col": "notes"},
+    },
+    "order_by": "name ASC"
+}
+COLLECTION_SCHEMAS["workouts"] = {
+    "table": "workouts",
+    "primary_key": ["user_id", "id"],
+    "columns": {
+        "routine_id": {"type": str, "max_length": 100, "default": None, "sql_col": "routine_id", "nullable": True},
+        "activity_id": {"type": str, "max_length": 100, "default": None, "sql_col": "activity_id", "nullable": True},
+        "date": {"type": str, "max_length": 10, "default": "", "sql_col": "date"},
+        "started_at": {"type": str, "max_length": 50, "default": "", "sql_col": "started_at"},
+        "duration_minutes": {"type": int, "min_val": 0, "max_val": 1440, "default": 0, "sql_col": "duration_minutes"},
+        "exercises": {"type": list, "default": [], "sql_col": "exercises", "serialize": json.dumps, "deserialize": lambda v: json.loads(v or "[]")},
+        "notes": {"type": str, "max_length": 2000, "default": "", "sql_col": "notes"},
+    },
+    "order_by": "date DESC"
+}
 WHITELISTED_COLLECTIONS = set(COLLECTION_SCHEMAS.keys())
+
+MAX_EXERCISES = 40
+MAX_SETS = 30
+
+
+def _bounded_number(value, cast, lo, hi, field):
+    if value in (None, ""):
+        return cast(0)
+    try:
+        num = cast(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"'{field}' debe ser numérico")
+    if num < lo or num > hi:
+        raise ValueError(f"'{field}' debe estar entre {lo} y {hi}")
+    return num
+
+
+def sanitize_exercises(raw, with_sets: bool) -> list:
+    """Normaliza la lista de ejercicios de una rutina (objetivos) o de un entreno (series hechas)."""
+    if not isinstance(raw, list):
+        raise ValueError("'exercises' debe ser una lista")
+    if len(raw) > MAX_EXERCISES:
+        raise ValueError(f"Máximo {MAX_EXERCISES} ejercicios por rutina o entreno")
+    clean = []
+    for i, ex in enumerate(raw):
+        if not isinstance(ex, dict):
+            raise ValueError(f"El ejercicio {i + 1} debe ser un objeto")
+        name = str(ex.get("name") or "").strip()
+        if not name or len(name) > 80:
+            raise ValueError(f"El ejercicio {i + 1} necesita un nombre de 1 a 80 caracteres")
+        measure = ex.get("measure") or "reps"
+        if measure not in ("reps", "time"):
+            raise ValueError(f"El ejercicio '{name}' tiene una medida inválida (reps o time)")
+        item = {"name": name, "measure": measure}
+        if with_sets:
+            sets = ex.get("sets") or []
+            if not isinstance(sets, list) or len(sets) > MAX_SETS:
+                raise ValueError(f"'{name}': máximo {MAX_SETS} series")
+            item["sets"] = [{
+                "reps": _bounded_number(st.get("reps"), int, 0, 1000, "reps"),
+                "seconds": _bounded_number(st.get("seconds"), int, 0, 7200, "seconds"),
+                "weight_kg": round(_bounded_number(st.get("weight_kg"), float, 0, 500, "weight_kg"), 2),
+            } for st in sets if isinstance(st, dict)]
+        else:
+            item["target_sets"] = _bounded_number(ex.get("target_sets"), int, 0, MAX_SETS, "target_sets")
+            item["target_reps"] = _bounded_number(ex.get("target_reps"), int, 0, 1000, "target_reps")
+            item["target_seconds"] = _bounded_number(ex.get("target_seconds"), int, 0, 7200, "target_seconds")
+        clean.append(item)
+    return clean
 
 
 def _conn(custom_path: str | None = None) -> sqlite3.Connection:
@@ -518,6 +613,20 @@ def validate_and_sanitize_item(collection_name: str, item: dict) -> tuple[dict |
         topic_ids = sanitized.get("topic_ids")
         if topic_ids and isinstance(topic_ids, list) and len(topic_ids) > 50:
             return None, "El campo 'topic_ids' no puede contener más de 50 temas", []
+
+    if collection_name in ("workout_routines", "workouts") and not sanitized.get("deleted_at"):
+        try:
+            sanitized["exercises"] = sanitize_exercises(sanitized.get("exercises") or [], with_sets=collection_name == "workouts")
+        except ValueError as e:
+            return None, str(e), []
+        if collection_name == "workout_routines" and not sanitized.get("name", "").strip():
+            return None, "La rutina necesita un nombre", []
+        if collection_name == "workouts":
+            d = sanitized.get("date") or ""
+            try:
+                datetime.strptime(d, "%Y-%m-%d")
+            except ValueError:
+                return None, "El entreno necesita una fecha válida (AAAA-MM-DD)", []
 
     return sanitized, None, unknown_fields
 

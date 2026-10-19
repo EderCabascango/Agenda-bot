@@ -27,6 +27,7 @@ La aplicación **Mi Diario** es una agenda personal e inteligente orientada a la
 - **Fase D**: Estadísticas y métricas (racha, meta diaria, matriz día × hora).
 - **Fase E**: Notas de aprendizaje post-sesión, exportación Markdown y tareas de repaso.
 - **Rediseño Visual Taskly**: aprobado por el usuario el 16-10-2026 (paleta negro, blanco y amarillo ámbar).
+- **Módulo de Ejercicio (calistenia)** (19-10-2026, a petición del usuario): rutinas reutilizables, registro de entrenos (series × reps, isométricos en segundos y lastre), "la última vez", récords y 1RM estimado, gráfica semanal, resumen y racha; marca la fila "Ejercicio" de la matriz y se puede entrenar desde una actividad de la agenda. Sincronizado entre PC y teléfono.
 - **Login y Perfil** (adelantado desde Seguridad): inicio de sesión con correo y contraseña para un único dueño, sesión JWT y perfil editable.
 
 ---

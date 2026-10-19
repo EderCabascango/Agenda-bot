@@ -492,17 +492,20 @@ function migrateLegacyQueue(legacyQueue, defaultCollection = 'activities') {
 /**
  * Genera un backup JSON completo estructurado con las 5 colecciones bajo schema_version: 2.
  */
+// Colecciones sincronizadas, en el orden en que se exportan e importan.
+const SYNC_COLLECTIONS = ['activities', 'subjects', 'topics', 'focus_sessions', 'learning_notes', 'workout_routines', 'workouts'];
+
+function pickCollections(source = {}) {
+  const out = {};
+  SYNC_COLLECTIONS.forEach(col => { out[col] = Array.isArray(source[col]) ? source[col] : []; });
+  return out;
+}
+
 function exportAllCollections(data = {}) {
   return {
     schema_version: 2,
     exported_at: new Date().toISOString(),
-    collections: {
-      activities: Array.isArray(data.activities) ? data.activities : [],
-      subjects: Array.isArray(data.subjects) ? data.subjects : [],
-      topics: Array.isArray(data.topics) ? data.topics : [],
-      focus_sessions: Array.isArray(data.focus_sessions) ? data.focus_sessions : [],
-      learning_notes: Array.isArray(data.learning_notes) ? data.learning_notes : []
-    }
+    collections: pickCollections(data)
   };
 }
 
@@ -530,13 +533,7 @@ function validateMultiCollectionImportPayload(raw) {
     return {
       valid: true,
       schema_version: 1,
-      sanitized: {
-        activities: actRes.sanitized,
-        subjects: [],
-        topics: [],
-        focus_sessions: [],
-        learning_notes: []
-      }
+      sanitized: { ...pickCollections({}), activities: actRes.sanitized }
     };
   }
 
@@ -549,13 +546,7 @@ function validateMultiCollectionImportPayload(raw) {
   const actRes = validateImportPayload(actList);
   if (!actRes.valid) return actRes;
 
-  const sanitized = {
-    activities: actRes.sanitized,
-    subjects: Array.isArray(collections.subjects) ? collections.subjects : [],
-    topics: Array.isArray(collections.topics) ? collections.topics : [],
-    focus_sessions: Array.isArray(collections.focus_sessions) ? collections.focus_sessions : [],
-    learning_notes: Array.isArray(collections.learning_notes) ? collections.learning_notes : []
-  };
+  const sanitized = { ...pickCollections(collections), activities: actRes.sanitized };
 
   return { valid: true, schema_version: parsed.schema_version || 2, sanitized };
 }
@@ -568,8 +559,7 @@ function prepareMultiCollectionImportChanges(importedCollections = {}, currentCo
   const allChanges = [];
   const allStats = { imported: 0, skipped: 0, conflicted: 0 };
 
-  const colNames = ['activities', 'subjects', 'topics', 'focus_sessions', 'learning_notes'];
-  colNames.forEach(col => {
+  SYNC_COLLECTIONS.forEach(col => {
     const impList = importedCollections[col] || [];
     const curList = currentCollections[col] || [];
     const res = prepareImportChanges(impList, curList, generateUUIDFn, options);
@@ -623,6 +613,7 @@ if (typeof module !== 'undefined' && module.exports) {
     validateImportPayload,
     prepareImportChanges,
     exportAllCollections,
+    SYNC_COLLECTIONS,
     validateMultiCollectionImportPayload,
     prepareMultiCollectionImportChanges,
     getSubjectForSession,
@@ -652,6 +643,7 @@ if (typeof window !== 'undefined') {
     validateImportPayload,
     prepareImportChanges,
     exportAllCollections,
+    SYNC_COLLECTIONS,
     validateMultiCollectionImportPayload,
     prepareMultiCollectionImportChanges,
     getSubjectForSession,

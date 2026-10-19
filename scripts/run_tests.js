@@ -53,6 +53,11 @@ const steps = [
     args: ['--test', path.join(ROOT_DIR, 'web/test_ambient_core.js')]
   },
   {
+    name: '1.f Tests Unitarios Frontend (WorkoutCore)',
+    cmd: process.execPath,
+    args: ['--test', path.join(ROOT_DIR, 'web/test_workout_core.js')]
+  },
+  {
     name: '2. Tests Unitarios e Integración Backend (Pytest)',
     cmd: PYTEST,
     args: [path.join(ROOT_DIR, 'backend')]
@@ -131,6 +136,11 @@ const steps = [
     name: '5.m E2E APK (Capacitor) y Sincronización PC <-> Teléfono',
     cmd: PYTHON,
     args: [path.join(ROOT_DIR, 'scripts/test_e2e_native_sync.py')]
+  },
+  {
+    name: '5.n E2E Módulo de Ejercicio (Rutinas, Registro, Progreso, Matriz y Agenda)',
+    cmd: PYTHON,
+    args: [path.join(ROOT_DIR, 'scripts/test_e2e_workout.py')]
   }
 ];
 

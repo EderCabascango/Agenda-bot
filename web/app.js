@@ -52,6 +52,9 @@
   const TOPICS_KEY = 'diary_topics';
   const FOCUS_SESSIONS_KEY = 'diary_focus_sessions';
   const LEARNING_NOTES_KEY = 'diary_learning_notes';
+  const WORKOUT_ROUTINES_KEY = 'diary_workout_routines';
+  const WORKOUTS_KEY = 'diary_workouts';
+  const WORKOUT_DRAFT_KEY = 'diary_workout_draft';
   const ACTIVE_FOCUS_SESSION_KEY = 'diary_focus_active';
   const TAB_ID = 'tab_' + Math.random().toString(36).substring(2, 9);
 
@@ -141,6 +144,18 @@
   function saveLearningNotes(list) {
     learningNotes = list;
     safeStorageSet(LEARNING_NOTES_KEY, list);
+  }
+  function loadWorkoutRoutines() {
+    return safeStorageGet(WORKOUT_ROUTINES_KEY, []);
+  }
+  function saveWorkoutRoutines(list) {
+    safeStorageSet(WORKOUT_ROUTINES_KEY, list);
+  }
+  function loadWorkouts() {
+    return safeStorageGet(WORKOUTS_KEY, []);
+  }
+  function saveWorkouts(list) {
+    safeStorageSet(WORKOUTS_KEY, list);
   }
 
   function loadSettings() {
@@ -346,6 +361,7 @@
     if (name === 'calendar') renderCalendar();
     if (name === 'stats') renderStats();
     if (name === 'study') renderStudyView();
+    if (name === 'workout') renderWorkoutView();
   }
 
   function refreshActiveView() {
@@ -523,6 +539,11 @@
                     <span class="material-icons-round">play_arrow</span>
                   </button>
                 ` : ''}
+                ${!isDone && typeof WorkoutCore !== 'undefined' && WorkoutCore.isExerciseActivity(a) ? `
+                  <button class="btn-agenda-focus btn-agenda-workout" data-agenda-workout="${a.id}" title="Registrar entreno">
+                    <span class="material-icons-round">fitness_center</span>
+                  </button>
+                ` : ''}
               </div>
             </div>
           `;
@@ -604,6 +625,12 @@
           });
         });
 
+        timeline.querySelectorAll('[data-agenda-workout]').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openWorkoutModal({ activityId: btn.dataset.agendaWorkout });
+          });
+        });
         timeline.querySelectorAll('[data-agenda-focus]').forEach(btn => {
           btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -772,6 +799,16 @@
       if (a.completed) completedByDate[key].push(a.title.toLowerCase());
     });
 
+    // Los entrenos del módulo de ejercicio cuentan como "ejercicio" hecho ese día.
+    const workoutMinutesByDate = {};
+    loadWorkouts().filter(w => w && !w.deleted_at && w.date).forEach(w => {
+      if (!completedByDate[w.date]) completedByDate[w.date] = [];
+      if (!allByDate[w.date]) allByDate[w.date] = [];
+      completedByDate[w.date].push('ejercicio');
+      allByDate[w.date].push('ejercicio');
+      workoutMinutesByDate[w.date] = (workoutMinutesByDate[w.date] || 0) + (Number(w.duration_minutes) || 30);
+    });
+
     // Helper to check if a row's keywords match any activity title on a given date
     function isDone(dateStr, rowKeys) {
       const done = completedByDate[dateStr] || [];
@@ -797,7 +834,11 @@
         a.completed &&
         rowKeys.some(k => a.title.toLowerCase().includes(k))
       );
-      if (matchingActs.length === 0) return 0;
+      if (matchingActs.length === 0) {
+        const wMins = rowKeys.includes('ejercicio') ? (workoutMinutesByDate[dateStr] || 0) : 0;
+        if (!wMins) return 0;
+        return wMins >= 120 ? 3 : wMins >= 60 ? 2 : 1;
+      }
       let totalMins = 0;
       matchingActs.forEach(a => {
         if (a.startTime && a.endTime) {
@@ -1835,7 +1876,9 @@
                 subjects,
                 topics,
                 focus_sessions: focusSessions,
-                learning_notes: learningNotes
+                learning_notes: learningNotes,
+                workout_routines: loadWorkoutRoutines(),
+                workouts: loadWorkouts()
               };
               const { mergedCollections, changesToEnqueue, stats } = SyncCore.prepareMultiCollectionImportChanges(
                 val.sanitized,
@@ -1848,6 +1891,8 @@
               if (mergedCollections.topics) saveTopics(mergedCollections.topics);
               if (mergedCollections.focus_sessions) saveFocusSessions(mergedCollections.focus_sessions);
               if (mergedCollections.learning_notes) saveLearningNotes(mergedCollections.learning_notes);
+              if (mergedCollections.workout_routines) saveWorkoutRoutines(mergedCollections.workout_routines);
+              if (mergedCollections.workouts) saveWorkouts(mergedCollections.workouts);
 
               changesToEnqueue.forEach(ch => enqueueChange(ch));
 
@@ -1929,7 +1974,9 @@
         subjects,
         topics,
         focus_sessions: focusSessions,
-        learning_notes: learningNotes
+        learning_notes: learningNotes,
+        workout_routines: loadWorkoutRoutines(),
+        workouts: loadWorkouts()
       });
     } else {
       exportObj = activities;
@@ -4854,7 +4901,9 @@ SIEMPRE devuelve un JSON válido.
     subjects: 'Materia',
     topics: 'Tema',
     focus_sessions: 'Sesión de Enfoque',
-    learning_notes: 'Nota de Aprendizaje'
+    learning_notes: 'Nota de Aprendizaje',
+    workout_routines: 'Rutina de Ejercicio',
+    workouts: 'Entreno'
   };
 
   // Una sola sincronización a la vez: si llega otra petición mientras hay una en curso,
@@ -4895,7 +4944,9 @@ SIEMPRE devuelve un JSON válido.
       subjects: queue.filter(q => q.collection === 'subjects'),
       topics: queue.filter(q => q.collection === 'topics'),
       focus_sessions: queue.filter(q => q.collection === 'focus_sessions'),
-      learning_notes: queue.filter(q => q.collection === 'learning_notes')
+      learning_notes: queue.filter(q => q.collection === 'learning_notes'),
+      workout_routines: queue.filter(q => q.collection === 'workout_routines'),
+      workouts: queue.filter(q => q.collection === 'workouts')
     };
 
     try {
@@ -5003,6 +5054,15 @@ SIEMPRE devuelve un JSON válido.
         saveFocusSessions(focusSessions);
         if ($('#view-study')?.classList.contains('active')) renderStudyView();
         if (selectedSubjectIdForDetail) renderSubjectDetailContent(selectedSubjectIdForDetail);
+      });
+      mergeCol(loadWorkoutRoutines(), 'workout_routines', (m) => {
+        saveWorkoutRoutines(m);
+        if ($('#view-workout')?.classList.contains('active')) renderWorkoutView();
+      });
+      mergeCol(loadWorkouts(), 'workouts', (m) => {
+        saveWorkouts(m);
+        renderDiarioGrid();
+        if ($('#view-workout')?.classList.contains('active')) renderWorkoutView();
       });
       mergeCol(learningNotes, 'learning_notes', (m) => {
         learningNotes = m;
@@ -5284,6 +5344,634 @@ SIEMPRE devuelve un JSON válido.
       removeTypingIndicator();
       addAgentMessage('Error al conectar con el servidor n8n.');
     }
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // ── Ejercicio (calistenia): rutinas, registro de entrenos y progreso ──
+  // ══════════════════════════════════════════════════════════════
+  let workoutTab = 'train';
+  let workoutProgressExercise = '';
+  let routineEditing = null; // { id|null, exercises: [...] }
+
+  function activeWorkouts() {
+    return loadWorkouts().filter(w => w && !w.deleted_at);
+  }
+  function activeRoutines() {
+    return loadWorkoutRoutines().filter(r => r && !r.deleted_at).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }
+  function loadWorkoutDraft() {
+    return safeStorageGet(WORKOUT_DRAFT_KEY, null);
+  }
+  function saveWorkoutDraft(draft) {
+    if (draft) safeStorageSet(WORKOUT_DRAFT_KEY, draft);
+    else { try { localStorage.removeItem(WORKOUT_DRAFT_KEY); } catch (e) { /* sin almacenamiento */ } }
+  }
+
+  function knownExerciseNames() {
+    const names = new Map();
+    const add = (n) => { const k = WorkoutCore.normalizeName(n); if (k && !names.has(k)) names.set(k, String(n).trim()); };
+    activeWorkouts().forEach(w => (w.exercises || []).forEach(ex => add(ex.name)));
+    activeRoutines().forEach(r => (r.exercises || []).forEach(ex => add(ex.name)));
+    WorkoutCore.SUGGESTED_EXERCISES.forEach(ex => add(ex.name));
+    return [...names.values()];
+  }
+  function suggestedMeasure(name) {
+    const key = WorkoutCore.normalizeName(name);
+    const known = WorkoutCore.SUGGESTED_EXERCISES.find(ex => WorkoutCore.normalizeName(ex.name) === key);
+    if (known) return known.measure;
+    const last = WorkoutCore.lastPerformance(activeWorkouts(), name);
+    return last ? last.measure : 'reps';
+  }
+  function fillExerciseDatalist() {
+    const dl = $('#workout-exercise-names');
+    if (dl) dl.innerHTML = knownExerciseNames().map(n => `<option value="${escHTML(n)}"></option>`).join('');
+  }
+
+  function routineExerciseText(ex) {
+    const sets = Number(ex.target_sets) || 0;
+    if (ex.measure === 'time') return `${sets || 1}×${Number(ex.target_seconds) || 0} s`;
+    return `${sets || 1}×${Number(ex.target_reps) || 0}`;
+  }
+
+  function renderWorkoutView() {
+    if (typeof WorkoutCore === 'undefined') return;
+    $$('[data-workout-tab]').forEach(b => b.classList.toggle('active', b.dataset.workoutTab === workoutTab));
+    ['train', 'routines', 'progress'].forEach(t => { const p = $(`#workout-panel-${t}`); if (p) p.hidden = t !== workoutTab; });
+    if (workoutTab === 'train') renderWorkoutTrain();
+    if (workoutTab === 'routines') renderWorkoutRoutines();
+    if (workoutTab === 'progress') renderWorkoutProgress();
+  }
+
+  function renderWorkoutTrain() {
+    const all = activeWorkouts();
+    const sum = WorkoutCore.weeklySummary(all, todayStr());
+    const summary = $('#workout-week-summary');
+    if (summary) {
+      const mins = Math.floor(sum.seconds / 60), secs = sum.seconds % 60;
+      summary.innerHTML = `
+        <div class="workout-stat"><span class="workout-stat-value">${sum.workouts}</span><span class="workout-stat-label">entrenos esta semana</span></div>
+        <div class="workout-stat"><span class="workout-stat-value">${sum.sets}</span><span class="workout-stat-label">series</span></div>
+        <div class="workout-stat"><span class="workout-stat-value">${sum.reps}</span><span class="workout-stat-label">repeticiones</span></div>
+        <div class="workout-stat"><span class="workout-stat-value">${mins}:${String(secs).padStart(2, '0')}</span><span class="workout-stat-label">en isométricos</span></div>
+        <div class="workout-stat workout-stat--accent"><span class="workout-stat-value">${sum.weekStreak}</span><span class="workout-stat-label">semanas seguidas</span></div>`;
+    }
+
+    const start = $('#workout-start-list');
+    if (start) {
+      const routines = activeRoutines();
+      start.innerHTML = routines.length ? routines.map(r => {
+        const lastDone = all.filter(w => w.routine_id === r.id).map(w => w.date).sort().pop();
+        return `
+          <div class="workout-routine-card">
+            <div class="workout-routine-head">
+              <h4>${escHTML(r.name)}</h4>
+              <span class="workout-muted">${lastDone ? `Última vez: ${escHTML(lastDone)}` : 'Aún sin registrar'}</span>
+            </div>
+            <p class="workout-routine-exercises">${(r.exercises || []).map(ex => `${escHTML(ex.name)} <b>${routineExerciseText(ex)}</b>`).join(' · ')}</p>
+            <button type="button" class="btn-primary" data-start-routine="${escHTML(r.id)}">
+              <span class="material-icons-round">play_arrow</span> Empezar
+            </button>
+          </div>`;
+      }).join('') : `
+        <div class="workout-empty">
+          <span class="material-icons-round">fitness_center</span>
+          <p>Aún no tienes rutinas. Crea una (por ejemplo "Empuje" o "Full body") o empieza un entreno libre.</p>
+          <button type="button" class="btn-outline" data-workout-goto="routines">Crear rutina</button>
+        </div>`;
+    }
+
+    const recent = $('#workout-recent-list');
+    if (recent) {
+      const routinesById = Object.fromEntries(loadWorkoutRoutines().map(r => [r.id, r]));
+      const list = [...all].sort((a, b) => (b.date + (b.started_at || '')).localeCompare(a.date + (a.started_at || ''))).slice(0, 10);
+      recent.innerHTML = list.length ? list.map(w => {
+        const s = WorkoutCore.summarizeWorkout(w);
+        const title = (w.routine_id && routinesById[w.routine_id] && routinesById[w.routine_id].name) || 'Entreno libre';
+        return `
+          <details class="workout-history-item">
+            <summary>
+              <span class="workout-history-date">${escHTML(w.date)}</span>
+              <span class="workout-history-title">${escHTML(title)}</span>
+              <span class="workout-muted">${s.exercises} ejercicios · ${s.sets} series${s.reps ? ` · ${s.reps} reps` : ''}${w.duration_minutes ? ` · ${w.duration_minutes} min` : ''}</span>
+            </summary>
+            <ul class="workout-history-sets">
+              ${(w.exercises || []).map(ex => `<li><b>${escHTML(ex.name)}</b> ${escHTML(WorkoutCore.formatSets(ex.sets, ex.measure))}</li>`).join('')}
+            </ul>
+            ${w.notes ? `<p class="workout-muted">${escHTML(w.notes)}</p>` : ''}
+            <button type="button" class="btn-text workout-delete" data-delete-workout="${escHTML(w.id)}">Eliminar entreno</button>
+          </details>`;
+      }).join('') : '<p class="workout-muted">Todavía no hay entrenos registrados.</p>';
+    }
+  }
+
+  function renderWorkoutRoutines() {
+    const el = $('#workout-routines-list');
+    if (!el) return;
+    const routines = activeRoutines();
+    el.innerHTML = routines.length ? routines.map(r => `
+      <div class="workout-routine-card">
+        <div class="workout-routine-head"><h4>${escHTML(r.name)}</h4><span class="workout-muted">${(r.exercises || []).length} ejercicios</span></div>
+        <ul class="workout-routine-list">${(r.exercises || []).map(ex => `<li>${escHTML(ex.name)} <b>${routineExerciseText(ex)}</b></li>`).join('')}</ul>
+        ${r.notes ? `<p class="workout-muted">${escHTML(r.notes)}</p>` : ''}
+        <div class="workout-card-actions">
+          <button type="button" class="btn-outline" data-edit-routine="${escHTML(r.id)}"><span class="material-icons-round">edit</span> Editar</button>
+          <button type="button" class="btn-text workout-delete" data-delete-routine="${escHTML(r.id)}">Eliminar</button>
+        </div>
+      </div>`).join('') : '<p class="workout-muted">No tienes rutinas todavía. Pulsa "Nueva rutina".</p>';
+  }
+
+  function renderWorkoutProgress() {
+    const all = activeWorkouts();
+    const records = WorkoutCore.personalRecords(all);
+    const select = $('#workout-progress-exercise');
+    if (select) {
+      if (!records.some(r => WorkoutCore.normalizeName(r.name) === WorkoutCore.normalizeName(workoutProgressExercise))) {
+        workoutProgressExercise = records[0] ? records[0].name : '';
+      }
+      select.innerHTML = records.length
+        ? records.map(r => `<option value="${escHTML(r.name)}">${escHTML(r.name)} (${r.sessions})</option>`).join('')
+        : '<option value="">Sin ejercicios registrados</option>';
+      select.value = workoutProgressExercise;
+    }
+
+    const rec = records.find(r => WorkoutCore.normalizeName(r.name) === WorkoutCore.normalizeName(workoutProgressExercise));
+    const chart = $('#workout-progress-chart');
+    if (chart) {
+      if (!rec) {
+        chart.innerHTML = '<p class="workout-muted">Registra entrenos para ver tu evolución.</p>';
+      } else {
+        const isTime = rec.measure === 'time';
+        const series = WorkoutCore.weeklySeries(all, { today: todayStr(), weeks: 8, exerciseName: rec.name });
+        const values = series.map(s => (isTime ? s.seconds : s.bestReps));
+        const max = Math.max(1, ...values);
+        const W = 320, H = 150, gap = 8, bw = (W - gap * 7) / 8;
+        const bars = series.map((s, i) => {
+          const v = values[i];
+          const h = v ? Math.max(4, Math.round((v / max) * (H - 34))) : 0;
+          const x = i * (bw + gap), y = H - 18 - h;
+          const label = s.weekStart.substring(5).replace('-', '/');
+          return `<g><title>Semana del ${s.weekStart}: ${v} ${isTime ? 's' : 'reps'}${s.best1RM ? ` · 1RM est. +${s.best1RM} kg` : ''}</title>
+            ${h ? `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="4" class="workout-bar"></rect>` : `<rect x="${x}" y="${H - 20}" width="${bw}" height="2" class="workout-bar-empty"></rect>`}
+            ${v ? `<text x="${x + bw / 2}" y="${y - 4}" text-anchor="middle" class="workout-bar-value">${v}</text>` : ''}
+            <text x="${x + bw / 2}" y="${H - 4}" text-anchor="middle" class="workout-bar-label">${label}</text></g>`;
+        }).join('');
+        chart.innerHTML = `
+          <p class="workout-muted">${isTime ? 'Segundos totales por semana' : 'Mejor serie (reps) por semana'} · últimas 8 semanas</p>
+          <svg viewBox="0 0 ${W} ${H}" class="workout-chart" role="img" aria-label="Evolución semanal de ${escHTML(rec.name)}">${bars}</svg>`;
+      }
+    }
+
+    const recEl = $('#workout-records');
+    if (recEl) {
+      recEl.innerHTML = records.length ? `
+        <table class="workout-records-table">
+          <thead><tr><th>Ejercicio</th><th>Mejor serie</th><th>Lastre</th><th>1RM est.</th></tr></thead>
+          <tbody>${records.map(r => `
+            <tr>
+              <td>${escHTML(r.name)}</td>
+              <td>${r.measure === 'time' ? `${r.maxSeconds} s` : `${r.maxReps} reps`}<span class="workout-muted"> ${escHTML((r.measure === 'time' ? r.maxSecondsDate : r.maxRepsDate) || '')}</span></td>
+              <td>${r.maxWeight ? `+${r.maxWeight} kg` : '—'}</td>
+              <td>${r.best1RM ? `+${r.best1RM} kg` : '—'}</td>
+            </tr>`).join('')}</tbody>
+        </table>` : '<p class="workout-muted">Aún no hay récords.</p>';
+    }
+
+    const histEl = $('#workout-exercise-history');
+    if (histEl) {
+      const hist = rec ? WorkoutCore.exerciseHistory(all, rec.name) : [];
+      histEl.innerHTML = hist.length
+        ? `<ul class="workout-history-sets">${hist.map(h => `<li><span class="workout-history-date">${escHTML(h.date)}</span> ${escHTML(h.text)}</li>`).join('')}</ul>`
+        : '<p class="workout-muted">Sin historial.</p>';
+    }
+  }
+
+  // ── Registro de un entreno ──
+  function draftHasData(draft) {
+    return !!draft && (draft.exercises || []).some(ex => (ex.sets || []).some(st => Number(st.reps) > 0 || Number(st.seconds) > 0));
+  }
+
+  async function openWorkoutModal({ routineId = null, activityId = null } = {}) {
+    let draft = loadWorkoutDraft();
+    if (draft && (routineId || activityId) && draftHasData(draft)) {
+      const replace = await confirmAction({
+        title: 'Tienes un entreno sin guardar',
+        message: 'Si empiezas otro se descartará el entreno que tenías a medias.',
+        confirmLabel: 'Empezar otro'
+      });
+      if (!replace) routineId = activityId = null;
+      else draft = null;
+    }
+    if (!draft || routineId || activityId) {
+      const routine = routineId ? activeRoutines().find(r => r.id === routineId) : null;
+      const base = routine ? WorkoutCore.buildDraftFromRoutine(routine, activeWorkouts()) : { routine_id: null, exercises: [] };
+      draft = {
+        id: uid(),
+        routine_id: base.routine_id,
+        activity_id: activityId,
+        date: todayStr(),
+        started_at: new Date().toISOString(),
+        duration_minutes: null,
+        exercises: base.exercises,
+        notes: ''
+      };
+      if (!draft.exercises.length) draft.exercises.push(newDraftExercise(''));
+      saveWorkoutDraft(draft);
+    }
+    renderWorkoutModal();
+    $('#workout-overlay').classList.add('open');
+  }
+
+  function newDraftExercise(name) {
+    const measure = name ? suggestedMeasure(name) : 'reps';
+    const last = name ? WorkoutCore.lastPerformance(activeWorkouts(), name) : null;
+    return { name, measure, sets: [{ reps: 0, seconds: 0, weight_kg: last ? last.maxWeight : 0 }], last: last ? `${last.date}: ${last.text}` : '' };
+  }
+
+  function renderWorkoutModal() {
+    const draft = loadWorkoutDraft();
+    if (!draft) return;
+    fillExerciseDatalist();
+    const routines = activeRoutines();
+    const routineSelect = $('#workout-routine-select');
+    routineSelect.innerHTML = '<option value="">Entreno libre</option>' + routines.map(r => `<option value="${escHTML(r.id)}">${escHTML(r.name)}</option>`).join('');
+    routineSelect.value = draft.routine_id && routines.some(r => r.id === draft.routine_id) ? draft.routine_id : '';
+    $('#workout-modal-title').textContent = routineSelect.value ? (routines.find(r => r.id === draft.routine_id) || {}).name : 'Entreno libre';
+    $('#workout-date').value = draft.date;
+    const elapsed = Math.max(0, Math.round((Date.now() - new Date(draft.started_at).getTime()) / 60000));
+    $('#workout-duration').value = draft.duration_minutes != null ? draft.duration_minutes : '';
+    $('#workout-duration').placeholder = String(Math.min(elapsed, 1440));
+    $('#workout-notes').value = draft.notes || '';
+
+    const linked = $('#workout-linked-activity');
+    const act = draft.activity_id ? activities.find(a => a.id === draft.activity_id) : null;
+    linked.hidden = !act;
+    linked.textContent = act ? `Al guardar se marcará como hecha: "${act.title}" (${act.startTime || ''})` : '';
+
+    $('#workout-exercises').innerHTML = draft.exercises.map((ex, ei) => `
+      <div class="workout-exercise" data-ex="${ei}">
+        <div class="workout-exercise-head">
+          <input type="text" class="setting-input workout-ex-name" list="workout-exercise-names" data-field="name" value="${escHTML(ex.name)}" placeholder="Ejercicio (ej. Dominadas)" maxlength="80" aria-label="Nombre del ejercicio" />
+          <select class="workout-ex-measure" data-field="measure" aria-label="Cómo se mide">
+            <option value="reps" ${ex.measure !== 'time' ? 'selected' : ''}>Reps</option>
+            <option value="time" ${ex.measure === 'time' ? 'selected' : ''}>Segundos</option>
+          </select>
+          <button type="button" class="btn-icon material-icons-round" data-remove-exercise="${ei}" aria-label="Quitar ejercicio">delete</button>
+        </div>
+        ${ex.last ? `<p class="workout-last">La última vez · ${escHTML(ex.last)}</p>` : ''}
+        <div class="workout-sets">
+          ${(ex.sets || []).map((st, si) => `
+            <div class="workout-set" data-set="${si}">
+              <span class="workout-set-n">${si + 1}</span>
+              ${ex.measure === 'time'
+                ? `<label><input type="number" inputmode="numeric" min="0" max="7200" data-field="seconds" value="${Number(st.seconds) || ''}" aria-label="Segundos serie ${si + 1}" /> s</label>`
+                : `<label><input type="number" inputmode="numeric" min="0" max="1000" data-field="reps" value="${Number(st.reps) || ''}" aria-label="Repeticiones serie ${si + 1}" /> reps</label>`}
+              <label class="workout-weight">+<input type="number" inputmode="decimal" min="0" max="500" step="0.5" data-field="weight_kg" value="${Number(st.weight_kg) || ''}" aria-label="Lastre serie ${si + 1}" /> kg</label>
+              <button type="button" class="btn-icon material-icons-round" data-remove-set="${si}" aria-label="Quitar serie">close</button>
+            </div>`).join('')}
+        </div>
+        <button type="button" class="btn-text" data-add-set="${ei}">+ Serie</button>
+      </div>`).join('');
+  }
+
+  // Repinta tras el cambio de foco (el evento "change" llega al salir del campo) y devuelve el foco
+  // al mismo campo de la misma fila, para no perder lo que el usuario empieza a escribir.
+  function rerenderKeepingFocus(container, renderFn) {
+    setTimeout(() => {
+      const box = $(container);
+      const active = document.activeElement;
+      let path = null;
+      if (box && active && box.contains(active)) {
+        const row = active.closest('[data-ex],[data-row]');
+        const set = active.closest('[data-set]');
+        path = {
+          row: row ? (row.dataset.ex !== undefined ? `[data-ex="${row.dataset.ex}"]` : `[data-row="${row.dataset.row}"]`) : '',
+          set: set ? `[data-set="${set.dataset.set}"]` : '',
+          field: active.dataset.field ? `[data-field="${active.dataset.field}"]` : ''
+        };
+      }
+      renderFn();
+      if (path && path.field) {
+        const target = $(`${container} ${path.row} ${path.set} ${path.field}`.replace(/\s+/g, ' '));
+        if (target) target.focus();
+      }
+    }, 0);
+  }
+
+  function updateDraft(mutator, rerender = false) {
+    const draft = loadWorkoutDraft();
+    if (!draft) return;
+    mutator(draft);
+    saveWorkoutDraft(draft);
+    if (rerender) renderWorkoutModal();
+  }
+
+  function closeWorkoutModal() {
+    $('#workout-overlay').classList.remove('open');
+    const errs = $('#workout-errors');
+    if (errs) errs.hidden = true;
+  }
+
+  async function discardWorkout() {
+    const draft = loadWorkoutDraft();
+    if (draftHasData(draft) && !await confirmAction({ title: 'Descartar entreno', message: 'Se perderán las series que anotaste en este entreno.', confirmLabel: 'Descartar' })) return;
+    saveWorkoutDraft(null);
+    closeWorkoutModal();
+  }
+
+  function saveWorkout() {
+    const draft = loadWorkoutDraft();
+    if (!draft) return;
+    const elapsed = Math.max(0, Math.round((Date.now() - new Date(draft.started_at).getTime()) / 60000));
+    const nowIso = new Date().toISOString();
+    const record = {
+      id: draft.id,
+      routine_id: draft.routine_id || null,
+      activity_id: draft.activity_id || null,
+      date: draft.date,
+      started_at: draft.started_at,
+      duration_minutes: Math.min(1440, draft.duration_minutes != null ? Number(draft.duration_minutes) || 0 : elapsed),
+      exercises: (draft.exercises || [])
+        .map(ex => ({
+          name: String(ex.name || '').trim(),
+          measure: ex.measure === 'time' ? 'time' : 'reps',
+          sets: (ex.sets || []).filter(st => Number(st.reps) > 0 || Number(st.seconds) > 0)
+            .map(st => ({ reps: Number(st.reps) || 0, seconds: Number(st.seconds) || 0, weight_kg: Number(st.weight_kg) || 0 }))
+        }))
+        .filter(ex => ex.name || ex.sets.length),
+      notes: String(draft.notes || '').trim(),
+      created_at: nowIso,
+      updated_at: nowIso,
+      version: 1
+    };
+    const check = WorkoutCore.validateWorkout(record);
+    const errs = $('#workout-errors');
+    if (!check.valid) {
+      errs.innerHTML = check.errors.map(e => `<div>• ${escHTML(e)}</div>`).join('');
+      errs.hidden = false;
+      return;
+    }
+    const list = loadWorkouts();
+    list.push(record);
+    saveWorkouts(list);
+    enqueueChange({ ...record, collection: 'workouts' });
+
+    // Entreno iniciado desde la agenda: la actividad queda hecha (también en los demás dispositivos).
+    if (record.activity_id) {
+      activities = loadActivities();
+      const idx = activities.findIndex(a => a.id === record.activity_id);
+      if (idx !== -1 && !activities[idx].completed) {
+        const act = activities[idx];
+        const updated = { ...act, completed: true, updated_at: nowIso, base_version: act.version || 1, version: (act.version || 1) + 1 };
+        activities[idx] = updated;
+        saveActivities(activities);
+        enqueueChange({ ...updated, collection: 'activities' });
+      }
+    }
+
+    saveWorkoutDraft(null);
+    closeWorkoutModal();
+    const s = WorkoutCore.summarizeWorkout(record);
+    showToast(`Entreno guardado ✓ · ${s.sets} series${s.reps ? ` · ${s.reps} reps` : ''}`, 'fitness_center', 'var(--accent-amber)');
+    renderWorkoutView();
+    renderDashboard();
+  }
+
+  async function deleteWorkout(id) {
+    const list = loadWorkouts();
+    const idx = list.findIndex(w => w.id === id);
+    if (idx === -1) return;
+    if (!await confirmAction({ title: 'Eliminar entreno', message: `Se eliminará el entreno del ${list[idx].date} en todos tus dispositivos.`, confirmLabel: 'Eliminar' })) return;
+    const nowIso = new Date().toISOString();
+    const w = list[idx];
+    const tomb = { ...w, deleted_at: nowIso, updated_at: nowIso, base_version: w.version || 1, version: (w.version || 1) + 1 };
+    list[idx] = tomb;
+    saveWorkouts(list);
+    enqueueChange({ ...tomb, collection: 'workouts' });
+    renderWorkoutView();
+    renderDiarioGrid();
+  }
+
+  // ── Editor de rutinas ──
+  function openRoutineEditor(routineId = null) {
+    const routine = routineId ? activeRoutines().find(r => r.id === routineId) : null;
+    routineEditing = {
+      id: routine ? routine.id : null,
+      exercises: routine ? (routine.exercises || []).map(ex => ({ ...ex })) : [{ name: '', measure: 'reps', target_sets: 3, target_reps: 10, target_seconds: 0 }]
+    };
+    $('#routine-editor-title').textContent = routine ? 'Editar rutina' : 'Nueva rutina';
+    $('#routine-editor-name').value = routine ? routine.name : '';
+    $('#routine-editor-notes').value = routine ? (routine.notes || '') : '';
+    $('#routine-editor-errors').hidden = true;
+    fillExerciseDatalist();
+    renderRoutineEditorRows();
+    $('#routine-editor-overlay').classList.add('open');
+    setTimeout(() => $('#routine-editor-name').focus(), 50);
+  }
+
+  function renderRoutineEditorRows() {
+    $('#routine-editor-exercises').innerHTML = routineEditing.exercises.map((ex, i) => `
+      <div class="routine-row" data-row="${i}">
+        <input type="text" class="setting-input" list="workout-exercise-names" data-field="name" value="${escHTML(ex.name)}" placeholder="Ejercicio" maxlength="80" aria-label="Ejercicio ${i + 1}" />
+        <select data-field="measure" aria-label="Medida ${i + 1}">
+          <option value="reps" ${ex.measure !== 'time' ? 'selected' : ''}>Reps</option>
+          <option value="time" ${ex.measure === 'time' ? 'selected' : ''}>Segundos</option>
+        </select>
+        <label><input type="number" min="1" max="30" data-field="target_sets" value="${Number(ex.target_sets) || 3}" aria-label="Series ${i + 1}" /> series</label>
+        <label>× <input type="number" min="0" max="7200" data-field="${ex.measure === 'time' ? 'target_seconds' : 'target_reps'}" value="${Number(ex.measure === 'time' ? ex.target_seconds : ex.target_reps) || ''}" aria-label="Objetivo ${i + 1}" /> ${ex.measure === 'time' ? 's' : 'reps'}</label>
+        <button type="button" class="btn-icon material-icons-round" data-remove-row="${i}" aria-label="Quitar ejercicio">delete</button>
+      </div>`).join('');
+  }
+
+  function saveRoutine() {
+    const nowIso = new Date().toISOString();
+    const data = {
+      name: $('#routine-editor-name').value.trim(),
+      notes: $('#routine-editor-notes').value.trim(),
+      exercises: routineEditing.exercises
+        .map(ex => ({
+          name: String(ex.name || '').trim(),
+          measure: ex.measure === 'time' ? 'time' : 'reps',
+          target_sets: Math.max(1, Number(ex.target_sets) || 1),
+          target_reps: ex.measure === 'time' ? 0 : Number(ex.target_reps) || 0,
+          target_seconds: ex.measure === 'time' ? Number(ex.target_seconds) || 0 : 0
+        }))
+        .filter(ex => ex.name)
+    };
+    const check = WorkoutCore.validateRoutine(data);
+    if (!check.valid) {
+      const errs = $('#routine-editor-errors');
+      errs.innerHTML = check.errors.map(e => `<div>• ${escHTML(e)}</div>`).join('');
+      errs.hidden = false;
+      return;
+    }
+    const list = loadWorkoutRoutines();
+    let saved;
+    if (routineEditing.id) {
+      const idx = list.findIndex(r => r.id === routineEditing.id);
+      const prev = list[idx];
+      saved = { ...prev, ...data, updated_at: nowIso, base_version: prev.version || 1, version: (prev.version || 1) + 1 };
+      list[idx] = saved;
+    } else {
+      saved = { id: uid(), ...data, created_at: nowIso, updated_at: nowIso, version: 1 };
+      list.push(saved);
+    }
+    saveWorkoutRoutines(list);
+    enqueueChange({ ...saved, collection: 'workout_routines' });
+    $('#routine-editor-overlay').classList.remove('open');
+    showToast(routineEditing.id ? 'Rutina actualizada ✓' : 'Rutina creada ✓', 'list_alt', 'var(--accent-amber)');
+    routineEditing = null;
+    renderWorkoutView();
+  }
+
+  async function deleteRoutine(id) {
+    const list = loadWorkoutRoutines();
+    const idx = list.findIndex(r => r.id === id);
+    if (idx === -1) return;
+    if (!await confirmAction({ title: 'Eliminar rutina', message: `Se eliminará la rutina "${list[idx].name}". Los entrenos que ya registraste con ella se conservan.`, confirmLabel: 'Eliminar' })) return;
+    const nowIso = new Date().toISOString();
+    const r = list[idx];
+    const tomb = { ...r, deleted_at: nowIso, updated_at: nowIso, base_version: r.version || 1, version: (r.version || 1) + 1 };
+    list[idx] = tomb;
+    saveWorkoutRoutines(list);
+    enqueueChange({ ...tomb, collection: 'workout_routines' });
+    renderWorkoutView();
+  }
+
+  function initWorkoutModule() {
+    $$('[data-workout-tab]').forEach(btn => btn.addEventListener('click', () => { workoutTab = btn.dataset.workoutTab; renderWorkoutView(); }));
+    $('#btn-workout-free')?.addEventListener('click', () => openWorkoutModal({ routineId: null, activityId: null }));
+    $('#btn-new-routine')?.addEventListener('click', () => openRoutineEditor(null));
+    $('#workout-progress-exercise')?.addEventListener('change', (e) => { workoutProgressExercise = e.target.value; renderWorkoutProgress(); });
+
+    $('#view-workout')?.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-start-routine],[data-edit-routine],[data-delete-routine],[data-delete-workout],[data-workout-goto]');
+      if (!t) return;
+      if (t.dataset.startRoutine) openWorkoutModal({ routineId: t.dataset.startRoutine });
+      else if (t.dataset.editRoutine) openRoutineEditor(t.dataset.editRoutine);
+      else if (t.dataset.deleteRoutine) deleteRoutine(t.dataset.deleteRoutine);
+      else if (t.dataset.deleteWorkout) deleteWorkout(t.dataset.deleteWorkout);
+      else if (t.dataset.workoutGoto) { workoutTab = t.dataset.workoutGoto; renderWorkoutView(); openRoutineEditor(null); }
+    });
+
+    // Modal del entreno: cada cambio se guarda en el borrador (sobrevive a recargar la página).
+    const exBox = $('#workout-exercises');
+    exBox?.addEventListener('input', (e) => {
+      const field = e.target.dataset.field;
+      const exEl = e.target.closest('[data-ex]');
+      if (!field || !exEl) return;
+      const ei = Number(exEl.dataset.ex);
+      const setEl = e.target.closest('[data-set]');
+      updateDraft(d => {
+        const ex = d.exercises[ei];
+        if (setEl) ex.sets[Number(setEl.dataset.set)][field] = Number(e.target.value) || 0;
+        else if (field === 'name') ex.name = e.target.value;
+      });
+    });
+    exBox?.addEventListener('change', (e) => {
+      const field = e.target.dataset.field;
+      const exEl = e.target.closest('[data-ex]');
+      if (!exEl || (field !== 'measure' && field !== 'name')) return;
+      const ei = Number(exEl.dataset.ex);
+      let changed = false;
+      updateDraft(d => {
+        const ex = d.exercises[ei];
+        const before = JSON.stringify([ex.measure, ex.last, ex.sets]);
+        if (field === 'measure') ex.measure = e.target.value;
+        if (field === 'name') {
+          ex.name = e.target.value.trim();
+          const last = ex.name ? WorkoutCore.lastPerformance(activeWorkouts(), ex.name) : null;
+          ex.last = last ? `${last.date}: ${last.text}` : '';
+          if (last && !ex.sets.some(st => st.reps || st.seconds)) { ex.measure = last.measure; ex.sets.forEach(st => { st.weight_kg = last.maxWeight; }); }
+          else if (!last) ex.measure = suggestedMeasure(ex.name);
+        }
+        changed = JSON.stringify([ex.measure, ex.last, ex.sets]) !== before;
+      });
+      if (changed) rerenderKeepingFocus('#workout-exercises', renderWorkoutModal);
+    });
+    exBox?.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-add-set],[data-remove-set],[data-remove-exercise]');
+      if (!t) return;
+      const ei = Number(t.closest('[data-ex]').dataset.ex);
+      updateDraft(d => {
+        const ex = d.exercises[ei];
+        if (t.dataset.addSet !== undefined) {
+          const prev = ex.sets[ex.sets.length - 1] || { reps: 0, seconds: 0, weight_kg: 0 };
+          ex.sets.push({ ...prev });
+        } else if (t.dataset.removeSet !== undefined) {
+          ex.sets.splice(Number(t.dataset.removeSet), 1);
+          if (!ex.sets.length) ex.sets.push({ reps: 0, seconds: 0, weight_kg: 0 });
+        } else {
+          d.exercises.splice(ei, 1);
+        }
+      }, true);
+    });
+    $('#btn-workout-add-exercise')?.addEventListener('click', () => {
+      updateDraft(d => d.exercises.push(newDraftExercise('')), true);
+      const inputs = $$('#workout-exercises .workout-ex-name');
+      if (inputs.length) inputs[inputs.length - 1].focus();
+    });
+    $('#workout-routine-select')?.addEventListener('change', async (e) => {
+      const draft = loadWorkoutDraft();
+      if (draftHasData(draft) && !await confirmAction({ title: 'Cambiar de rutina', message: 'Se reemplazarán los ejercicios que ya anotaste.', confirmLabel: 'Cambiar' })) {
+        e.target.value = draft.routine_id || '';
+        return;
+      }
+      const routine = activeRoutines().find(r => r.id === e.target.value);
+      updateDraft(d => {
+        const base = routine ? WorkoutCore.buildDraftFromRoutine(routine, activeWorkouts()) : { routine_id: null, exercises: [newDraftExercise('')] };
+        d.routine_id = base.routine_id;
+        d.exercises = base.exercises.length ? base.exercises : [newDraftExercise('')];
+      }, true);
+    });
+    $('#workout-date')?.addEventListener('change', (e) => updateDraft(d => { d.date = e.target.value || todayStr(); }));
+    $('#workout-duration')?.addEventListener('input', (e) => updateDraft(d => { d.duration_minutes = e.target.value === '' ? null : Number(e.target.value); }));
+    $('#workout-notes')?.addEventListener('input', (e) => updateDraft(d => { d.notes = e.target.value; }));
+    $('#workout-save')?.addEventListener('click', saveWorkout);
+    $('#workout-cancel')?.addEventListener('click', discardWorkout);
+    $('#workout-close')?.addEventListener('click', closeWorkoutModal); // cerrar conserva el borrador
+
+    // Editor de rutinas
+    const rows = $('#routine-editor-exercises');
+    rows?.addEventListener('input', (e) => {
+      const row = e.target.closest('[data-row]');
+      const field = e.target.dataset.field;
+      if (!row || !field || field === 'measure') return;
+      const ex = routineEditing.exercises[Number(row.dataset.row)];
+      ex[field] = field === 'name' ? e.target.value : Number(e.target.value) || 0;
+    });
+    rows?.addEventListener('change', (e) => {
+      const row = e.target.closest('[data-row]');
+      if (!row) return;
+      const ex = routineEditing.exercises[Number(row.dataset.row)];
+      if (e.target.dataset.field === 'measure') {
+        ex.measure = e.target.value;
+        ex._measureTouched = true;
+        renderRoutineEditorRows();
+      } else if (e.target.dataset.field === 'name' && ex.name && !ex._measureTouched) {
+        const measure = suggestedMeasure(ex.name);
+        if (measure !== ex.measure) {
+          ex.measure = measure;
+          if (ex.measure === 'time' && !ex.target_seconds) ex.target_seconds = 30;
+          rerenderKeepingFocus('#routine-editor-exercises', renderRoutineEditorRows);
+        }
+      }
+    });
+    rows?.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-remove-row]');
+      if (!t) return;
+      routineEditing.exercises.splice(Number(t.dataset.removeRow), 1);
+      renderRoutineEditorRows();
+    });
+    $('#btn-routine-add-exercise')?.addEventListener('click', () => {
+      routineEditing.exercises.push({ name: '', measure: 'reps', target_sets: 3, target_reps: 10, target_seconds: 0 });
+      renderRoutineEditorRows();
+      const inputs = $$('#routine-editor-exercises input[data-field="name"]');
+      if (inputs.length) inputs[inputs.length - 1].focus();
+    });
+    $('#routine-editor-save')?.addEventListener('click', saveRoutine);
+    const closeEditor = () => { $('#routine-editor-overlay').classList.remove('open'); routineEditing = null; };
+    $('#routine-editor-cancel')?.addEventListener('click', closeEditor);
+    $('#routine-editor-close')?.addEventListener('click', closeEditor);
   }
 
   // ── Login con correo y contraseña ──
@@ -5908,6 +6596,7 @@ SIEMPRE devuelve un JSON válido.
     // Settings
     initSettings();
     initAmbientControls();
+    initWorkoutModule();
     updateFocusUIBadges();
 
     renderProfileUI();
