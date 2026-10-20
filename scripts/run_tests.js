@@ -58,6 +58,11 @@ const steps = [
     args: ['--test', path.join(ROOT_DIR, 'web/test_workout_core.js')]
   },
   {
+    name: '1.g Tests Unitarios Frontend (NotesCore)',
+    cmd: process.execPath,
+    args: ['--test', path.join(ROOT_DIR, 'web/test_notes_core.js')]
+  },
+  {
     name: '2. Tests Unitarios e Integración Backend (Pytest)',
     cmd: PYTEST,
     args: [path.join(ROOT_DIR, 'backend')]
@@ -141,6 +146,16 @@ const steps = [
     name: '5.n E2E Módulo de Ejercicio (Rutinas, Registro, Progreso, Matriz y Agenda)',
     cmd: PYTHON,
     args: [path.join(ROOT_DIR, 'scripts/test_e2e_workout.py')]
+  },
+  {
+    name: '5.o E2E Apuntes (Tareas, Etiquetas, Día, Búsqueda y Sincronización)',
+    cmd: PYTHON,
+    args: [path.join(ROOT_DIR, 'scripts/test_e2e_notes.py')]
+  },
+  {
+    name: '5.p E2E Plan Semanal y Entreno Guiado (Series y Descansos Cronometrados)',
+    cmd: PYTHON,
+    args: [path.join(ROOT_DIR, 'scripts/test_e2e_guided_workout.py')]
   }
 ];
 

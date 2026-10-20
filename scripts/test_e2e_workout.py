@@ -74,16 +74,18 @@ def run():
             routines = server_collection(server, 'workout_routines')
             assert len(routines) == 1 and routines[0]['name'] == 'Empuje'
             assert routines[0]['exercises'][0]['target_sets'] == 4
-            assert routines[0]['exercises'][1] == {'name': 'Plancha', 'measure': 'time', 'target_sets': 3, 'target_reps': 0, 'target_seconds': 45}
+            plancha = routines[0]['exercises'][1]
+            assert (plancha['measure'], plancha['target_sets'], plancha['target_seconds'], plancha['rest_seconds']) == ('time', 3, 45, 60)
             print("  [OK] Rutina creada y sincronizada (Plancha detectada como isométrico).")
 
             # ── 2. Primer entreno ──
             page.click('[data-workout-tab="train"]')
-            page.click('[data-start-routine]')
+            page.click('#workout-start-list [data-start-routine]')
             page.wait_for_selector('#workout-overlay.open')
+            page.click('[data-workout-mode="table"]')  # las rutinas abren en modo guiado; aquí se prueba la tabla
             ex1 = '#workout-exercises [data-ex="0"]'
             assert page.locator(f'{ex1} [data-set]').count() == 4, "Se precargan las 4 series objetivo"
-            assert page.input_value(f'{ex1} [data-set="0"] input[data-field="reps"]') == '10'
+            assert page.input_value(f'{ex1} [data-set="0"] input[data-field="reps"]') == '15', "precarga el máximo del rango 10–15"
             page.fill(f'{ex1} [data-set="0"] input[data-field="reps"]', '12')
             page.fill(f'{ex1} [data-set="0"] input[data-field="weight_kg"]', '5')
             page.fill('#workout-duration', '40')
@@ -92,13 +94,14 @@ def run():
             wait_synced(page)
             saved = server_collection(server, 'workouts')
             assert len(saved) == 1 and saved[0]['duration_minutes'] == 40
-            assert saved[0]['exercises'][0]['sets'][0] == {'reps': 12, 'seconds': 0, 'weight_kg': 5.0}
+            assert saved[0]['exercises'][0]['sets'][0] == {'reps': 12, 'seconds': 0, 'weight_kg': 5.0, 'distance_km': 0.0}
             assert saved[0]['exercises'][1]['sets'][0]['seconds'] == 45
             print("  [OK] Entreno registrado desde la rutina y sincronizado.")
 
             # ── 3. Segundo entreno: "La última vez" ──
-            page.click('[data-start-routine]')
+            page.click('#workout-start-list [data-start-routine]')
             page.wait_for_selector('#workout-overlay.open')
+            page.click('[data-workout-mode="table"]')
             last = page.text_content(f'{ex1} .workout-last')
             assert 'La última vez' in last and '12@+5kg' in last, last
             assert page.input_value(f'{ex1} [data-set="0"] input[data-field="weight_kg"]') == '5', "Se precarga el lastre de la última vez"
@@ -111,10 +114,10 @@ def run():
             page.click('[data-workout-tab="progress"]')
             page.wait_for_selector('#workout-records table')
             records = page.text_content('#workout-records')
-            assert 'Fondos' in records and '12 reps' in records and '+5 kg' in records and '+7 kg' in records, records
+            assert 'Fondos' in records and '15 reps' in records and '+5 kg' in records and '+7 kg' in records, records
             assert 'Plancha' in records and '45 s' in records
             assert page.locator('#workout-progress-chart rect.workout-bar').count() == 1
-            print("  [OK] Récords (12 reps, +5 kg, 1RM +7 kg) y gráfica semanal.")
+            print("  [OK] Récords (15 reps, +5 kg, 1RM +7 kg) y gráfica semanal.")
 
             # ── 5. Matriz ──
             page.click('.nav-item[data-view="dashboard"]')

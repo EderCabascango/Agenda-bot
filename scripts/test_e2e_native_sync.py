@@ -5,6 +5,7 @@ Simula el APK con window.Capacitor.isNativePlatform() = true:
 2. Con la dirección del servidor, entra y la primera sincronización trae los datos de la PC.
 3. Lo que se crea en el teléfono llega a la PC y viceversa al volver a la app (visibilitychange).
 4. Dos sincronizaciones pedidas a la vez nunca se solapan (una sola petición /sync en vuelo).
+5. Lo creado mientras una sincronización está en curso no se pierde.
 """
 import json
 import time
@@ -119,6 +120,26 @@ def run():
             for (s1, e1), (s2, _) in zip(spans, spans[1:]):
                 assert s2 >= e1, "Las sincronizaciones no deben solaparse"
             print(f"  [OK] 3 sincronizaciones pedidas a la vez -> {len(spans)} petición(es) /sync en serie.")
+
+            # ── 5. Cambio hecho mientras una sincronización está en curso: no se pierde ──
+            phone.evaluate("""() => {
+                const orig = window.fetch;
+                window.fetch = async (...args) => {
+                    const res = await orig(...args);
+                    if (String(args[0]).endsWith('/sync')) await new Promise(r => setTimeout(r, 1500));
+                    return res;
+                };
+                window.__inflight = window.syncWithBackend();
+            }""")
+            phone.click('#fab-add')
+            phone.wait_for_selector('#form-title', state='visible')
+            phone.fill('#form-title', 'Creada durante la sincronización')
+            phone.fill('#form-date', TODAY)
+            phone.click('#activity-form button[type="submit"]')
+            phone.evaluate("async () => { await window.__inflight; }")
+            phone.wait_for_function("() => JSON.parse(localStorage.getItem('diary_sync_queue') || '[]').length === 0", timeout=20000)
+            assert any(a['title'] == 'Creada durante la sincronización' for a in api(server, "GET", "/activities")),                 "lo creado mientras viajaba otra sincronización debe llegar al servidor"
+            print("  [OK] Un cambio hecho durante una sincronización en curso no se pierde de la cola.")
 
             pc_browser.close()
             phone_browser.close()

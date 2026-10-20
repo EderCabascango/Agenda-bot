@@ -221,11 +221,15 @@ def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
         conn.execute(
             """CREATE TABLE workout_routines (
                 user_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT DEFAULT '',
-                exercises TEXT DEFAULT '[]', notes TEXT DEFAULT '',
+                exercises TEXT DEFAULT '[]', notes TEXT DEFAULT '', days TEXT DEFAULT '[]',
                 created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
                 PRIMARY KEY (user_id, id))"""
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_workout_routines_user_sync ON workout_routines (user_id, updated_at)")
+    else:
+        routine_cols = {row["name"] for row in conn.execute("PRAGMA table_info(workout_routines)").fetchall()}
+        if "days" not in routine_cols:
+            conn.execute("ALTER TABLE workout_routines ADD COLUMN days TEXT DEFAULT '[]'")
     if "workouts" not in existing_tables:
         conn.execute(
             """CREATE TABLE workouts (
@@ -237,6 +241,18 @@ def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_workouts_user_sync ON workouts (user_id, updated_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_workouts_user_date ON workouts (user_id, date)")
+
+    # 6c. Apuntes generales (texto, lista de tareas, etiquetas y día)
+    if "notes" not in existing_tables:
+        conn.execute(
+            """CREATE TABLE notes (
+                user_id TEXT NOT NULL, id TEXT NOT NULL, title TEXT DEFAULT '', content TEXT DEFAULT '',
+                checklist TEXT DEFAULT '[]', tags TEXT DEFAULT '[]', date TEXT DEFAULT '', pinned INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
+                PRIMARY KEY (user_id, id))"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_user_sync ON notes (user_id, updated_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_user_date ON notes (user_id, date)")
 
     # 6. Perfil del usuario (tabla nueva y aditiva: no toca datos existentes)
     if "profiles" not in existing_tables:
@@ -355,6 +371,7 @@ COLLECTION_SCHEMAS["workout_routines"] = {
         "name": {"type": str, "max_length": 80, "default": "", "sql_col": "name"},
         "exercises": {"type": list, "default": [], "sql_col": "exercises", "serialize": json.dumps, "deserialize": lambda v: json.loads(v or "[]")},
         "notes": {"type": str, "max_length": 2000, "default": "", "sql_col": "notes"},
+        "days": {"type": list, "default": [], "sql_col": "days", "serialize": json.dumps, "deserialize": lambda v: json.loads(v or "[]")},
     },
     "order_by": "name ASC"
 }
@@ -372,7 +389,64 @@ COLLECTION_SCHEMAS["workouts"] = {
     },
     "order_by": "date DESC"
 }
+COLLECTION_SCHEMAS["notes"] = {
+    "table": "notes",
+    "primary_key": ["user_id", "id"],
+    "columns": {
+        "title": {"type": str, "max_length": 200, "default": "", "sql_col": "title"},
+        "content": {"type": str, "max_length": 20000, "default": "", "sql_col": "content"},
+        "checklist": {"type": list, "default": [], "sql_col": "checklist", "serialize": json.dumps, "deserialize": lambda v: json.loads(v or "[]")},
+        "tags": {"type": list, "default": [], "sql_col": "tags", "serialize": json.dumps, "deserialize": lambda v: json.loads(v or "[]")},
+        "date": {"type": str, "max_length": 10, "default": "", "sql_col": "date"},
+        "pinned": {"type": int, "min_val": 0, "max_val": 1, "default": 0, "sql_col": "pinned"},
+    },
+    "order_by": "updated_at DESC"
+}
 WHITELISTED_COLLECTIONS = set(COLLECTION_SCHEMAS.keys())
+
+MAX_CHECKLIST_ITEMS = 200
+MAX_TAGS = 20
+
+
+def sanitize_note(note: dict) -> dict:
+    """Normaliza tareas, etiquetas y fecha de un apunte. Lanza ValueError si algo no es válido."""
+    checklist = note.get("checklist") or []
+    if not isinstance(checklist, list) or len(checklist) > MAX_CHECKLIST_ITEMS:
+        raise ValueError(f"La lista de tareas admite como máximo {MAX_CHECKLIST_ITEMS} elementos")
+    clean_items = []
+    for item in checklist:
+        if not isinstance(item, dict):
+            raise ValueError("Cada tarea debe ser un objeto {text, done}")
+        text = str(item.get("text") or "").strip()
+        if len(text) > 300:
+            raise ValueError("Cada tarea admite como máximo 300 caracteres")
+        if text:
+            clean_items.append({"text": text, "done": bool(item.get("done"))})
+
+    tags = note.get("tags") or []
+    if not isinstance(tags, list):
+        raise ValueError("'tags' debe ser una lista")
+    clean_tags = []
+    for tag in tags:
+        t = str(tag or "").strip().lower().lstrip("#")
+        if len(t) > 40:
+            raise ValueError("Cada etiqueta admite como máximo 40 caracteres")
+        if t and t not in clean_tags:
+            clean_tags.append(t)
+    if len(clean_tags) > MAX_TAGS:
+        raise ValueError(f"Máximo {MAX_TAGS} etiquetas por apunte")
+
+    date = str(note.get("date") or "")
+    if date:
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("La fecha del apunte debe ser AAAA-MM-DD")
+
+    if not str(note.get("title") or "").strip() and not str(note.get("content") or "").strip() and not clean_items:
+        raise ValueError("El apunte está vacío: escribe un título, texto o alguna tarea")
+    return {"checklist": clean_items, "tags": clean_tags, "date": date, "pinned": 1 if note.get("pinned") else 0}
+
 
 MAX_EXERCISES = 40
 MAX_SETS = 30
@@ -404,8 +478,8 @@ def sanitize_exercises(raw, with_sets: bool) -> list:
         if not name or len(name) > 80:
             raise ValueError(f"El ejercicio {i + 1} necesita un nombre de 1 a 80 caracteres")
         measure = ex.get("measure") or "reps"
-        if measure not in ("reps", "time"):
-            raise ValueError(f"El ejercicio '{name}' tiene una medida inválida (reps o time)")
+        if measure not in ("reps", "time", "cardio"):
+            raise ValueError(f"El ejercicio '{name}' tiene una medida inválida (reps, time o cardio)")
         item = {"name": name, "measure": measure}
         if with_sets:
             sets = ex.get("sets") or []
@@ -413,13 +487,20 @@ def sanitize_exercises(raw, with_sets: bool) -> list:
                 raise ValueError(f"'{name}': máximo {MAX_SETS} series")
             item["sets"] = [{
                 "reps": _bounded_number(st.get("reps"), int, 0, 1000, "reps"),
-                "seconds": _bounded_number(st.get("seconds"), int, 0, 7200, "seconds"),
+                "seconds": _bounded_number(st.get("seconds"), int, 0, 86400, "seconds"),
                 "weight_kg": round(_bounded_number(st.get("weight_kg"), float, 0, 500, "weight_kg"), 2),
+                "distance_km": round(_bounded_number(st.get("distance_km"), float, 0, 200, "distance_km"), 2),
             } for st in sets if isinstance(st, dict)]
         else:
             item["target_sets"] = _bounded_number(ex.get("target_sets"), int, 0, MAX_SETS, "target_sets")
-            item["target_reps"] = _bounded_number(ex.get("target_reps"), int, 0, 1000, "target_reps")
-            item["target_seconds"] = _bounded_number(ex.get("target_seconds"), int, 0, 7200, "target_seconds")
+            reps_min = _bounded_number(ex.get("target_reps_min", ex.get("target_reps")), int, 0, 1000, "target_reps_min")
+            reps_max = _bounded_number(ex.get("target_reps_max", reps_min), int, 0, 1000, "target_reps_max")
+            item["target_reps_min"] = min(reps_min, reps_max) if reps_max else reps_min
+            item["target_reps_max"] = max(reps_min, reps_max)
+            item["target_reps"] = item["target_reps_min"]
+            item["target_seconds"] = _bounded_number(ex.get("target_seconds"), int, 0, 86400, "target_seconds")
+            rest = ex.get("rest_seconds")
+            item["rest_seconds"] = 60 if rest in (None, "") else _bounded_number(rest, int, 0, 600, "rest_seconds")
         clean.append(item)
     return clean
 
@@ -614,6 +695,12 @@ def validate_and_sanitize_item(collection_name: str, item: dict) -> tuple[dict |
         if topic_ids and isinstance(topic_ids, list) and len(topic_ids) > 50:
             return None, "El campo 'topic_ids' no puede contener más de 50 temas", []
 
+    if collection_name == "notes" and not sanitized.get("deleted_at"):
+        try:
+            sanitized.update(sanitize_note(sanitized))
+        except ValueError as e:
+            return None, str(e), []
+
     if collection_name in ("workout_routines", "workouts") and not sanitized.get("deleted_at"):
         try:
             sanitized["exercises"] = sanitize_exercises(sanitized.get("exercises") or [], with_sets=collection_name == "workouts")
@@ -621,6 +708,11 @@ def validate_and_sanitize_item(collection_name: str, item: dict) -> tuple[dict |
             return None, str(e), []
         if collection_name == "workout_routines" and not sanitized.get("name", "").strip():
             return None, "La rutina necesita un nombre", []
+        if collection_name == "workout_routines":
+            days = sanitized.get("days") or []
+            if not isinstance(days, list) or any(not isinstance(d, int) or isinstance(d, bool) or d < 0 or d > 6 for d in days):
+                return None, "Los días de la rutina deben ser números de 0 (lunes) a 6 (domingo)", []
+            sanitized["days"] = sorted(set(days))
         if collection_name == "workouts":
             d = sanitized.get("date") or ""
             try:

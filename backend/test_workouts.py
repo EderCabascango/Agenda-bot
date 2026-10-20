@@ -58,8 +58,10 @@ def test_routine_and_workout_roundtrip_between_devices():
     routine = other_device["workout_routines"]["changes"][0]
     workout = other_device["workouts"]["changes"][0]
     assert routine["name"] == "Empuje"
-    assert routine["exercises"][1] == {"name": "Plancha", "measure": "time", "target_sets": 3, "target_reps": 0, "target_seconds": 60}
-    assert workout["exercises"][0]["sets"][1] == {"reps": 8, "seconds": 0, "weight_kg": 5.0}
+    assert routine["exercises"][1] == {"name": "Plancha", "measure": "time", "target_sets": 3, "target_reps": 0,
+                                       "target_reps_min": 0, "target_reps_max": 0, "target_seconds": 60, "rest_seconds": 60}
+    assert routine["exercises"][0]["target_reps_min"] == routine["exercises"][0]["target_reps_max"] == 10, "las rutinas antiguas conservan sus reps"
+    assert workout["exercises"][0]["sets"][1] == {"reps": 8, "seconds": 0, "weight_kg": 5.0, "distance_km": 0.0}
     assert workout["duration_minutes"] == 45 and workout["notes"] == "Buen día"
 
 
@@ -95,3 +97,49 @@ def test_workouts_are_isolated_per_user():
     _sync("wk_owner", {"workouts": [{**WORKOUT, "id": "privado"}]})
     other = _sync("wk_other", {"workouts": []}, full_pull=True)["results"]["workouts"]["changes"]
     assert all(w["id"] != "privado" for w in other)
+
+
+def test_ranges_rest_cardio_and_days():
+    user = "wk_plan"
+    routine = {
+        "id": "plan-a", "name": "A · Full body", "days": [4, 0, 0],
+        "exercises": [
+            {"name": "Flexiones", "measure": "reps", "target_sets": 3, "target_reps_min": 15, "target_reps_max": 10, "rest_seconds": 45},
+            {"name": "Plancha", "measure": "time", "target_sets": 3, "target_seconds": 30},
+        ],
+    }
+    cardio = {"id": "ent-correr", "date": "2026-10-22", "duration_minutes": 32,
+              "exercises": [{"name": "Correr suave", "measure": "cardio", "sets": [{"seconds": 1920, "distance_km": 4.25}]}]}
+    res = _sync(user, {"workout_routines": [routine], "workouts": [cardio]})
+    assert res["results"]["workout_routines"]["applied"] == 1 and res["results"]["workouts"]["applied"] == 1
+    pulled = _sync(user, {"workout_routines": [], "workouts": []}, full_pull=True)["results"]
+    r = pulled["workout_routines"]["changes"][0]
+    assert r["days"] == [0, 4]
+    assert (r["exercises"][0]["target_reps_min"], r["exercises"][0]["target_reps_max"], r["exercises"][0]["rest_seconds"]) == (10, 15, 45)
+    assert r["exercises"][1]["rest_seconds"] == 60, "descanso por defecto"
+    assert pulled["workouts"]["changes"][0]["exercises"][0]["sets"][0] == {"reps": 0, "seconds": 1920, "weight_kg": 0.0, "distance_km": 4.25}
+
+    bad = _sync(user, {"workout_routines": [
+        {**routine, "id": "dias-malos", "days": [7]},
+        {**routine, "id": "descanso-largo", "exercises": [{"name": "X", "rest_seconds": 900}]},
+    ], "workouts": [
+        {**cardio, "id": "km-imposibles", "exercises": [{"name": "Correr", "measure": "cardio", "sets": [{"seconds": 60, "distance_km": 500}]}]},
+    ]})["results"]
+    assert {x["id"] for x in bad["workout_routines"]["rejected"]} == {"dias-malos", "descanso-largo"}
+    assert bad["workouts"]["rejected"][0]["id"] == "km-imposibles"
+
+
+def test_existing_routines_table_gets_days_column(tmp_path):
+    import sqlite3
+    path = str(tmp_path / "vieja.db")
+    old = sqlite3.connect(path)
+    old.execute("""CREATE TABLE workout_routines (user_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT DEFAULT '',
+                   exercises TEXT DEFAULT '[]', notes TEXT DEFAULT '', created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '',
+                   deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1, PRIMARY KEY (user_id, id))""")
+    old.execute("INSERT INTO workout_routines (user_id, id, name) VALUES ('me', 'r1', 'Empuje')")
+    old.commit()
+    old.close()
+    with db._conn(path) as conn:
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(workout_routines)").fetchall()}
+        row = conn.execute("SELECT name, days FROM workout_routines WHERE id='r1'").fetchone()
+    assert "days" in cols and row["name"] == "Empuje" and row["days"] == "[]"

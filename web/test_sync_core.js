@@ -509,8 +509,20 @@ describe('SyncCore - Complete Client Sync Logic Test Suite (Fase 1, 1.5, 1.6)', 
       assert.equal(exp.collections.learning_notes.length, 1);
     });
 
+    test('remainingAfterSync conserva lo encolado o reeditado durante una sincronización en curso', () => {
+      const sent = [{ id: 'a', title: 'A', version: 1 }, { id: 'b', title: 'B', version: 1 }];
+      const current = [
+        { id: 'a', title: 'A', version: 1 },           // enviado y sin cambios -> sale
+        { id: 'b', title: 'B editado', version: 2 },   // reeditado mientras viajaba -> se queda
+        { id: 'c', title: 'Nuevo', version: 1 }        // encolado durante la petición -> se queda
+      ];
+      assert.deepEqual(SyncCore.remainingAfterSync(current, sent).map(i => i.id), ['b', 'c']);
+      assert.deepEqual(SyncCore.remainingAfterSync(sent, sent), []);
+      assert.deepEqual(SyncCore.remainingAfterSync(null, sent), []);
+    });
+
     test('Respaldo e importación incluyen rutinas y entrenos de ejercicio', () => {
-      assert.deepEqual(SyncCore.SYNC_COLLECTIONS.slice(-2), ['workout_routines', 'workouts']);
+      assert.deepEqual(SyncCore.SYNC_COLLECTIONS.slice(-3), ['workout_routines', 'workouts', 'notes']);
       const exp = SyncCore.exportAllCollections({
         workout_routines: [{ id: 'rut-1', name: 'Empuje', exercises: [] }],
         workouts: [{ id: 'ent-1', date: '2026-10-19', exercises: [] }]

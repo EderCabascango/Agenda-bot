@@ -82,6 +82,16 @@ function dequeueCommitted(queue, committedChanges, conflicts = []) {
 /**
  * Limpia totalmente los IDs confirmados de la cola una vez procesados o movidos al almacén de conflictos.
  */
+/**
+ * Cola que queda tras una sincronización: quita solo los cambios que se enviaron y que siguen
+ * idénticos. Lo encolado (o reeditado) mientras la petición estaba en curso se conserva.
+ */
+function remainingAfterSync(currentQueue, sentQueue) {
+  if (!Array.isArray(currentQueue)) return [];
+  const sent = new Map((Array.isArray(sentQueue) ? sentQueue : []).map(item => [item && item.id, JSON.stringify(item)]));
+  return currentQueue.filter(item => !(item && sent.has(item.id) && sent.get(item.id) === JSON.stringify(item)));
+}
+
 function purgeCommittedAndConflicted(queue, committedChanges) {
   if (!Array.isArray(queue) || !Array.isArray(committedChanges)) return queue || [];
   const committedIds = new Set(committedChanges.map(c => c.id));
@@ -493,7 +503,7 @@ function migrateLegacyQueue(legacyQueue, defaultCollection = 'activities') {
  * Genera un backup JSON completo estructurado con las 5 colecciones bajo schema_version: 2.
  */
 // Colecciones sincronizadas, en el orden en que se exportan e importan.
-const SYNC_COLLECTIONS = ['activities', 'subjects', 'topics', 'focus_sessions', 'learning_notes', 'workout_routines', 'workouts'];
+const SYNC_COLLECTIONS = ['activities', 'subjects', 'topics', 'focus_sessions', 'learning_notes', 'workout_routines', 'workouts', 'notes'];
 
 function pickCollections(source = {}) {
   const out = {};
@@ -613,6 +623,7 @@ if (typeof module !== 'undefined' && module.exports) {
     validateImportPayload,
     prepareImportChanges,
     exportAllCollections,
+    remainingAfterSync,
     SYNC_COLLECTIONS,
     validateMultiCollectionImportPayload,
     prepareMultiCollectionImportChanges,
@@ -643,6 +654,7 @@ if (typeof window !== 'undefined') {
     validateImportPayload,
     prepareImportChanges,
     exportAllCollections,
+    remainingAfterSync,
     SYNC_COLLECTIONS,
     validateMultiCollectionImportPayload,
     prepareMultiCollectionImportChanges,

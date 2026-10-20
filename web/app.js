@@ -55,6 +55,7 @@
   const WORKOUT_ROUTINES_KEY = 'diary_workout_routines';
   const WORKOUTS_KEY = 'diary_workouts';
   const WORKOUT_DRAFT_KEY = 'diary_workout_draft';
+  const NOTES_KEY = 'diary_notes';
   const ACTIVE_FOCUS_SESSION_KEY = 'diary_focus_active';
   const TAB_ID = 'tab_' + Math.random().toString(36).substring(2, 9);
 
@@ -156,6 +157,12 @@
   }
   function saveWorkouts(list) {
     safeStorageSet(WORKOUTS_KEY, list);
+  }
+  function loadNotes() {
+    return safeStorageGet(NOTES_KEY, []);
+  }
+  function saveNotes(list) {
+    safeStorageSet(NOTES_KEY, list);
   }
 
   function loadSettings() {
@@ -362,6 +369,7 @@
     if (name === 'stats') renderStats();
     if (name === 'study') renderStudyView();
     if (name === 'workout') renderWorkoutView();
+    if (name === 'notes') renderNotesView();
   }
 
   function refreshActiveView() {
@@ -436,6 +444,7 @@
     // ── Agenda de Hoy Side Panel ──
     const dateSubtitle = $('#db-agenda-date');
     if (dateSubtitle) dateSubtitle.textContent = formatDate(new Date());
+    renderAgendaNotesLink();
 
     // Mini 7-day strip
     const weekStrip = $('#mini-week-strip');
@@ -1220,6 +1229,7 @@
     if (!detailTitle) return;
     const d = new Date(calSelectedDate + 'T12:00:00');
     detailTitle.textContent = formatDate(d);
+    renderCalDayNotes();
     const dayActs = (typeof SyncCore !== 'undefined' && SyncCore.getCalendarDayActivities)
       ? SyncCore.getCalendarDayActivities(activities, calSelectedDate)
       : activities.filter(a => a && !a.deleted_at && a.date === calSelectedDate);
@@ -1504,7 +1514,8 @@
   const ambientPlayer = (typeof AmbientCore !== 'undefined') ? AmbientCore.createAmbientPlayer() : null;
 
   function isFocusInProgress() {
-    return !!activeFocusTimer && ['running', 'paused', 'break', 'waiting'].includes(activeFocusTimer.status);
+    const focusRunning = !!activeFocusTimer && ['running', 'paused', 'break', 'waiting'].includes(activeFocusTimer.status);
+    return focusRunning || (typeof isGuidedWorkoutActive === 'function' && isGuidedWorkoutActive());
   }
   function isDndActive() {
     return loadSettings().focusDnd !== false && isFocusInProgress();
@@ -1878,7 +1889,8 @@
                 focus_sessions: focusSessions,
                 learning_notes: learningNotes,
                 workout_routines: loadWorkoutRoutines(),
-                workouts: loadWorkouts()
+                workouts: loadWorkouts(),
+                notes: loadNotes()
               };
               const { mergedCollections, changesToEnqueue, stats } = SyncCore.prepareMultiCollectionImportChanges(
                 val.sanitized,
@@ -1893,6 +1905,7 @@
               if (mergedCollections.learning_notes) saveLearningNotes(mergedCollections.learning_notes);
               if (mergedCollections.workout_routines) saveWorkoutRoutines(mergedCollections.workout_routines);
               if (mergedCollections.workouts) saveWorkouts(mergedCollections.workouts);
+              if (mergedCollections.notes) saveNotes(mergedCollections.notes);
 
               changesToEnqueue.forEach(ch => enqueueChange(ch));
 
@@ -1976,7 +1989,8 @@
         focus_sessions: focusSessions,
         learning_notes: learningNotes,
         workout_routines: loadWorkoutRoutines(),
-        workouts: loadWorkouts()
+        workouts: loadWorkouts(),
+        notes: loadNotes()
       });
     } else {
       exportObj = activities;
@@ -4903,7 +4917,8 @@ SIEMPRE devuelve un JSON válido.
     focus_sessions: 'Sesión de Enfoque',
     learning_notes: 'Nota de Aprendizaje',
     workout_routines: 'Rutina de Ejercicio',
-    workouts: 'Entreno'
+    workouts: 'Entreno',
+    notes: 'Apunte'
   };
 
   // Una sola sincronización a la vez: si llega otra petición mientras hay una en curso,
@@ -4946,7 +4961,8 @@ SIEMPRE devuelve un JSON válido.
       focus_sessions: queue.filter(q => q.collection === 'focus_sessions'),
       learning_notes: queue.filter(q => q.collection === 'learning_notes'),
       workout_routines: queue.filter(q => q.collection === 'workout_routines'),
-      workouts: queue.filter(q => q.collection === 'workouts')
+      workouts: queue.filter(q => q.collection === 'workouts'),
+      notes: queue.filter(q => q.collection === 'notes')
     };
 
     try {
@@ -4960,8 +4976,9 @@ SIEMPRE devuelve un JSON válido.
       if (!res.ok) return false;
       const data = await res.json();
 
-      let remainingQueue = (typeof SyncCore !== 'undefined' && SyncCore.purgeCommittedAndConflicted)
-        ? SyncCore.purgeCommittedAndConflicted(queue, queue)
+      // Solo salen de la cola los cambios enviados que no se tocaron mientras la petición estaba en curso.
+      let remainingQueue = (typeof SyncCore !== 'undefined' && SyncCore.remainingAfterSync)
+        ? SyncCore.remainingAfterSync(getSyncQueue(), queue)
         : [];
       saveSyncQueue(remainingQueue);
 
@@ -4986,10 +5003,9 @@ SIEMPRE devuelve un JSON válido.
       if (allRejected.length > 0) {
         let rejectedStore = getRejectedStore();
         if (typeof SyncCore !== 'undefined' && SyncCore.handleRejectedItems) {
+          // Se guardan en el almacén de rechazados; ya salieron de la cola porque se enviaron.
           const resRej = SyncCore.handleRejectedItems(rejectedStore, queue, allRejected);
           saveRejectedStore(resRej.rejectedStore);
-          remainingQueue = resRej.queue;
-          saveSyncQueue(remainingQueue);
         }
         showToast(`${allRejected.length} elemento(s) rechazado(s) por validación.`, 'warning', 'var(--accent-amber)');
       }
@@ -5058,6 +5074,10 @@ SIEMPRE devuelve un JSON válido.
       mergeCol(loadWorkoutRoutines(), 'workout_routines', (m) => {
         saveWorkoutRoutines(m);
         if ($('#view-workout')?.classList.contains('active')) renderWorkoutView();
+      });
+      mergeCol(loadNotes(), 'notes', (m) => {
+        saveNotes(m);
+        refreshNotesEverywhere();
       });
       mergeCol(loadWorkouts(), 'workouts', (m) => {
         saveWorkouts(m);
@@ -5347,11 +5367,16 @@ SIEMPRE devuelve un JSON válido.
   }
 
   // ══════════════════════════════════════════════════════════════
-  // ── Ejercicio (calistenia): rutinas, registro de entrenos y progreso ──
+  // ── Ejercicio (calistenia + cardio): rutinas, entreno guiado, registro y progreso ──
   // ══════════════════════════════════════════════════════════════
   let workoutTab = 'train';
   let workoutProgressExercise = '';
-  let routineEditing = null; // { id|null, exercises: [...] }
+  let routineEditing = null; // { id|null, exercises: [...], days: [] }
+  let guidedTicker = null;
+  let guidedAlerted = {}; // avisos ya emitidos por paso: { 'idx:pre': true, 'idx:end': true }
+  let workoutWakeLock = null;
+
+  const MEASURE_LABELS = { reps: 'Reps', time: 'Segundos', cardio: 'Cardio' };
 
   function activeWorkouts() {
     return loadWorkouts().filter(w => w && !w.deleted_at);
@@ -5365,6 +5390,10 @@ SIEMPRE devuelve un JSON válido.
   function saveWorkoutDraft(draft) {
     if (draft) safeStorageSet(WORKOUT_DRAFT_KEY, draft);
     else { try { localStorage.removeItem(WORKOUT_DRAFT_KEY); } catch (e) { /* sin almacenamiento */ } }
+  }
+  function isGuidedWorkoutActive() {
+    const d = loadWorkoutDraft();
+    return !!(d && d.mode === 'guided' && d.guided && !d.guided.finished);
   }
 
   function knownExerciseNames() {
@@ -5388,9 +5417,11 @@ SIEMPRE devuelve un JSON válido.
   }
 
   function routineExerciseText(ex) {
-    const sets = Number(ex.target_sets) || 0;
-    if (ex.measure === 'time') return `${sets || 1}×${Number(ex.target_seconds) || 0} s`;
-    return `${sets || 1}×${Number(ex.target_reps) || 0}`;
+    if (ex.measure === 'cardio') return WorkoutCore.formatTarget(ex);
+    const sets = Number(ex.target_sets) || 1;
+    const target = WorkoutCore.formatTarget(ex).replace(' reps', '');
+    const rest = ex.rest_seconds == null ? WorkoutCore.DEFAULT_REST_SECONDS : Number(ex.rest_seconds);
+    return `${sets}×${target}${rest ? ` · ${rest}s desc.` : ''}`;
   }
 
   function renderWorkoutView() {
@@ -5402,43 +5433,66 @@ SIEMPRE devuelve un JSON válido.
     if (workoutTab === 'progress') renderWorkoutProgress();
   }
 
+  function routineCardHTML(r, all, { primaryLabel = 'Empezar', showDays = true } = {}) {
+    const lastDone = all.filter(w => w.routine_id === r.id).map(w => w.date).sort().pop();
+    const days = WorkoutCore.formatDays(r.days);
+    return `
+      <div class="workout-routine-card ${WorkoutCore.isCardioRoutine(r) ? 'is-cardio' : ''}">
+        <div class="workout-routine-head">
+          <h4>${escHTML(r.name)}</h4>
+          <span class="workout-muted">${lastDone ? `Última vez: ${escHTML(lastDone)}` : 'Aún sin registrar'}</span>
+        </div>
+        ${showDays && days ? `<span class="workout-days">${escHTML(days)}</span>` : ''}
+        <p class="workout-routine-exercises">${(r.exercises || []).map(ex => `${escHTML(ex.name)} <b>${escHTML(routineExerciseText(ex))}</b>`).join(' · ')}</p>
+        <button type="button" class="btn-primary" data-start-routine="${escHTML(r.id)}">
+          <span class="material-icons-round">play_arrow</span> ${primaryLabel}
+        </button>
+      </div>`;
+  }
+
   function renderWorkoutTrain() {
     const all = activeWorkouts();
+    const routines = activeRoutines();
     const sum = WorkoutCore.weeklySummary(all, todayStr());
     const summary = $('#workout-week-summary');
     if (summary) {
-      const mins = Math.floor(sum.seconds / 60), secs = sum.seconds % 60;
       summary.innerHTML = `
         <div class="workout-stat"><span class="workout-stat-value">${sum.workouts}</span><span class="workout-stat-label">entrenos esta semana</span></div>
-        <div class="workout-stat"><span class="workout-stat-value">${sum.sets}</span><span class="workout-stat-label">series</span></div>
         <div class="workout-stat"><span class="workout-stat-value">${sum.reps}</span><span class="workout-stat-label">repeticiones</span></div>
-        <div class="workout-stat"><span class="workout-stat-value">${mins}:${String(secs).padStart(2, '0')}</span><span class="workout-stat-label">en isométricos</span></div>
+        <div class="workout-stat"><span class="workout-stat-value">${WorkoutCore.formatDuration(sum.seconds)}</span><span class="workout-stat-label">en isométricos</span></div>
+        <div class="workout-stat"><span class="workout-stat-value">${sum.cardioMinutes}<small> min</small></span><span class="workout-stat-label">cardio · ${sum.distanceKm} km</span></div>
         <div class="workout-stat workout-stat--accent"><span class="workout-stat-value">${sum.weekStreak}</span><span class="workout-stat-label">semanas seguidas</span></div>`;
     }
 
-    const start = $('#workout-start-list');
-    if (start) {
-      const routines = activeRoutines();
-      start.innerHTML = routines.length ? routines.map(r => {
-        const lastDone = all.filter(w => w.routine_id === r.id).map(w => w.date).sort().pop();
-        return `
-          <div class="workout-routine-card">
-            <div class="workout-routine-head">
-              <h4>${escHTML(r.name)}</h4>
-              <span class="workout-muted">${lastDone ? `Última vez: ${escHTML(lastDone)}` : 'Aún sin registrar'}</span>
-            </div>
-            <p class="workout-routine-exercises">${(r.exercises || []).map(ex => `${escHTML(ex.name)} <b>${routineExerciseText(ex)}</b>`).join(' · ')}</p>
-            <button type="button" class="btn-primary" data-start-routine="${escHTML(r.id)}">
-              <span class="material-icons-round">play_arrow</span> Empezar
-            </button>
-          </div>`;
-      }).join('') : `
+    const today = $('#workout-today');
+    if (today) {
+      const planned = WorkoutCore.plannedRoutinesFor(routines, todayStr());
+      const cardioAlternatives = routines.filter(r => WorkoutCore.isCardioRoutine(r) && !planned.includes(r));
+      const dayName = WorkoutCore.DAY_NAMES[WorkoutCore.weekdayIndex(todayStr())];
+      today.innerHTML = routines.length ? `
+        <div class="workout-today-card">
+          <div>
+            <p class="workout-today-label">Hoy, ${escHTML(dayName)}</p>
+            <h3 class="workout-today-title">${planned.length ? `Toca: ${planned.map(r => escHTML(r.name)).join(' + ')}` : 'Día de descanso'}</h3>
+            ${planned.length ? `<p class="workout-muted">${escHTML((planned[0].exercises || []).map(ex => ex.name).join(' · '))}</p>` : '<p class="workout-muted">Si te apetece, sal a caminar o elige cualquier rutina.</p>'}
+          </div>
+          <div class="workout-today-actions">
+            ${planned.map(r => `<button type="button" class="btn-primary" data-start-routine="${escHTML(r.id)}"><span class="material-icons-round">play_arrow</span> Empezar ${planned.length > 1 ? escHTML(r.name) : 'guiado'}</button>`).join('')}
+            ${cardioAlternatives.map(r => `<button type="button" class="btn-outline" data-start-routine="${escHTML(r.id)}"><span class="material-icons-round">directions_run</span> ${planned.length ? 'Cambiar por' : ''} ${escHTML(r.name)}</button>`).join('')}
+          </div>
+        </div>` : `
         <div class="workout-empty">
           <span class="material-icons-round">fitness_center</span>
-          <p>Aún no tienes rutinas. Crea una (por ejemplo "Empuje" o "Full body") o empieza un entreno libre.</p>
-          <button type="button" class="btn-outline" data-workout-goto="routines">Crear rutina</button>
+          <p>Aún no tienes rutinas. Carga el plan sugerido (3 días de calistenia + caminar y correr) o crea las tuyas.</p>
+          <div class="workout-card-actions">
+            <button type="button" class="btn-primary" data-load-plan>Cargar plan sugerido</button>
+            <button type="button" class="btn-outline" data-workout-goto="routines">Crear rutina</button>
+          </div>
         </div>`;
     }
+
+    const start = $('#workout-start-list');
+    if (start) start.innerHTML = routines.map(r => routineCardHTML(r, all)).join('') || '<p class="workout-muted">Sin rutinas todavía.</p>';
 
     const recent = $('#workout-recent-list');
     if (recent) {
@@ -5447,12 +5501,17 @@ SIEMPRE devuelve un JSON válido.
       recent.innerHTML = list.length ? list.map(w => {
         const s = WorkoutCore.summarizeWorkout(w);
         const title = (w.routine_id && routinesById[w.routine_id] && routinesById[w.routine_id].name) || 'Entreno libre';
+        const bits = [`${s.exercises} ejercicios`, `${s.sets} series`];
+        if (s.reps) bits.push(`${s.reps} reps`);
+        if (s.cardioSeconds) bits.push(`${Math.round(s.cardioSeconds / 60)} min cardio`);
+        if (s.distanceKm) bits.push(`${s.distanceKm} km`);
+        if (w.duration_minutes) bits.push(`${w.duration_minutes} min`);
         return `
           <details class="workout-history-item">
             <summary>
               <span class="workout-history-date">${escHTML(w.date)}</span>
               <span class="workout-history-title">${escHTML(title)}</span>
-              <span class="workout-muted">${s.exercises} ejercicios · ${s.sets} series${s.reps ? ` · ${s.reps} reps` : ''}${w.duration_minutes ? ` · ${w.duration_minutes} min` : ''}</span>
+              <span class="workout-muted">${bits.join(' · ')}</span>
             </summary>
             <ul class="workout-history-sets">
               ${(w.exercises || []).map(ex => `<li><b>${escHTML(ex.name)}</b> ${escHTML(WorkoutCore.formatSets(ex.sets, ex.measure))}</li>`).join('')}
@@ -5468,16 +5527,20 @@ SIEMPRE devuelve un JSON válido.
     const el = $('#workout-routines-list');
     if (!el) return;
     const routines = activeRoutines();
+    const missingPlan = WorkoutCore.planSeed(loadWorkoutRoutines()).length;
+    const planBtn = $('#btn-load-plan');
+    if (planBtn) planBtn.hidden = missingPlan === 0;
     el.innerHTML = routines.length ? routines.map(r => `
-      <div class="workout-routine-card">
+      <div class="workout-routine-card ${WorkoutCore.isCardioRoutine(r) ? 'is-cardio' : ''}">
         <div class="workout-routine-head"><h4>${escHTML(r.name)}</h4><span class="workout-muted">${(r.exercises || []).length} ejercicios</span></div>
-        <ul class="workout-routine-list">${(r.exercises || []).map(ex => `<li>${escHTML(ex.name)} <b>${routineExerciseText(ex)}</b></li>`).join('')}</ul>
+        ${WorkoutCore.formatDays(r.days) ? `<span class="workout-days">${escHTML(WorkoutCore.formatDays(r.days))}</span>` : '<span class="workout-muted">Sin días asignados</span>'}
+        <ul class="workout-routine-list">${(r.exercises || []).map(ex => `<li>${escHTML(ex.name)} <b>${escHTML(routineExerciseText(ex))}</b></li>`).join('')}</ul>
         ${r.notes ? `<p class="workout-muted">${escHTML(r.notes)}</p>` : ''}
         <div class="workout-card-actions">
           <button type="button" class="btn-outline" data-edit-routine="${escHTML(r.id)}"><span class="material-icons-round">edit</span> Editar</button>
           <button type="button" class="btn-text workout-delete" data-delete-routine="${escHTML(r.id)}">Eliminar</button>
         </div>
-      </div>`).join('') : '<p class="workout-muted">No tienes rutinas todavía. Pulsa "Nueva rutina".</p>';
+      </div>`).join('') : '<p class="workout-muted">No tienes rutinas todavía. Carga el plan sugerido o pulsa "Nueva rutina".</p>';
   }
 
   function renderWorkoutProgress() {
@@ -5500,9 +5563,11 @@ SIEMPRE devuelve un JSON válido.
       if (!rec) {
         chart.innerHTML = '<p class="workout-muted">Registra entrenos para ver tu evolución.</p>';
       } else {
-        const isTime = rec.measure === 'time';
         const series = WorkoutCore.weeklySeries(all, { today: todayStr(), weeks: 8, exerciseName: rec.name });
-        const values = series.map(s => (isTime ? s.seconds : s.bestReps));
+        const kind = rec.measure;
+        const values = series.map(s => (kind === 'cardio' ? Math.round(s.cardioSeconds / 60) : kind === 'time' ? s.seconds : s.bestReps));
+        const unit = kind === 'cardio' ? 'min' : kind === 'time' ? 's' : 'reps';
+        const caption = kind === 'cardio' ? 'Minutos de cardio por semana' : kind === 'time' ? 'Segundos totales por semana' : 'Mejor serie (reps) por semana';
         const max = Math.max(1, ...values);
         const W = 320, H = 150, gap = 8, bw = (W - gap * 7) / 8;
         const bars = series.map((s, i) => {
@@ -5510,26 +5575,29 @@ SIEMPRE devuelve un JSON válido.
           const h = v ? Math.max(4, Math.round((v / max) * (H - 34))) : 0;
           const x = i * (bw + gap), y = H - 18 - h;
           const label = s.weekStart.substring(5).replace('-', '/');
-          return `<g><title>Semana del ${s.weekStart}: ${v} ${isTime ? 's' : 'reps'}${s.best1RM ? ` · 1RM est. +${s.best1RM} kg` : ''}</title>
+          return `<g><title>Semana del ${s.weekStart}: ${v} ${unit}${s.best1RM ? ` · 1RM est. +${s.best1RM} kg` : ''}${s.distanceKm ? ` · ${s.distanceKm} km` : ''}</title>
             ${h ? `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="4" class="workout-bar"></rect>` : `<rect x="${x}" y="${H - 20}" width="${bw}" height="2" class="workout-bar-empty"></rect>`}
             ${v ? `<text x="${x + bw / 2}" y="${y - 4}" text-anchor="middle" class="workout-bar-value">${v}</text>` : ''}
             <text x="${x + bw / 2}" y="${H - 4}" text-anchor="middle" class="workout-bar-label">${label}</text></g>`;
         }).join('');
         chart.innerHTML = `
-          <p class="workout-muted">${isTime ? 'Segundos totales por semana' : 'Mejor serie (reps) por semana'} · últimas 8 semanas</p>
+          <p class="workout-muted">${caption} · últimas 8 semanas</p>
           <svg viewBox="0 0 ${W} ${H}" class="workout-chart" role="img" aria-label="Evolución semanal de ${escHTML(rec.name)}">${bars}</svg>`;
       }
     }
 
     const recEl = $('#workout-records');
     if (recEl) {
+      const best = (r) => (r.measure === 'cardio' ? `${r.maxDistanceKm ? `${r.maxDistanceKm} km` : `${Math.round(r.maxSeconds / 60)} min`}`
+        : r.measure === 'time' ? `${r.maxSeconds} s` : `${r.maxReps} reps`);
+      const bestDate = (r) => (r.measure === 'cardio' ? (r.maxDistanceDate || r.maxSecondsDate) : r.measure === 'time' ? r.maxSecondsDate : r.maxRepsDate);
       recEl.innerHTML = records.length ? `
         <table class="workout-records-table">
-          <thead><tr><th>Ejercicio</th><th>Mejor serie</th><th>Lastre</th><th>1RM est.</th></tr></thead>
+          <thead><tr><th>Ejercicio</th><th>Mejor</th><th>Lastre</th><th>1RM est.</th></tr></thead>
           <tbody>${records.map(r => `
             <tr>
               <td>${escHTML(r.name)}</td>
-              <td>${r.measure === 'time' ? `${r.maxSeconds} s` : `${r.maxReps} reps`}<span class="workout-muted"> ${escHTML((r.measure === 'time' ? r.maxSecondsDate : r.maxRepsDate) || '')}</span></td>
+              <td>${best(r)}<span class="workout-muted"> ${escHTML(bestDate(r) || '')}</span></td>
               <td>${r.maxWeight ? `+${r.maxWeight} kg` : '—'}</td>
               <td>${r.best1RM ? `+${r.best1RM} kg` : '—'}</td>
             </tr>`).join('')}</tbody>
@@ -5545,12 +5613,28 @@ SIEMPRE devuelve un JSON válido.
     }
   }
 
-  // ── Registro de un entreno ──
-  function draftHasData(draft) {
-    return !!draft && (draft.exercises || []).some(ex => (ex.sets || []).some(st => Number(st.reps) > 0 || Number(st.seconds) > 0));
+  function loadSuggestedPlan() {
+    const toCreate = WorkoutCore.planSeed(loadWorkoutRoutines());
+    if (!toCreate.length) { showToast('El plan sugerido ya está cargado'); return; }
+    const nowIso = new Date().toISOString();
+    const list = loadWorkoutRoutines();
+    toCreate.forEach(p => {
+      const routine = { ...p, created_at: nowIso, updated_at: nowIso, version: 1 };
+      list.push(routine);
+      enqueueChange({ ...routine, collection: 'workout_routines' });
+    });
+    saveWorkoutRoutines(list);
+    showToast(`Plan cargado ✓ · ${toCreate.length} rutinas (L A · M Caminar · X B · J Correr · V C)`, 'fitness_center', 'var(--accent-amber)');
+    renderWorkoutView();
   }
 
-  async function openWorkoutModal({ routineId = null, activityId = null } = {}) {
+  // ── Registro de un entreno (modo guiado o tabla) ──
+  function draftHasData(draft) {
+    return !!draft && (draft.exercises || []).some(ex => (ex.sets || []).some(st => st.done || Number(st.reps) > 0 || Number(st.seconds) > 0 || Number(st.distance_km) > 0))
+      && (draft.mode !== 'guided' || !!draft.guided);
+  }
+
+  async function openWorkoutModal({ routineId = null, activityId = null, mode = null } = {}) {
     let draft = loadWorkoutDraft();
     if (draft && (routineId || activityId) && draftHasData(draft)) {
       const replace = await confirmAction({
@@ -5562,6 +5646,11 @@ SIEMPRE devuelve un JSON válido.
       else draft = null;
     }
     if (!draft || routineId || activityId) {
+      if (activityId && !routineId) {
+        const act = activities.find(a => a.id === activityId);
+        const r = act ? WorkoutCore.routineForActivity(activeRoutines(), act, act.date || todayStr()) : null;
+        if (r) routineId = r.id;
+      }
       const routine = routineId ? activeRoutines().find(r => r.id === routineId) : null;
       const base = routine ? WorkoutCore.buildDraftFromRoutine(routine, activeWorkouts()) : { routine_id: null, exercises: [] };
       draft = {
@@ -5572,19 +5661,23 @@ SIEMPRE devuelve un JSON válido.
         started_at: new Date().toISOString(),
         duration_minutes: null,
         exercises: base.exercises,
-        notes: ''
+        notes: '',
+        mode: mode || (routine ? 'guided' : 'table'),
+        guided: null
       };
-      if (!draft.exercises.length) draft.exercises.push(newDraftExercise(''));
+      if (!draft.exercises.length) { draft.exercises.push(newDraftExercise('')); draft.mode = 'table'; }
       saveWorkoutDraft(draft);
+      guidedAlerted = {};
     }
     renderWorkoutModal();
     $('#workout-overlay').classList.add('open');
+    syncGuidedTicker();
   }
 
-  function newDraftExercise(name) {
-    const measure = name ? suggestedMeasure(name) : 'reps';
+  function newDraftExercise(name, measure = null) {
+    const m = measure || (name ? suggestedMeasure(name) : 'reps');
     const last = name ? WorkoutCore.lastPerformance(activeWorkouts(), name) : null;
-    return { name, measure, sets: [{ reps: 0, seconds: 0, weight_kg: last ? last.maxWeight : 0 }], last: last ? `${last.date}: ${last.text}` : '' };
+    return { name, measure: m, sets: [{ reps: 0, seconds: 0, weight_kg: last ? last.maxWeight : 0, distance_km: 0 }], last: last ? `${last.date}: ${last.text}` : '', rest_seconds: WorkoutCore.DEFAULT_REST_SECONDS };
   }
 
   function renderWorkoutModal() {
@@ -5607,30 +5700,267 @@ SIEMPRE devuelve un JSON válido.
     linked.hidden = !act;
     linked.textContent = act ? `Al guardar se marcará como hecha: "${act.title}" (${act.startTime || ''})` : '';
 
+    const guided = draft.mode === 'guided';
+    $$('[data-workout-mode]').forEach(b => b.classList.toggle('active', b.dataset.workoutMode === draft.mode));
+    $('#workout-table-panel').hidden = guided;
+    $('#workout-guided').hidden = !guided;
+    if (guided) renderGuided();
+    else renderWorkoutTable(draft);
+  }
+
+  function renderWorkoutTable(draft) {
     $('#workout-exercises').innerHTML = draft.exercises.map((ex, ei) => `
       <div class="workout-exercise" data-ex="${ei}">
         <div class="workout-exercise-head">
-          <input type="text" class="setting-input workout-ex-name" list="workout-exercise-names" data-field="name" value="${escHTML(ex.name)}" placeholder="Ejercicio (ej. Dominadas)" maxlength="80" aria-label="Nombre del ejercicio" />
+          <input type="text" class="setting-input workout-ex-name" list="workout-exercise-names" data-field="name" value="${escHTML(ex.name)}" placeholder="Ejercicio (ej. Flexiones)" maxlength="80" aria-label="Nombre del ejercicio" />
           <select class="workout-ex-measure" data-field="measure" aria-label="Cómo se mide">
-            <option value="reps" ${ex.measure !== 'time' ? 'selected' : ''}>Reps</option>
-            <option value="time" ${ex.measure === 'time' ? 'selected' : ''}>Segundos</option>
+            ${Object.entries(MEASURE_LABELS).map(([k, label]) => `<option value="${k}" ${ex.measure === k ? 'selected' : ''}>${label}</option>`).join('')}
           </select>
           <button type="button" class="btn-icon material-icons-round" data-remove-exercise="${ei}" aria-label="Quitar ejercicio">delete</button>
         </div>
         ${ex.last ? `<p class="workout-last">La última vez · ${escHTML(ex.last)}</p>` : ''}
         <div class="workout-sets">
           ${(ex.sets || []).map((st, si) => `
-            <div class="workout-set" data-set="${si}">
+            <div class="workout-set ${st.done ? 'is-done' : ''}" data-set="${si}">
               <span class="workout-set-n">${si + 1}</span>
-              ${ex.measure === 'time'
-                ? `<label><input type="number" inputmode="numeric" min="0" max="7200" data-field="seconds" value="${Number(st.seconds) || ''}" aria-label="Segundos serie ${si + 1}" /> s</label>`
-                : `<label><input type="number" inputmode="numeric" min="0" max="1000" data-field="reps" value="${Number(st.reps) || ''}" aria-label="Repeticiones serie ${si + 1}" /> reps</label>`}
-              <label class="workout-weight">+<input type="number" inputmode="decimal" min="0" max="500" step="0.5" data-field="weight_kg" value="${Number(st.weight_kg) || ''}" aria-label="Lastre serie ${si + 1}" /> kg</label>
+              ${ex.measure === 'cardio'
+                ? `<label><input type="number" inputmode="numeric" min="0" max="1440" data-field="minutes" value="${Number(st.seconds) ? Math.round(Number(st.seconds) / 60) : ''}" aria-label="Minutos" /> min</label>
+                   <label><input type="number" inputmode="decimal" min="0" max="200" step="0.01" data-field="distance_km" value="${Number(st.distance_km) || ''}" aria-label="Kilómetros" /> km</label>`
+                : ex.measure === 'time'
+                  ? `<label><input type="number" inputmode="numeric" min="0" max="7200" data-field="seconds" value="${Number(st.seconds) || ''}" aria-label="Segundos serie ${si + 1}" /> s</label>`
+                  : `<label><input type="number" inputmode="numeric" min="0" max="1000" data-field="reps" value="${Number(st.reps) || ''}" aria-label="Repeticiones serie ${si + 1}" /> reps</label>`}
+              ${ex.measure === 'reps' ? `<label class="workout-weight">+<input type="number" inputmode="decimal" min="0" max="500" step="0.5" data-field="weight_kg" value="${Number(st.weight_kg) || ''}" aria-label="Lastre serie ${si + 1}" /> kg</label>` : ''}
               <button type="button" class="btn-icon material-icons-round" data-remove-set="${si}" aria-label="Quitar serie">close</button>
             </div>`).join('')}
         </div>
-        <button type="button" class="btn-text" data-add-set="${ei}">+ Serie</button>
+        ${ex.measure !== 'cardio' ? `<button type="button" class="btn-text" data-add-set="${ei}">+ Serie</button>` : ''}
       </div>`).join('');
+  }
+
+  // ── Modo guiado ──
+  function guidedSound(kind) {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const tones = kind === 'pre' ? [[660, 0, 0.12]] : [[880, 0, 0.25], [880, 0.35, 0.25], [1175, 0.7, 0.45]];
+      tones.forEach(([freq, at, len]) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.35, ctx.currentTime + at);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + at + len);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime + at);
+        osc.stop(ctx.currentTime + at + len);
+      });
+    } catch (e) { /* sin audio */ }
+    if (kind === 'end' && navigator.vibrate) { try { navigator.vibrate([350, 150, 350]); } catch (e) { /* sin vibración */ } }
+  }
+
+  async function acquireWorkoutWakeLock() {
+    if (workoutWakeLock || !('wakeLock' in navigator)) return;
+    try {
+      workoutWakeLock = await navigator.wakeLock.request('screen');
+      workoutWakeLock.addEventListener('release', () => { workoutWakeLock = null; });
+    } catch (e) { /* el navegador lo rechazó */ }
+  }
+  function releaseWorkoutWakeLock() {
+    if (workoutWakeLock) { try { workoutWakeLock.release(); } catch (e) { /* ya liberado */ } workoutWakeLock = null; }
+  }
+
+  function syncGuidedTicker() {
+    const open = $('#workout-overlay')?.classList.contains('open');
+    const active = open && isGuidedWorkoutActive();
+    if (active && !guidedTicker) {
+      guidedTicker = setInterval(tickGuided, 250);
+      acquireWorkoutWakeLock();
+    } else if (!active && guidedTicker) {
+      clearInterval(guidedTicker);
+      guidedTicker = null;
+    }
+    if (!isGuidedWorkoutActive()) releaseWorkoutWakeLock();
+    syncFocusSideEffects();
+  }
+
+  function tickGuided() {
+    const draft = loadWorkoutDraft();
+    if (!draft || !draft.guided) return syncGuidedTicker();
+    const v = WorkoutCore.guidedView(draft, draft.guided, Date.now());
+    const total = $('#guided-total');
+    if (total) total.textContent = WorkoutCore.formatDuration(v.totalElapsed);
+    if (v.finished) return;
+    const clock = $('#guided-clock');
+    const key = draft.guided.index;
+    if (clock) {
+      const isCardio = v.step.type === 'work' && v.exercise.measure === 'cardio';
+      clock.textContent = WorkoutCore.formatDuration(isCardio ? v.elapsed : v.remaining);
+    }
+    if (v.duration && !v.paused) {
+      if (v.step.type === 'rest' && v.remaining <= 3 && v.remaining > 0 && !guidedAlerted[`${key}:pre`]) {
+        guidedAlerted[`${key}:pre`] = true;
+        guidedSound('pre');
+      }
+      if (v.timeUp && !guidedAlerted[`${key}:end`]) {
+        guidedAlerted[`${key}:end`] = true;
+        guidedSound('end');
+        renderGuided(); // muestra "Siguiente" y espera
+      }
+    }
+  }
+
+  function updateGuided(mutator) {
+    const draft = loadWorkoutDraft();
+    if (!draft) return null;
+    mutator(draft);
+    saveWorkoutDraft(draft);
+    renderGuided();
+    syncGuidedTicker();
+    return draft;
+  }
+
+  function renderGuided() {
+    const box = $('#workout-guided');
+    const draft = loadWorkoutDraft();
+    if (!box || !draft) return;
+    if (!draft.guided) {
+      const steps = WorkoutCore.buildSessionSteps(draft);
+      const restTotal = steps.filter(s => s.type === 'rest').reduce((a, s) => a + s.seconds, 0);
+      box.innerHTML = `
+        <div class="guided-intro">
+          <p class="workout-muted">${steps.filter(s => s.type === 'work').length} series · ${Math.round(restTotal / 60)} min de descansos</p>
+          <ol class="guided-plan">${draft.exercises.map(ex => `<li><b>${escHTML(ex.name)}</b> ${escHTML(ex.measure === 'cardio' ? WorkoutCore.formatTarget(ex) : `${(ex.sets || []).length}×${WorkoutCore.formatTarget(ex)}`)}${ex.measure !== 'cardio' && ex.rest_seconds ? ` <span class="workout-muted">· ${ex.rest_seconds}s desc.</span>` : ''}</li>`).join('')}</ol>
+          <button type="button" class="btn-primary guided-big-btn" data-guided="start"><span class="material-icons-round">play_arrow</span> Empezar entreno</button>
+        </div>`;
+      return;
+    }
+    const v = WorkoutCore.guidedView(draft, draft.guided, Date.now());
+    const top = `
+      <div class="guided-top">
+        <span class="guided-total"><span class="material-icons-round">timer</span> <span id="guided-total">${WorkoutCore.formatDuration(v.totalElapsed)}</span></span>
+        <span class="workout-muted">Paso ${Math.min(v.position, v.total)}/${v.total}</span>
+        ${v.finished ? '' : `<button type="button" class="btn-outline" data-guided="${v.paused ? 'resume' : 'pause'}"><span class="material-icons-round">${v.paused ? 'play_arrow' : 'pause'}</span> ${v.paused ? 'Seguir' : 'Pausa'}</button>`}
+      </div>
+      <div class="guided-progress"><span style="width:${Math.round((Math.min(v.position - (v.finished ? 0 : 1), v.total) / Math.max(1, v.total)) * 100)}%"></span></div>`;
+
+    if (v.finished) {
+      const done = { exercises: draft.exercises.map(ex => ({ ...ex, sets: (ex.sets || []).filter(st => st.done) })) };
+      const s = WorkoutCore.summarizeWorkout(done);
+      box.innerHTML = `${top}
+        <div class="guided-card guided-finished">
+          <span class="material-icons-round guided-finished-icon">emoji_events</span>
+          <h3>¡Entreno completado!</h3>
+          <p>${s.sets} series${s.reps ? ` · ${s.reps} reps` : ''}${s.seconds ? ` · ${WorkoutCore.formatDuration(s.seconds)} en isométricos` : ''}${s.cardioSeconds ? ` · ${Math.round(s.cardioSeconds / 60)} min de cardio` : ''}${s.distanceKm ? ` · ${s.distanceKm} km` : ''}</p>
+          <p class="workout-muted">Tiempo total ${WorkoutCore.formatDuration(v.totalElapsed)}. Añade notas si quieres y guarda.</p>
+          <button type="button" class="btn-primary guided-big-btn" data-guided="save"><span class="material-icons-round">check</span> Guardar entreno</button>
+        </div>`;
+      return;
+    }
+
+    const ex = v.exercise;
+    const set = (ex.sets || [])[v.step.set] || {};
+    const back = v.position > 1 ? '<button type="button" class="btn-text" data-guided="back">‹ Anterior</button>' : '';
+    if (v.step.type === 'rest') {
+      box.innerHTML = `${top}
+        <div class="guided-card guided-rest ${v.timeUp ? 'is-up' : ''}">
+          <p class="guided-kicker">${v.timeUp ? '¡Descanso terminado!' : 'Descanso'}</p>
+          <div class="guided-clock" id="guided-clock">${WorkoutCore.formatDuration(v.remaining)}</div>
+          ${v.next ? `<p class="guided-next">Siguiente: <b>${escHTML(v.next.name)}</b> · serie ${v.next.setNumber}/${v.next.setCount} · ${escHTML(v.next.target)}</p>` : ''}
+          <div class="guided-actions">
+            ${back}
+            ${v.timeUp ? '' : '<button type="button" class="btn-outline" data-guided="add15">+15 s</button>'}
+            <button type="button" class="${v.timeUp ? 'btn-primary guided-big-btn' : 'btn-outline'}" data-guided="next">${v.timeUp ? 'Siguiente' : 'Saltar descanso'}</button>
+          </div>
+        </div>`;
+      return;
+    }
+
+    const header = `
+      <p class="guided-kicker">${ex.measure === 'cardio' ? 'Cardio' : `Serie ${v.setNumber} de ${v.setCount}`}</p>
+      <h3 class="guided-exercise">${escHTML(ex.name)}</h3>
+      <p class="guided-target">Objetivo: <b>${escHTML(v.target)}</b></p>
+      ${ex.last ? `<p class="workout-last">La última vez · ${escHTML(ex.last)}</p>` : ''}`;
+
+    if (ex.measure === 'reps') {
+      const value = Number(set.reps) || Number(ex.target_reps_max) || Number(ex.target_reps_min) || 10;
+      box.innerHTML = `${top}
+        <div class="guided-card">
+          ${header}
+          <div class="guided-stepper">
+            <button type="button" class="guided-step-btn" data-guided="reps-1" aria-label="Una repetición menos">−</button>
+            <input type="number" inputmode="numeric" min="0" max="1000" id="guided-reps" value="${value}" aria-label="Repeticiones logradas" />
+            <button type="button" class="guided-step-btn" data-guided="reps+1" aria-label="Una repetición más">+</button>
+          </div>
+          <p class="workout-muted">repeticiones logradas</p>
+          <label class="guided-weight">Lastre <input type="number" inputmode="decimal" min="0" max="500" step="0.5" id="guided-weight" value="${Number(set.weight_kg) || ''}" placeholder="0" /> kg</label>
+          <div class="guided-actions">${back}<button type="button" class="btn-primary guided-big-btn" data-guided="done"><span class="material-icons-round">check</span> Hecho</button></div>
+        </div>`;
+    } else if (ex.measure === 'time') {
+      box.innerHTML = `${top}
+        <div class="guided-card ${v.timeUp ? 'is-up' : ''}">
+          ${header}
+          <div class="guided-clock" id="guided-clock">${WorkoutCore.formatDuration(v.remaining)}</div>
+          <p class="workout-muted">${v.timeUp ? '¡Tiempo! Pulsa Hecho para continuar.' : 'En marcha… pulsa Hecho si terminas antes.'}</p>
+          <div class="guided-actions">${back}<button type="button" class="btn-primary guided-big-btn" data-guided="done"><span class="material-icons-round">check</span> Hecho</button></div>
+        </div>`;
+    } else {
+      box.innerHTML = `${top}
+        <div class="guided-card ${v.timeUp ? 'is-up' : ''}">
+          ${header}
+          <div class="guided-clock" id="guided-clock">${WorkoutCore.formatDuration(v.elapsed)}</div>
+          <p class="workout-muted">${v.timeUp ? '¡Objetivo cumplido! Termina cuando quieras.' : 'Cronómetro en marcha'}</p>
+          <label class="guided-weight">Distancia <input type="number" inputmode="decimal" min="0" max="200" step="0.01" id="guided-km" value="${Number(set.distance_km) || ''}" placeholder="0" /> km</label>
+          <div class="guided-actions">${back}<button type="button" class="btn-primary guided-big-btn" data-guided="done"><span class="material-icons-round">flag</span> Terminar</button></div>
+        </div>`;
+    }
+  }
+
+  function handleGuidedAction(action) {
+    const now = Date.now();
+    if (action === 'start') {
+      return updateGuided(d => { d.guided = WorkoutCore.guidedStart(now); d.started_at = new Date(now).toISOString(); guidedAlerted = {}; });
+    }
+    if (action === 'save') return saveWorkout();
+    if (action === 'reps-1' || action === 'reps+1') {
+      const input = $('#guided-reps');
+      if (input) input.value = Math.max(0, (Number(input.value) || 0) + (action === 'reps+1' ? 1 : -1));
+      return;
+    }
+    updateGuided(d => {
+      const g = d.guided;
+      if (!g) return;
+      if (action === 'pause') d.guided = WorkoutCore.guidedPause(g, now);
+      else if (action === 'resume') d.guided = WorkoutCore.guidedResume(g, now);
+      else if (action === 'add15') d.guided = WorkoutCore.guidedAddRest(g, 15);
+      else if (action === 'back') d.guided = WorkoutCore.guidedBack(g, now);
+      else if (action === 'next') d.guided = WorkoutCore.guidedAdvance(WorkoutCore.guidedResume(g, now), d, now);
+      else if (action === 'done') {
+        const v = WorkoutCore.guidedView(d, g, now);
+        const ex = d.exercises[v.step.ex];
+        const set = ex.sets[v.step.set] || (ex.sets[v.step.set] = {});
+        if (ex.measure === 'reps') {
+          set.reps = Math.max(0, Number($('#guided-reps')?.value) || 0);
+          set.weight_kg = Math.max(0, Number($('#guided-weight')?.value) || 0);
+        } else if (ex.measure === 'time') {
+          set.seconds = v.timeUp ? v.duration : v.elapsed;
+        } else {
+          set.seconds = v.elapsed;
+          set.distance_km = Math.max(0, Number($('#guided-km')?.value) || 0);
+        }
+        set.done = true;
+        d.guided = WorkoutCore.guidedAdvance(WorkoutCore.guidedResume(g, now), d, now);
+      }
+    });
+  }
+
+  function updateDraft(mutator, rerender = false) {
+    const draft = loadWorkoutDraft();
+    if (!draft) return;
+    mutator(draft);
+    saveWorkoutDraft(draft);
+    if (rerender) renderWorkoutModal();
   }
 
   // Repinta tras el cambio de foco (el evento "change" llega al salir del campo) y devuelve el foco
@@ -5657,18 +5987,11 @@ SIEMPRE devuelve un JSON válido.
     }, 0);
   }
 
-  function updateDraft(mutator, rerender = false) {
-    const draft = loadWorkoutDraft();
-    if (!draft) return;
-    mutator(draft);
-    saveWorkoutDraft(draft);
-    if (rerender) renderWorkoutModal();
-  }
-
   function closeWorkoutModal() {
     $('#workout-overlay').classList.remove('open');
     const errs = $('#workout-errors');
     if (errs) errs.hidden = true;
+    syncGuidedTicker();
   }
 
   async function discardWorkout() {
@@ -5681,8 +6004,13 @@ SIEMPRE devuelve un JSON válido.
   function saveWorkout() {
     const draft = loadWorkoutDraft();
     if (!draft) return;
-    const elapsed = Math.max(0, Math.round((Date.now() - new Date(draft.started_at).getTime()) / 60000));
-    const nowIso = new Date().toISOString();
+    const guidedMode = draft.mode === 'guided' && !!draft.guided;
+    const nowMs = Date.now();
+    const elapsed = guidedMode
+      ? Math.round(WorkoutCore.guidedView(draft, draft.guided, nowMs).totalElapsed / 60)
+      : Math.max(0, Math.round((nowMs - new Date(draft.started_at).getTime()) / 60000));
+    const nowIso = new Date(nowMs).toISOString();
+    const hasData = (st, measure) => (measure === 'cardio' ? Number(st.seconds) > 0 || Number(st.distance_km) > 0 : Number(st.reps) > 0 || Number(st.seconds) > 0);
     const record = {
       id: draft.id,
       routine_id: draft.routine_id || null,
@@ -5691,13 +6019,17 @@ SIEMPRE devuelve un JSON válido.
       started_at: draft.started_at,
       duration_minutes: Math.min(1440, draft.duration_minutes != null ? Number(draft.duration_minutes) || 0 : elapsed),
       exercises: (draft.exercises || [])
-        .map(ex => ({
-          name: String(ex.name || '').trim(),
-          measure: ex.measure === 'time' ? 'time' : 'reps',
-          sets: (ex.sets || []).filter(st => Number(st.reps) > 0 || Number(st.seconds) > 0)
-            .map(st => ({ reps: Number(st.reps) || 0, seconds: Number(st.seconds) || 0, weight_kg: Number(st.weight_kg) || 0 }))
-        }))
-        .filter(ex => ex.name || ex.sets.length),
+        .map(ex => {
+          const measure = ['time', 'cardio'].includes(ex.measure) ? ex.measure : 'reps';
+          return {
+            name: String(ex.name || '').trim(),
+            measure,
+            // En modo guiado solo cuentan las series marcadas como hechas (las demás traen el objetivo precargado).
+            sets: (ex.sets || []).filter(st => (guidedMode ? st.done : true) && hasData(st, measure))
+              .map(st => ({ reps: Number(st.reps) || 0, seconds: Number(st.seconds) || 0, weight_kg: Number(st.weight_kg) || 0, distance_km: Number(st.distance_km) || 0 }))
+          };
+        })
+        .filter(ex => ex.name && ex.sets.length),
       notes: String(draft.notes || '').trim(),
       created_at: nowIso,
       updated_at: nowIso,
@@ -5731,7 +6063,7 @@ SIEMPRE devuelve un JSON válido.
     saveWorkoutDraft(null);
     closeWorkoutModal();
     const s = WorkoutCore.summarizeWorkout(record);
-    showToast(`Entreno guardado ✓ · ${s.sets} series${s.reps ? ` · ${s.reps} reps` : ''}`, 'fitness_center', 'var(--accent-amber)');
+    showToast(`Entreno guardado ✓ · ${s.sets} series${s.reps ? ` · ${s.reps} reps` : ''}${s.distanceKm ? ` · ${s.distanceKm} km` : ''}`, 'fitness_center', 'var(--accent-amber)');
     renderWorkoutView();
     renderDashboard();
   }
@@ -5752,34 +6084,64 @@ SIEMPRE devuelve un JSON válido.
   }
 
   // ── Editor de rutinas ──
+  function blankRoutineExercise() {
+    return { name: '', measure: 'reps', target_sets: 3, target_reps_min: 10, target_reps_max: 15, target_seconds: 0, rest_seconds: WorkoutCore.DEFAULT_REST_SECONDS };
+  }
+
   function openRoutineEditor(routineId = null) {
     const routine = routineId ? activeRoutines().find(r => r.id === routineId) : null;
     routineEditing = {
       id: routine ? routine.id : null,
-      exercises: routine ? (routine.exercises || []).map(ex => ({ ...ex })) : [{ name: '', measure: 'reps', target_sets: 3, target_reps: 10, target_seconds: 0 }]
+      days: routine && Array.isArray(routine.days) ? [...routine.days] : [],
+      exercises: routine ? (routine.exercises || []).map(ex => ({
+        ...ex,
+        target_reps_min: ex.target_reps_min != null ? ex.target_reps_min : ex.target_reps,
+        target_reps_max: ex.target_reps_max != null ? ex.target_reps_max : ex.target_reps,
+        rest_seconds: ex.rest_seconds == null ? WorkoutCore.DEFAULT_REST_SECONDS : ex.rest_seconds
+      })) : [blankRoutineExercise()]
     };
     $('#routine-editor-title').textContent = routine ? 'Editar rutina' : 'Nueva rutina';
     $('#routine-editor-name').value = routine ? routine.name : '';
     $('#routine-editor-notes').value = routine ? (routine.notes || '') : '';
     $('#routine-editor-errors').hidden = true;
     fillExerciseDatalist();
+    renderRoutineDays();
     renderRoutineEditorRows();
     $('#routine-editor-overlay').classList.add('open');
     setTimeout(() => $('#routine-editor-name').focus(), 50);
   }
 
+  function renderRoutineDays() {
+    const box = $('#routine-editor-days');
+    if (!box) return;
+    box.innerHTML = WorkoutCore.DAY_LABELS.map((label, d) => `
+      <button type="button" class="routine-day ${routineEditing.days.includes(d) ? 'active' : ''}" data-day="${d}" aria-pressed="${routineEditing.days.includes(d)}" title="${WorkoutCore.DAY_NAMES[d]}">${label}</button>`).join('');
+  }
+
   function renderRoutineEditorRows() {
-    $('#routine-editor-exercises').innerHTML = routineEditing.exercises.map((ex, i) => `
+    $('#routine-editor-exercises').innerHTML = routineEditing.exercises.map((ex, i) => {
+      let target;
+      if (ex.measure === 'cardio') {
+        target = `<label><input type="number" min="1" max="600" data-field="target_minutes" value="${Math.round((Number(ex.target_seconds) || 0) / 60) || ''}" aria-label="Minutos ${i + 1}" /> min</label>`;
+      } else if (ex.measure === 'time') {
+        target = `<label><input type="number" min="1" max="30" data-field="target_sets" value="${Number(ex.target_sets) || 3}" aria-label="Series ${i + 1}" /> ×</label>
+          <label><input type="number" min="0" max="7200" data-field="target_seconds" value="${Number(ex.target_seconds) || ''}" aria-label="Segundos ${i + 1}" /> s</label>`;
+      } else {
+        target = `<label><input type="number" min="1" max="30" data-field="target_sets" value="${Number(ex.target_sets) || 3}" aria-label="Series ${i + 1}" /> ×</label>
+          <label><input type="number" min="0" max="1000" data-field="target_reps_min" value="${Number(ex.target_reps_min) || ''}" aria-label="Reps mínimas ${i + 1}" /> –
+          <input type="number" min="0" max="1000" data-field="target_reps_max" value="${Number(ex.target_reps_max) || ''}" aria-label="Reps máximas ${i + 1}" /> reps</label>`;
+      }
+      return `
       <div class="routine-row" data-row="${i}">
         <input type="text" class="setting-input" list="workout-exercise-names" data-field="name" value="${escHTML(ex.name)}" placeholder="Ejercicio" maxlength="80" aria-label="Ejercicio ${i + 1}" />
         <select data-field="measure" aria-label="Medida ${i + 1}">
-          <option value="reps" ${ex.measure !== 'time' ? 'selected' : ''}>Reps</option>
-          <option value="time" ${ex.measure === 'time' ? 'selected' : ''}>Segundos</option>
+          ${Object.entries(MEASURE_LABELS).map(([k, label]) => `<option value="${k}" ${ex.measure === k ? 'selected' : ''}>${label}</option>`).join('')}
         </select>
-        <label><input type="number" min="1" max="30" data-field="target_sets" value="${Number(ex.target_sets) || 3}" aria-label="Series ${i + 1}" /> series</label>
-        <label>× <input type="number" min="0" max="7200" data-field="${ex.measure === 'time' ? 'target_seconds' : 'target_reps'}" value="${Number(ex.measure === 'time' ? ex.target_seconds : ex.target_reps) || ''}" aria-label="Objetivo ${i + 1}" /> ${ex.measure === 'time' ? 's' : 'reps'}</label>
+        ${target}
+        ${ex.measure !== 'cardio' ? `<label class="routine-rest"><span class="material-icons-round" aria-hidden="true">hourglass_bottom</span><input type="number" min="0" max="600" step="5" data-field="rest_seconds" value="${Number(ex.rest_seconds) || 0}" aria-label="Descanso ${i + 1} en segundos" /> s desc.</label>` : ''}
         <button type="button" class="btn-icon material-icons-round" data-remove-row="${i}" aria-label="Quitar ejercicio">delete</button>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   }
 
   function saveRoutine() {
@@ -5787,14 +6149,22 @@ SIEMPRE devuelve un JSON válido.
     const data = {
       name: $('#routine-editor-name').value.trim(),
       notes: $('#routine-editor-notes').value.trim(),
+      days: [...routineEditing.days].sort((a, b) => a - b),
       exercises: routineEditing.exercises
-        .map(ex => ({
-          name: String(ex.name || '').trim(),
-          measure: ex.measure === 'time' ? 'time' : 'reps',
-          target_sets: Math.max(1, Number(ex.target_sets) || 1),
-          target_reps: ex.measure === 'time' ? 0 : Number(ex.target_reps) || 0,
-          target_seconds: ex.measure === 'time' ? Number(ex.target_seconds) || 0 : 0
-        }))
+        .map(ex => {
+          const measure = ['time', 'cardio'].includes(ex.measure) ? ex.measure : 'reps';
+          const min = Number(ex.target_reps_min) || 0, max = Number(ex.target_reps_max) || 0;
+          return {
+            name: String(ex.name || '').trim(),
+            measure,
+            target_sets: measure === 'cardio' ? 1 : Math.max(1, Number(ex.target_sets) || 1),
+            target_reps_min: measure === 'reps' ? Math.min(min || max, max || min) : 0,
+            target_reps_max: measure === 'reps' ? Math.max(min, max) : 0,
+            target_reps: measure === 'reps' ? Math.min(min || max, max || min) : 0,
+            target_seconds: measure === 'reps' ? 0 : Number(ex.target_seconds) || 0,
+            rest_seconds: measure === 'cardio' ? 0 : Math.min(600, Math.max(0, Number(ex.rest_seconds) || 0))
+          };
+        })
         .filter(ex => ex.name)
     };
     const check = WorkoutCore.validateRoutine(data);
@@ -5841,19 +6211,31 @@ SIEMPRE devuelve un JSON válido.
     $$('[data-workout-tab]').forEach(btn => btn.addEventListener('click', () => { workoutTab = btn.dataset.workoutTab; renderWorkoutView(); }));
     $('#btn-workout-free')?.addEventListener('click', () => openWorkoutModal({ routineId: null, activityId: null }));
     $('#btn-new-routine')?.addEventListener('click', () => openRoutineEditor(null));
+    $('#btn-load-plan')?.addEventListener('click', loadSuggestedPlan);
     $('#workout-progress-exercise')?.addEventListener('change', (e) => { workoutProgressExercise = e.target.value; renderWorkoutProgress(); });
 
     $('#view-workout')?.addEventListener('click', (e) => {
-      const t = e.target.closest('[data-start-routine],[data-edit-routine],[data-delete-routine],[data-delete-workout],[data-workout-goto]');
+      const t = e.target.closest('[data-start-routine],[data-edit-routine],[data-delete-routine],[data-delete-workout],[data-workout-goto],[data-load-plan]');
       if (!t) return;
       if (t.dataset.startRoutine) openWorkoutModal({ routineId: t.dataset.startRoutine });
       else if (t.dataset.editRoutine) openRoutineEditor(t.dataset.editRoutine);
       else if (t.dataset.deleteRoutine) deleteRoutine(t.dataset.deleteRoutine);
       else if (t.dataset.deleteWorkout) deleteWorkout(t.dataset.deleteWorkout);
+      else if (t.dataset.loadPlan !== undefined) loadSuggestedPlan();
       else if (t.dataset.workoutGoto) { workoutTab = t.dataset.workoutGoto; renderWorkoutView(); openRoutineEditor(null); }
     });
 
-    // Modal del entreno: cada cambio se guarda en el borrador (sobrevive a recargar la página).
+    // Modo del entreno: guiado o tabla
+    $$('[data-workout-mode]').forEach(btn => btn.addEventListener('click', () => {
+      updateDraft(d => { d.mode = btn.dataset.workoutMode; }, true);
+      syncGuidedTicker();
+    }));
+    $('#workout-guided')?.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-guided]');
+      if (t) handleGuidedAction(t.dataset.guided);
+    });
+
+    // Tabla: cada cambio se guarda en el borrador (sobrevive a recargar la página).
     const exBox = $('#workout-exercises');
     exBox?.addEventListener('input', (e) => {
       const field = e.target.dataset.field;
@@ -5863,8 +6245,12 @@ SIEMPRE devuelve un JSON válido.
       const setEl = e.target.closest('[data-set]');
       updateDraft(d => {
         const ex = d.exercises[ei];
-        if (setEl) ex.sets[Number(setEl.dataset.set)][field] = Number(e.target.value) || 0;
-        else if (field === 'name') ex.name = e.target.value;
+        if (setEl) {
+          const st = ex.sets[Number(setEl.dataset.set)];
+          if (field === 'minutes') st.seconds = (Number(e.target.value) || 0) * 60;
+          else st[field] = Number(e.target.value) || 0;
+          st.done = true;
+        } else if (field === 'name') ex.name = e.target.value;
       });
     });
     exBox?.addEventListener('change', (e) => {
@@ -5876,7 +6262,10 @@ SIEMPRE devuelve un JSON válido.
       updateDraft(d => {
         const ex = d.exercises[ei];
         const before = JSON.stringify([ex.measure, ex.last, ex.sets]);
-        if (field === 'measure') ex.measure = e.target.value;
+        if (field === 'measure') {
+          ex.measure = e.target.value;
+          if (ex.measure === 'cardio') ex.sets = [ex.sets[0] || { reps: 0, seconds: 0, weight_kg: 0, distance_km: 0 }];
+        }
         if (field === 'name') {
           ex.name = e.target.value.trim();
           const last = ex.name ? WorkoutCore.lastPerformance(activeWorkouts(), ex.name) : null;
@@ -5895,11 +6284,11 @@ SIEMPRE devuelve un JSON válido.
       updateDraft(d => {
         const ex = d.exercises[ei];
         if (t.dataset.addSet !== undefined) {
-          const prev = ex.sets[ex.sets.length - 1] || { reps: 0, seconds: 0, weight_kg: 0 };
-          ex.sets.push({ ...prev });
+          const prev = ex.sets[ex.sets.length - 1] || { reps: 0, seconds: 0, weight_kg: 0, distance_km: 0 };
+          ex.sets.push({ ...prev, done: false });
         } else if (t.dataset.removeSet !== undefined) {
           ex.sets.splice(Number(t.dataset.removeSet), 1);
-          if (!ex.sets.length) ex.sets.push({ reps: 0, seconds: 0, weight_kg: 0 });
+          if (!ex.sets.length) ex.sets.push({ reps: 0, seconds: 0, weight_kg: 0, distance_km: 0 });
         } else {
           d.exercises.splice(ei, 1);
         }
@@ -5921,23 +6310,35 @@ SIEMPRE devuelve un JSON válido.
         const base = routine ? WorkoutCore.buildDraftFromRoutine(routine, activeWorkouts()) : { routine_id: null, exercises: [newDraftExercise('')] };
         d.routine_id = base.routine_id;
         d.exercises = base.exercises.length ? base.exercises : [newDraftExercise('')];
+        d.guided = null;
       }, true);
+      syncGuidedTicker();
     });
     $('#workout-date')?.addEventListener('change', (e) => updateDraft(d => { d.date = e.target.value || todayStr(); }));
     $('#workout-duration')?.addEventListener('input', (e) => updateDraft(d => { d.duration_minutes = e.target.value === '' ? null : Number(e.target.value); }));
     $('#workout-notes')?.addEventListener('input', (e) => updateDraft(d => { d.notes = e.target.value; }));
     $('#workout-save')?.addEventListener('click', saveWorkout);
     $('#workout-cancel')?.addEventListener('click', discardWorkout);
-    $('#workout-close')?.addEventListener('click', closeWorkoutModal); // cerrar conserva el borrador
+    $('#workout-close')?.addEventListener('click', closeWorkoutModal); // cerrar conserva el borrador (y el cronómetro sigue por marcas de tiempo)
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && isGuidedWorkoutActive()) { renderGuided(); acquireWorkoutWakeLock(); } });
 
     // Editor de rutinas
+    $('#routine-editor-days')?.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-day]');
+      if (!b) return;
+      const d = Number(b.dataset.day);
+      routineEditing.days = routineEditing.days.includes(d) ? routineEditing.days.filter(x => x !== d) : [...routineEditing.days, d];
+      renderRoutineDays();
+    });
     const rows = $('#routine-editor-exercises');
     rows?.addEventListener('input', (e) => {
       const row = e.target.closest('[data-row]');
       const field = e.target.dataset.field;
       if (!row || !field || field === 'measure') return;
       const ex = routineEditing.exercises[Number(row.dataset.row)];
-      ex[field] = field === 'name' ? e.target.value : Number(e.target.value) || 0;
+      if (field === 'name') ex.name = e.target.value;
+      else if (field === 'target_minutes') ex.target_seconds = (Number(e.target.value) || 0) * 60;
+      else ex[field] = Number(e.target.value) || 0;
     });
     rows?.addEventListener('change', (e) => {
       const row = e.target.closest('[data-row]');
@@ -5946,12 +6347,15 @@ SIEMPRE devuelve un JSON válido.
       if (e.target.dataset.field === 'measure') {
         ex.measure = e.target.value;
         ex._measureTouched = true;
+        if (ex.measure === 'time' && !ex.target_seconds) ex.target_seconds = 30;
+        if (ex.measure === 'cardio' && !ex.target_seconds) ex.target_seconds = 30 * 60;
         renderRoutineEditorRows();
       } else if (e.target.dataset.field === 'name' && ex.name && !ex._measureTouched) {
         const measure = suggestedMeasure(ex.name);
         if (measure !== ex.measure) {
           ex.measure = measure;
           if (ex.measure === 'time' && !ex.target_seconds) ex.target_seconds = 30;
+          if (ex.measure === 'cardio' && !ex.target_seconds) ex.target_seconds = 30 * 60;
           rerenderKeepingFocus('#routine-editor-exercises', renderRoutineEditorRows);
         }
       }
@@ -5963,7 +6367,7 @@ SIEMPRE devuelve un JSON válido.
       renderRoutineEditorRows();
     });
     $('#btn-routine-add-exercise')?.addEventListener('click', () => {
-      routineEditing.exercises.push({ name: '', measure: 'reps', target_sets: 3, target_reps: 10, target_seconds: 0 });
+      routineEditing.exercises.push(blankRoutineExercise());
       renderRoutineEditorRows();
       const inputs = $$('#routine-editor-exercises input[data-field="name"]');
       if (inputs.length) inputs[inputs.length - 1].focus();
@@ -5972,6 +6376,287 @@ SIEMPRE devuelve un JSON válido.
     const closeEditor = () => { $('#routine-editor-overlay').classList.remove('open'); routineEditing = null; };
     $('#routine-editor-cancel')?.addEventListener('click', closeEditor);
     $('#routine-editor-close')?.addEventListener('click', closeEditor);
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // ── Apuntes: notas con texto, lista de tareas, etiquetas y día ──
+  // ══════════════════════════════════════════════════════════════
+  let notesFilter = { query: '', tag: '', date: '' };
+  let noteEditing = null; // { id|null, checklist: [{text, done}], pinned }
+
+  function activeNotes() {
+    return loadNotes().filter(n => n && !n.deleted_at);
+  }
+
+  function upsertNote(note) {
+    const list = loadNotes();
+    const idx = list.findIndex(n => n.id === note.id);
+    if (idx === -1) list.push(note); else list[idx] = note;
+    saveNotes(list);
+    enqueueChange({ ...note, collection: 'notes' });
+  }
+
+  function refreshNotesEverywhere() {
+    if ($('#view-notes')?.classList.contains('active')) renderNotesView();
+    renderCalDayNotes();
+    renderAgendaNotesLink();
+  }
+
+  function noteCardHTML(n) {
+    const prog = NotesCore.checklistProgress(n);
+    const items = (n.checklist || []).filter(i => String(i.text || '').trim());
+    const shown = items.slice(0, 5);
+    return `
+      <article class="note-card ${n.pinned ? 'is-pinned' : ''}" data-note-id="${escHTML(n.id)}" tabindex="0" aria-label="Apunte ${escHTML(n.title || 'sin título')}">
+        <div class="note-card-head">
+          <h4>${escHTML(n.title || 'Sin título')}</h4>
+          ${n.pinned ? '<span class="material-icons-round note-pin" title="Fijado">push_pin</span>' : ''}
+        </div>
+        ${n.content ? `<p class="note-excerpt">${escHTML(NotesCore.excerpt(n))}</p>` : ''}
+        ${shown.length ? `<ul class="note-card-checklist">${shown.map(i => {
+          const realIdx = n.checklist.indexOf(i);
+          return `<li><label class="${i.done ? 'is-done' : ''}"><input type="checkbox" data-note-check="${realIdx}" ${i.done ? 'checked' : ''} /> ${escHTML(i.text)}</label></li>`;
+        }).join('')}${items.length > shown.length ? `<li class="workout-muted">+${items.length - shown.length} más</li>` : ''}</ul>` : ''}
+        <div class="note-card-foot">
+          ${prog.total ? `<span class="note-progress ${prog.complete ? 'is-complete' : ''}">${prog.done}/${prog.total}</span>` : ''}
+          ${(n.tags || []).map(t => `<span class="note-tag">#${escHTML(t)}</span>`).join('')}
+          ${n.date ? `<span class="note-date"><span class="material-icons-round">event</span>${escHTML(n.date)}</span>` : ''}
+        </div>
+      </article>`;
+  }
+
+  function renderNotesView() {
+    if (typeof NotesCore === 'undefined') return;
+    const all = activeNotes();
+    const tagsEl = $('#notes-tags');
+    if (tagsEl) {
+      const tags = NotesCore.allTags(all);
+      tagsEl.innerHTML = tags.length ? [`<button type="button" class="note-tag-chip ${!notesFilter.tag ? 'active' : ''}" data-note-tag="">Todas</button>`]
+        .concat(tags.map(t => `<button type="button" class="note-tag-chip ${notesFilter.tag === t.tag ? 'active' : ''}" data-note-tag="${escHTML(t.tag)}">#${escHTML(t.tag)} <span>${t.count}</span></button>`)).join('') : '';
+    }
+    const dateInput = $('#notes-date-filter');
+    if (dateInput && dateInput.value !== notesFilter.date) dateInput.value = notesFilter.date;
+    const info = $('#notes-filter-info');
+    if (info) {
+      info.hidden = !notesFilter.date;
+      info.innerHTML = notesFilter.date ? `Mostrando los apuntes del ${escHTML(notesFilter.date)} · <button type="button" class="btn-text" data-clear-note-date>ver todos</button>` : '';
+    }
+    const list = $('#notes-list');
+    if (!list) return;
+    const shown = NotesCore.sortNotes(NotesCore.filterNotes(all, notesFilter));
+    list.innerHTML = shown.length ? shown.map(noteCardHTML).join('') : `
+      <div class="workout-empty">
+        <span class="material-icons-round">sticky_note_2</span>
+        <p>${all.length ? 'Ningún apunte coincide con la búsqueda.' : 'Aún no tienes apuntes. Crea el primero: una idea, una lista de compras, lo que necesites recordar.'}</p>
+      </div>`;
+  }
+
+  function renderCalDayNotes() {
+    const box = $('#cal-day-notes');
+    if (!box || typeof NotesCore === 'undefined') return;
+    const notes = NotesCore.notesForDate(activeNotes(), calSelectedDate);
+    box.innerHTML = `
+      <div class="day-notes-head">
+        <h5>Apuntes del día (${notes.length})</h5>
+        <button type="button" class="btn-text" data-new-note-date="${escHTML(calSelectedDate)}">+ Apunte</button>
+      </div>
+      ${notes.map(n => {
+        const prog = NotesCore.checklistProgress(n);
+        return `<button type="button" class="day-note-item" data-open-note="${escHTML(n.id)}">
+          <span class="material-icons-round">${n.pinned ? 'push_pin' : 'sticky_note_2'}</span>
+          <span>${escHTML(n.title || NotesCore.excerpt(n, 40) || 'Sin título')}</span>
+          ${prog.total ? `<span class="workout-muted">${prog.done}/${prog.total}</span>` : ''}
+        </button>`;
+      }).join('')}`;
+  }
+
+  function renderAgendaNotesLink() {
+    const label = $('#agenda-notes-count');
+    if (!label || typeof NotesCore === 'undefined') return;
+    const n = NotesCore.notesForDate(activeNotes(), todayStr()).length;
+    label.textContent = n ? `Apuntes de hoy (${n})` : 'Apuntes de hoy';
+  }
+
+  function openNoteEditor(noteId = null, presetDate = '') {
+    const note = noteId ? activeNotes().find(n => n.id === noteId) : null;
+    noteEditing = {
+      id: note ? note.id : null,
+      checklist: note ? (note.checklist || []).map(i => ({ text: i.text, done: !!i.done })) : [],
+      pinned: note ? !!note.pinned : false
+    };
+    $('#note-editor-heading').textContent = note ? 'Editar apunte' : 'Nuevo apunte';
+    $('#note-editor-title').value = note ? note.title || '' : '';
+    $('#note-editor-content').value = note ? note.content || '' : '';
+    $('#note-editor-tags').value = note ? (note.tags || []).join(', ') : (notesFilter.tag || '');
+    $('#note-editor-date').value = note ? note.date || '' : (presetDate || notesFilter.date || '');
+    $('#note-editor-new-item').value = '';
+    $('#note-editor-delete').hidden = !note;
+    $('#note-editor-errors').hidden = true;
+    renderNotePin();
+    renderNoteChecklist();
+    $('#note-editor-overlay').classList.add('open');
+    setTimeout(() => (note ? $('#note-editor-content') : $('#note-editor-title')).focus(), 50);
+  }
+
+  function renderNotePin() {
+    const btn = $('#note-editor-pin');
+    btn.classList.toggle('is-active', noteEditing.pinned);
+    btn.setAttribute('aria-pressed', String(noteEditing.pinned));
+    btn.title = noteEditing.pinned ? 'Fijado arriba (pulsa para soltar)' : 'Fijar arriba';
+  }
+
+  function renderNoteChecklist() {
+    const items = noteEditing.checklist;
+    const prog = NotesCore.checklistProgress({ checklist: items });
+    $('#note-checklist-progress').textContent = prog.total ? `${prog.done}/${prog.total}` : '';
+    $('#note-editor-checklist').innerHTML = items.map((it, i) => `
+      <div class="note-item-row" data-item="${i}">
+        <input type="checkbox" data-item-field="done" ${it.done ? 'checked' : ''} aria-label="Hecha" />
+        <input type="text" class="setting-input ${it.done ? 'is-done' : ''}" data-item-field="text" value="${escHTML(it.text)}" maxlength="300" aria-label="Tarea ${i + 1}" />
+        <button type="button" class="btn-icon material-icons-round" data-item-move="-1" ${i === 0 ? 'disabled' : ''} aria-label="Subir">arrow_upward</button>
+        <button type="button" class="btn-icon material-icons-round" data-item-move="1" ${i === items.length - 1 ? 'disabled' : ''} aria-label="Bajar">arrow_downward</button>
+        <button type="button" class="btn-icon material-icons-round" data-item-remove aria-label="Quitar tarea">close</button>
+      </div>`).join('');
+  }
+
+  function addNoteItem() {
+    const input = $('#note-editor-new-item');
+    const text = input.value.trim();
+    if (!text) return;
+    noteEditing.checklist.push({ text: text.slice(0, 300), done: false });
+    input.value = '';
+    renderNoteChecklist();
+    input.focus();
+  }
+
+  function saveNoteFromEditor() {
+    if (!noteEditing) return;
+    const pendingItem = $('#note-editor-new-item').value.trim();
+    if (pendingItem) noteEditing.checklist.push({ text: pendingItem.slice(0, 300), done: false });
+    const nowIso = new Date().toISOString();
+    const data = {
+      title: $('#note-editor-title').value.trim(),
+      content: $('#note-editor-content').value.replace(/\s+$/, ''),
+      checklist: noteEditing.checklist.filter(i => String(i.text || '').trim()),
+      tags: NotesCore.parseTags($('#note-editor-tags').value),
+      date: $('#note-editor-date').value || '',
+      pinned: noteEditing.pinned ? 1 : 0
+    };
+    if (NotesCore.isEmpty(data)) {
+      const errs = $('#note-editor-errors');
+      errs.textContent = 'El apunte está vacío: escribe un título, texto o alguna tarea.';
+      errs.hidden = false;
+      return;
+    }
+    let note;
+    if (noteEditing.id) {
+      const prev = loadNotes().find(n => n.id === noteEditing.id);
+      note = { ...prev, ...data, updated_at: nowIso, base_version: prev.version || 1, version: (prev.version || 1) + 1 };
+    } else {
+      note = { id: uid(), ...data, created_at: nowIso, updated_at: nowIso, version: 1 };
+    }
+    upsertNote(note);
+    $('#note-editor-overlay').classList.remove('open');
+    showToast(noteEditing.id ? 'Apunte guardado ✓' : 'Apunte creado ✓', 'sticky_note_2', 'var(--accent-amber)');
+    noteEditing = null;
+    refreshNotesEverywhere();
+  }
+
+  async function deleteNoteFromEditor() {
+    if (!noteEditing || !noteEditing.id) return;
+    const prev = loadNotes().find(n => n.id === noteEditing.id);
+    if (!prev) return;
+    if (!await confirmAction({ title: 'Eliminar apunte', message: `Se eliminará "${prev.title || 'Sin título'}" en todos tus dispositivos.`, confirmLabel: 'Eliminar' })) return;
+    const nowIso = new Date().toISOString();
+    upsertNote({ ...prev, deleted_at: nowIso, updated_at: nowIso, base_version: prev.version || 1, version: (prev.version || 1) + 1 });
+    $('#note-editor-overlay').classList.remove('open');
+    noteEditing = null;
+    refreshNotesEverywhere();
+  }
+
+  function toggleNoteItemFromCard(noteId, idx, done) {
+    const prev = loadNotes().find(n => n.id === noteId);
+    if (!prev || !prev.checklist || !prev.checklist[idx]) return;
+    const checklist = prev.checklist.map((it, i) => (i === idx ? { ...it, done } : it));
+    upsertNote({ ...prev, checklist, updated_at: new Date().toISOString(), base_version: prev.version || 1, version: (prev.version || 1) + 1 });
+    refreshNotesEverywhere();
+  }
+
+  function showNotesForDate(date) {
+    notesFilter = { query: '', tag: '', date };
+    const search = $('#notes-search');
+    if (search) search.value = '';
+    switchView('notes');
+  }
+
+  function initNotesModule() {
+    $('#btn-new-note')?.addEventListener('click', () => openNoteEditor(null));
+    $('#notes-search')?.addEventListener('input', (e) => { notesFilter.query = e.target.value; renderNotesView(); });
+    $('#notes-date-filter')?.addEventListener('change', (e) => { notesFilter.date = e.target.value; renderNotesView(); });
+    $('#notes-today-filter')?.addEventListener('click', () => { notesFilter.date = notesFilter.date === todayStr() ? '' : todayStr(); renderNotesView(); });
+    $('#btn-agenda-notes')?.addEventListener('click', () => showNotesForDate(todayStr()));
+
+    $('#view-notes')?.addEventListener('click', (e) => {
+      const tagBtn = e.target.closest('[data-note-tag]');
+      if (tagBtn) { notesFilter.tag = tagBtn.dataset.noteTag; renderNotesView(); return; }
+      if (e.target.closest('[data-clear-note-date]')) { notesFilter.date = ''; renderNotesView(); return; }
+      if (e.target.closest('[data-note-check]') || e.target.closest('label')) return; // las casillas se manejan en "change"
+      const card = e.target.closest('[data-note-id]');
+      if (card) openNoteEditor(card.dataset.noteId);
+    });
+    $('#view-notes')?.addEventListener('change', (e) => {
+      const check = e.target.closest('[data-note-check]');
+      if (!check) return;
+      toggleNoteItemFromCard(check.closest('[data-note-id]').dataset.noteId, Number(check.dataset.noteCheck), check.checked);
+    });
+    $('#view-notes')?.addEventListener('keydown', (e) => {
+      const card = e.target.closest('[data-note-id]');
+      if (card && e.target === card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openNoteEditor(card.dataset.noteId); }
+    });
+
+    $('#cal-day-notes')?.addEventListener('click', (e) => {
+      const add = e.target.closest('[data-new-note-date]');
+      if (add) { openNoteEditor(null, add.dataset.newNoteDate); return; }
+      const open = e.target.closest('[data-open-note]');
+      if (open) openNoteEditor(open.dataset.openNote);
+    });
+
+    // Editor
+    $('#note-editor-add-item')?.addEventListener('click', addNoteItem);
+    $('#note-editor-new-item')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addNoteItem(); } });
+    const list = $('#note-editor-checklist');
+    list?.addEventListener('input', (e) => {
+      const row = e.target.closest('[data-item]');
+      if (row && e.target.dataset.itemField === 'text') noteEditing.checklist[Number(row.dataset.item)].text = e.target.value;
+    });
+    list?.addEventListener('change', (e) => {
+      const row = e.target.closest('[data-item]');
+      if (row && e.target.dataset.itemField === 'done') {
+        noteEditing.checklist[Number(row.dataset.item)].done = e.target.checked;
+        renderNoteChecklist();
+      }
+    });
+    list?.addEventListener('click', (e) => {
+      const row = e.target.closest('[data-item]');
+      if (!row) return;
+      const i = Number(row.dataset.item);
+      const move = e.target.closest('[data-item-move]');
+      if (move) {
+        const j = i + Number(move.dataset.itemMove);
+        if (j < 0 || j >= noteEditing.checklist.length) return;
+        [noteEditing.checklist[i], noteEditing.checklist[j]] = [noteEditing.checklist[j], noteEditing.checklist[i]];
+        renderNoteChecklist();
+      } else if (e.target.closest('[data-item-remove]')) {
+        noteEditing.checklist.splice(i, 1);
+        renderNoteChecklist();
+      }
+    });
+    $('#note-editor-pin')?.addEventListener('click', () => { noteEditing.pinned = !noteEditing.pinned; renderNotePin(); });
+    $('#note-editor-save')?.addEventListener('click', saveNoteFromEditor);
+    $('#note-editor-delete')?.addEventListener('click', deleteNoteFromEditor);
+    const closeEditor = () => { $('#note-editor-overlay').classList.remove('open'); noteEditing = null; };
+    $('#note-editor-cancel')?.addEventListener('click', closeEditor);
+    $('#note-editor-close')?.addEventListener('click', closeEditor);
   }
 
   // ── Login con correo y contraseña ──
@@ -6597,6 +7282,7 @@ SIEMPRE devuelve un JSON válido.
     initSettings();
     initAmbientControls();
     initWorkoutModule();
+    initNotesModule();
     updateFocusUIBadges();
 
     renderProfileUI();

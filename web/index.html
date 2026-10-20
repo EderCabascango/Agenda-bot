@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:8000 https://*.ts.net;" />
   <link rel="stylesheet" href="fonts/material-icons-round.css" />
-  <link rel="stylesheet" href="style.css?v=12" />
+  <link rel="stylesheet" href="style.css?v=14" />
 </head>
 <body>
 
@@ -64,6 +64,10 @@
         <button class="nav-item" data-view="workout">
           <span class="material-icons-round">fitness_center</span>
           <span>Ejercicio</span>
+        </button>
+        <button class="nav-item" data-view="notes">
+          <span class="material-icons-round">sticky_note_2</span>
+          <span>Apuntes</span>
         </button>
 
         <div class="nav-section-label">HERRAMIENTAS</div>
@@ -204,6 +208,9 @@
                     <h3 class="agenda-title">Agenda de Hoy</h3>
                     <span class="agenda-date-subtitle" id="db-agenda-date">Viernes, 9 Oct</span>
                   </div>
+                  <button type="button" class="btn-text agenda-notes-link" id="btn-agenda-notes">
+                    <span class="material-icons-round">sticky_note_2</span> <span id="agenda-notes-count">Apuntes de hoy</span>
+                  </button>
                 </div>
 
                 <!-- Mini 7-Day Day Picker Strip -->
@@ -268,6 +275,7 @@
             <div class="cal-day-detail" id="cal-day-detail">
               <h4 id="cal-detail-title">Selecciona un día</h4>
               <div id="cal-detail-list"></div>
+              <div class="day-notes" id="cal-day-notes"></div>
             </div>
           </div>
         </section>
@@ -424,8 +432,9 @@
           </div>
 
           <div class="workout-panel" id="workout-panel-train">
+            <div class="workout-today" id="workout-today"></div>
             <div class="workout-summary" id="workout-week-summary"></div>
-            <h3 class="workout-section-title">Empezar una rutina</h3>
+            <h3 class="workout-section-title">Tus rutinas</h3>
             <div class="workout-routine-grid" id="workout-start-list"></div>
             <h3 class="workout-section-title">Últimos entrenos</h3>
             <div class="workout-history" id="workout-recent-list"></div>
@@ -433,6 +442,9 @@
 
           <div class="workout-panel" id="workout-panel-routines" hidden>
             <div class="workout-panel-actions">
+              <button type="button" class="btn-outline" id="btn-load-plan">
+                <span class="material-icons-round">auto_awesome</span> Cargar plan sugerido
+              </button>
               <button type="button" class="btn-primary" id="btn-new-routine">
                 <span class="material-icons-round">add</span> Nueva rutina
               </button>
@@ -462,6 +474,33 @@
               <div id="workout-exercise-history"></div>
             </div>
           </div>
+        </section>
+
+        <!-- ========== APUNTES ========== -->
+        <section class="view" id="view-notes">
+          <div class="view-header workout-header">
+            <div>
+              <h2>Apuntes</h2>
+              <p class="section-desc">Notas rápidas, listas de tareas y lo que no quieres olvidar</p>
+            </div>
+            <button type="button" class="btn-primary" id="btn-new-note">
+              <span class="material-icons-round">add</span> Nuevo apunte
+            </button>
+          </div>
+          <div class="notes-toolbar">
+            <label class="notes-search">
+              <span class="material-icons-round" aria-hidden="true">search</span>
+              <input type="search" id="notes-search" placeholder="Buscar en tus apuntes…" aria-label="Buscar en apuntes" />
+            </label>
+            <label class="workout-field notes-date-filter">
+              <span>Día</span>
+              <input type="date" id="notes-date-filter" aria-label="Filtrar por día" />
+            </label>
+            <button type="button" class="btn-outline" id="notes-today-filter">Hoy</button>
+          </div>
+          <div class="notes-tags" id="notes-tags"></div>
+          <p class="workout-muted" id="notes-filter-info" hidden></p>
+          <div class="notes-grid" id="notes-list"></div>
         </section>
 
         <section class="view" id="view-settings">
@@ -856,7 +895,7 @@
       </button>
       <button class="bnav-item" data-view="calendar">
         <span class="material-icons-round">calendar_month</span>
-        <span>Calendario</span>
+        <span>Agenda</span>
       </button>
       <button class="bnav-item" data-view="stats">
         <span class="material-icons-round">analytics</span>
@@ -869,6 +908,10 @@
       <button class="bnav-item" data-view="workout">
         <span class="material-icons-round">fitness_center</span>
         <span>Ejercicio</span>
+      </button>
+      <button class="bnav-item" data-view="notes">
+        <span class="material-icons-round">sticky_note_2</span>
+        <span>Apuntes</span>
       </button>
     </nav>
   </div>
@@ -1413,6 +1456,47 @@
     </div>
   </div>
 
+  <!-- Modal: Apunte -->
+  <div class="modal-overlay" id="note-editor-overlay">
+    <div class="modal workout-modal" role="dialog" aria-modal="true" aria-labelledby="note-editor-heading">
+      <div class="modal-header">
+        <h3 class="modal-title" id="note-editor-heading">Nuevo apunte</h3>
+        <div class="note-header-actions">
+          <button type="button" class="btn-icon material-icons-round" id="note-editor-pin" aria-pressed="false" title="Fijar arriba">push_pin</button>
+          <button type="button" class="modal-close material-icons-round" id="note-editor-close" aria-label="Cerrar">close</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <input type="text" class="note-title-input" id="note-editor-title" maxlength="200" placeholder="Título" aria-label="Título del apunte" />
+        <textarea class="note-content-input" id="note-editor-content" rows="6" maxlength="20000" placeholder="Escribe aquí…" aria-label="Texto del apunte"></textarea>
+        <div class="note-checklist">
+          <p class="workout-card-title">Tareas <span class="workout-muted" id="note-checklist-progress"></span></p>
+          <div id="note-editor-checklist"></div>
+          <div class="note-checklist-add">
+            <input type="text" class="setting-input" id="note-editor-new-item" maxlength="300" placeholder="Nueva tarea y Enter" aria-label="Nueva tarea" />
+            <button type="button" class="btn-outline" id="note-editor-add-item">Agregar</button>
+          </div>
+        </div>
+        <div class="workout-meta-row note-meta-row">
+          <label class="workout-field">
+            <span>Etiquetas</span>
+            <input type="text" id="note-editor-tags" maxlength="400" placeholder="casa, ideas, trabajo" />
+          </label>
+          <label class="workout-field">
+            <span>Día</span>
+            <input type="date" id="note-editor-date" />
+          </label>
+        </div>
+        <div class="form-errors" id="note-editor-errors" hidden></div>
+        <div class="modal-actions note-actions">
+          <button type="button" class="btn-text workout-delete" id="note-editor-delete" hidden>Eliminar</button>
+          <button type="button" class="btn-secondary" id="note-editor-cancel">Cancelar</button>
+          <button type="button" class="btn-primary" id="note-editor-save">Guardar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal: Registrar entreno -->
   <div class="modal-overlay" id="workout-overlay">
     <div class="modal workout-modal" role="dialog" aria-modal="true" aria-labelledby="workout-modal-title">
@@ -1424,6 +1508,12 @@
         <button type="button" class="modal-close material-icons-round" id="workout-close" aria-label="Cerrar">close</button>
       </div>
       <div class="modal-body">
+        <div class="workout-mode-toggle" role="tablist" aria-label="Modo del entreno">
+          <button type="button" class="active" data-workout-mode="guided" role="tab"><span class="material-icons-round">timer</span> Guiado</button>
+          <button type="button" data-workout-mode="table" role="tab"><span class="material-icons-round">table_rows</span> Tabla</button>
+        </div>
+        <div id="workout-guided" class="workout-guided" hidden></div>
+        <div id="workout-table-panel">
         <div class="workout-meta-row">
           <label class="workout-field">
             <span>Rutina</span>
@@ -1444,6 +1534,7 @@
         <button type="button" class="btn-outline workout-add-exercise" id="btn-workout-add-exercise">
           <span class="material-icons-round">add</span> Agregar ejercicio
         </button>
+        </div>
         <label class="workout-field">
           <span>Notas</span>
           <textarea id="workout-notes" rows="2" maxlength="2000" placeholder="¿Cómo te sentiste? Progresiones, molestias…"></textarea>
@@ -1469,6 +1560,10 @@
           <span>Nombre</span>
           <input type="text" id="routine-editor-name" maxlength="80" placeholder="Ej.: Empuje, Tirón, Pierna, Full body" />
         </label>
+        <div class="workout-field routine-days-field">
+          <span>Días de la semana</span>
+          <div class="routine-days" id="routine-editor-days" role="group" aria-label="Días en que toca esta rutina"></div>
+        </div>
         <div id="routine-editor-exercises"></div>
         <button type="button" class="btn-outline workout-add-exercise" id="btn-routine-add-exercise">
           <span class="material-icons-round">add</span> Agregar ejercicio
@@ -1601,7 +1696,8 @@
   <script src="timer-core.js?v=9"></script>
   <script src="stats-core.js?v=9"></script>
   <script src="ambient-core.js?v=1"></script>
-  <script src="workout-core.js?v=1"></script>
-  <script src="app.js?v=16"></script>
+  <script src="workout-core.js?v=2"></script>
+  <script src="notes-core.js?v=1"></script>
+  <script src="app.js?v=18"></script>
 </body>
 </html>
