@@ -4880,7 +4880,9 @@ SIEMPRE devuelve un JSON válido.
     settings = loadSettings();
     if (settings.backendUrl) return settings.backendUrl.replace(/\/+$/, '');
     if (isNativeApp()) return '';
-    if (window.location.protocol.startsWith('http') && (window.location.port === '8000' || window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost')) {
+    // La web la sirve el propio backend (uvicorn en local o Vercel): misma dirección.
+    // Solo el servidor estático de desarrollo (npm run dev, puerto 8081) va aparte.
+    if (window.location.protocol.startsWith('http') && window.location.port !== '8081') {
       return window.location.origin;
     }
     return 'http://127.0.0.1:8000';
