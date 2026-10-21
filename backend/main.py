@@ -222,6 +222,21 @@ def legacy_put_activities(acts: list[dict], user: str = Depends(auth)):
 
 
 
+@app.post("/admin/import")
+def admin_import(dump: dict, user: str = Depends(auth)):
+    """Carga inicial de la base en la nube desde agenda.db (migrar_a_turso.py --url).
+    Solo funciona mientras la base destino está vacía: nunca sobrescribe datos."""
+    from migrar_a_turso import import_dump
+    try:
+        conn = db._conn()
+        try:
+            return {"copied": import_dump(conn, dump)}
+        finally:
+            conn.close()
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
 @app.post("/agent/chat")
 def chat(body: Chat, user: str = Depends(auth)):
     cfg = {"configurable": {"thread_id": f"{user}:{body.thread_id}", "user_id": user}}

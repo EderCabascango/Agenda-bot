@@ -24,3 +24,6 @@ test-output.txt
 
 
 dist/
+
+# Credenciales de Turso solo para migrar_a_turso.py
+backend/.env.turso

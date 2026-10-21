@@ -1,3 +1,24 @@
 {
-  "outputDirectory": "web"
+  "outputDirectory": "web",
+  "functions": {
+    "api/index.py": {
+      "includeFiles": "backend/*.py",
+      "excludeFiles": "backend/test_*.py",
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(auth|agent|admin)/(.*)",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/(profile|health|activities|sync)",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/activities/(.*)",
+      "destination": "/api/index"
+    }
+  ]
 }

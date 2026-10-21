@@ -9,6 +9,8 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import turso
+
 DB_PATH = os.getenv("AGENDA_DB", os.getenv("DATABASE_PATH", os.path.join(os.path.dirname(__file__), "agenda.db")))
 PURGE_DAYS_DEFAULT = 30
 _INITIALIZED_DBS: set[str] = set()
@@ -507,6 +509,14 @@ def sanitize_exercises(raw, with_sets: bool) -> list:
 
 def _conn(custom_path: str | None = None) -> sqlite3.Connection:
     global _INITIALIZED_DBS
+    if custom_path is None and turso.is_configured():
+        # En la nube (Vercel): base de datos Turso en lugar del archivo local.
+        conn = turso.connect()
+        if "turso" not in _INITIALIZED_DBS:
+            _migrate_schema_if_needed(conn, "turso")
+            _INITIALIZED_DBS.add("turso")
+        return conn
+
     raw_path = custom_path or os.getenv("AGENDA_DB") or os.getenv("DATABASE_PATH") or DB_PATH
     abs_path = os.path.abspath(raw_path)
     conn = sqlite3.connect(abs_path, timeout=15.0)

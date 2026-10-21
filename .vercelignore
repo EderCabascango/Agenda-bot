@@ -1,0 +1,21 @@
+# Nunca subir datos locales ni secretos
+**/.env
+*.db
+*.db_*
+backend/agenda.db*
+backend/backups/
+backend/.venv/
+# Nada de esto hace falta en Vercel
+android/
+app/
+dist/
+node_modules/
+screenshots/
+docs/
+design/
+scripts/
+.claude/
+**/__pycache__/
+.pytest_cache/
+test-output.txt
+**/.env.*
