@@ -370,6 +370,7 @@
     if (name === 'study') renderStudyView();
     if (name === 'workout') renderWorkoutView();
     if (name === 'notes') renderNotesView();
+    if (name === 'meditate') renderMeditation();
   }
 
   function refreshActiveView() {
@@ -1509,6 +1510,96 @@
   // ── Web Notification System ──
   let scheduledAlarms = [];
 
+  // Notificaciones: en el APK la API web `Notification` no existe dentro del WebView, así que se usa
+  // el plugin nativo LocalNotifications, que además las programa en Android y suenan con la app cerrada.
+  const NOTIF_ID_FOCUS = 1;
+  const NOTIF_ID_MEDITATION = 2;
+  const NOTIF_REMINDER_BASE = 100000;
+  const NOTIF_REMINDER_DAYS = 7;
+
+  function nativeNotifs() {
+    const plugins = window.Capacitor && window.Capacitor.Plugins;
+    return (isNativeApp() && plugins && plugins.LocalNotifications) || null;
+  }
+
+  function notifyNow(title, body, tag) {
+    const ln = nativeNotifs();
+    if (ln) {
+      ln.schedule({ notifications: [{ id: Math.floor(Math.random() * 90000) + 10, title, body, schedule: { at: new Date(Date.now() + 500), allowWhileIdle: true } }] }).catch(() => {});
+      return;
+    }
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      try { new Notification(title, tag ? { body, tag } : { body }); } catch (e) { /* no disponible */ }
+    }
+  }
+
+  // Solo nativo: programa (o reprograma) una notificación con id fijo para una hora concreta.
+  function scheduleNativeNotif(id, title, body, at) {
+    const ln = nativeNotifs();
+    if (!ln) return;
+    ln.cancel({ notifications: [{ id }] }).catch(() => {})
+      .then(() => ln.checkPermissions())
+      // Android 13+: el primer aviso pide permiso aunque no se hayan activado los recordatorios.
+      .then(p => (p && p.display === 'granted') ? p : ln.requestPermissions())
+      .then(p => {
+        if (p && p.display === 'granted' && at > Date.now()) {
+          return ln.schedule({ notifications: [{ id, title, body, schedule: { at: new Date(at), allowWhileIdle: true } }] });
+        }
+      })
+      .catch(() => {});
+  }
+
+  function cancelNativeNotif(id) {
+    const ln = nativeNotifs();
+    if (ln) ln.cancel({ notifications: [{ id }] }).catch(() => {});
+  }
+
+  // id estable por actividad y día, dentro del rango de enteros de Android.
+  function reminderNotifId(actId, dateStr) {
+    let h = 0;
+    for (const ch of `${actId}|${dateStr}`) h = (h * 31 + ch.charCodeAt(0)) | 0;
+    return NOTIF_REMINDER_BASE + (Math.abs(h) % 1000000000);
+  }
+
+  // Programa en Android los recordatorios de los próximos días (funcionan aunque la app esté cerrada).
+  async function scheduleNativeReminders() {
+    const ln = nativeNotifs();
+    if (!ln) return;
+    try {
+      const pending = await ln.getPending();
+      const old = (pending.notifications || []).filter(n => Number(n.id) >= NOTIF_REMINDER_BASE).map(n => ({ id: Number(n.id) }));
+      if (old.length) await ln.cancel({ notifications: old });
+      if (!settings.notifications) return;
+
+      const advance = parseInt(settings.alarmAdvance || '5', 10);
+      const now = Date.now();
+      const list = [];
+      for (let d = 0; d < NOTIF_REMINDER_DAYS; d++) {
+        const day = new Date();
+        day.setDate(day.getDate() + d);
+        const dateStr = toDateStr(day);
+        const acts = (typeof SyncCore !== 'undefined' && SyncCore.getAlarmEligibleActivities)
+          ? SyncCore.getAlarmEligibleActivities(activities, dateStr)
+          : activities.filter(a => a && !a.deleted_at && a.date === dateStr && !a.completed);
+        acts.filter(a => a.startTime && a.alarm !== false).forEach(act => {
+          const [h, m] = act.startTime.split(':').map(Number);
+          const at = new Date(day.getFullYear(), day.getMonth(), day.getDate(), h, m).getTime() - advance * 60000;
+          if (at <= now) return;
+          const label = advance > 0 ? `en ${advance} min` : 'ahora';
+          list.push({
+            id: reminderNotifId(act.id, dateStr),
+            title: 'Mi Diario – Recordatorio',
+            body: `"${act.title}" comienza ${label} (${act.startTime}${act.endTime ? ' – ' + act.endTime : ''})`,
+            schedule: { at: new Date(at), allowWhileIdle: true },
+          });
+        });
+      }
+      if (list.length) await ln.schedule({ notifications: list });
+    } catch (e) {
+      console.warn('No se pudieron programar los recordatorios nativos', e);
+    }
+  }
+
   // ── Modo no molestar y sonido ambiental durante el enfoque (Fase F) ──
   let dndQueue = [];
   const ambientPlayer = (typeof AmbientCore !== 'undefined') ? AmbientCore.createAmbientPlayer() : null;
@@ -1539,9 +1630,7 @@
     dndQueue = [];
     pending.forEach(({ act, minuteLabel }) => addNotifToPanel(act, minuteLabel));
     const titles = pending.map(p => p.act.title).join(', ');
-    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      try { new Notification('Mi Diario – Avisos durante tu enfoque', { body: titles, tag: 'dnd-summary' }); } catch (e) {}
-    }
+    notifyNow('Mi Diario – Avisos durante tu enfoque', titles, 'dnd-summary');
     playAlarmSound();
     // Después del toast de cierre de la sesión, para que no lo pise.
     setTimeout(() => showToast(`Mientras te enfocabas: ${pending.length} aviso(s) — ${titles}`, 'notifications', 'var(--accent-amber)'), 2500);
@@ -1572,6 +1661,12 @@
   }
 
   function requestNotifPermission() {
+    const ln = nativeNotifs();
+    if (ln) {
+      return ln.requestPermissions()
+        .then(r => (r && r.display === 'granted') ? 'granted' : 'denied')
+        .catch(() => 'denied');
+    }
     if (!('Notification' in window)) {
       showToast('Tu navegador no soporta notificaciones', 'warning', 'var(--accent-amber)');
       return Promise.resolve('denied');
@@ -1599,9 +1694,15 @@
     } catch (e) { /* Audio not available */ }
   }
 
+  let nativeReminderTimer = null;
   function scheduleWebAlarms() {
     scheduledAlarms.forEach(id => clearTimeout(id));
     scheduledAlarms = [];
+    if (nativeNotifs()) {
+      // Se llama tras cada cambio: agrupa las reprogramaciones seguidas en una sola.
+      clearTimeout(nativeReminderTimer);
+      nativeReminderTimer = setTimeout(scheduleNativeReminders, 800);
+    }
 
     if (!settings.notifications) return;
 
@@ -1628,7 +1729,8 @@
           }
           const body = `"${act.title}" comienza ${minuteLabel} (${act.startTime}${act.endTime ? ' – ' + act.endTime : ''})`;
 
-          if (Notification.permission === 'granted') {
+          // En el APK la notificación ya la programó Android (scheduleNativeReminders).
+          if (!nativeNotifs() && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
             new Notification('Mi Diario – Recordatorio', {
               body,
               tag: act.id,
@@ -3772,7 +3874,9 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
       pendingFocusNotification = { title, body };
     }
     playTimerChime();
-    if (typeof Notification !== 'undefined') {
+    if (nativeNotifs()) {
+      // En el APK el aviso de fin de fase ya está programado en Android (syncFocusNativeNotif).
+    } else if (typeof Notification !== 'undefined') {
       if (Notification.permission === 'granted') {
         try { new Notification(title, { body }); } catch (e) {}
       } else if (Notification.permission !== 'denied') {
@@ -3905,6 +4009,9 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     const setupView = $('#focus-setup-view');
     const activeView = $('#focus-active-view');
     const summaryView = $('#focus-summary-view');
+    // Durante la sesión el modal pasa a modo inmersivo: más grande y con el reloj protagonista.
+    const immersive = !!activeFocusTimer && !['idle', 'completed'].includes(activeFocusTimer.status);
+    $('#modal-focus-timer')?.classList.toggle('focus-immersive', immersive);
 
     if (!activeFocusTimer || activeFocusTimer.status === 'idle') {
       if (setupView) setupView.style.display = 'block';
@@ -4335,6 +4442,249 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     syncWithBackend();
   }
 
+  // ── Meditación ──
+  const MEDITATION_ACTIVE_KEY = 'diary_meditation_active';
+  const MEDITATION_LOG_KEY = 'diary_meditation_log';
+  const meditationPlayer = (typeof AmbientCore !== 'undefined') ? AmbientCore.createAmbientPlayer() : null;
+  let meditation = null;
+  let meditationTicker = null;
+  let meditationWakeLock = null;
+
+  function meditationMinutesSetting() {
+    const m = Number(loadSettings().meditationMinutes);
+    return MeditationCore.DURATIONS.includes(m) ? m : 10;
+  }
+
+  function saveMeditation() {
+    safeStorageSet(MEDITATION_ACTIVE_KEY, meditation && meditation.status !== 'done' ? meditation : null);
+  }
+
+  function initMeditation() {
+    if (typeof MeditationCore === 'undefined') return;
+    const s = loadSettings();
+    const select = $('#meditate-sound');
+    const volume = $('#meditate-volume');
+    if (select && typeof AmbientCore !== 'undefined') {
+      select.innerHTML = AmbientCore.SOUNDS.map(o => `<option value="${o.id}">${escHTML(o.label)}</option>`).join('');
+      select.value = AmbientCore.SOUND_IDS.includes(s.meditationSound) ? s.meditationSound : 'ocean';
+      select.addEventListener('change', () => {
+        settings = loadSettings();
+        settings.meditationSound = select.value;
+        saveSettings(settings);
+        updateMeditationSound();
+      });
+    }
+    if (volume) {
+      volume.value = Math.round((typeof s.meditationVolume === 'number' ? s.meditationVolume : 0.5) * 100);
+      if (meditationPlayer) meditationPlayer.setVolume(volume.value / 100);
+      volume.addEventListener('input', () => {
+        settings = loadSettings();
+        settings.meditationVolume = volume.value / 100;
+        saveSettings(settings);
+        if (meditationPlayer) meditationPlayer.setVolume(settings.meditationVolume);
+      });
+    }
+    const bells = $('#meditate-bells');
+    if (bells) {
+      bells.checked = s.meditationBells !== false;
+      bells.addEventListener('change', () => {
+        settings = loadSettings();
+        settings.meditationBells = bells.checked;
+        saveSettings(settings);
+      });
+    }
+    $$('#meditate-durations .meditate-chip').forEach(btn => btn.addEventListener('click', () => {
+      if (meditation) return; // no se cambia a mitad de sesión
+      settings = loadSettings();
+      settings.meditationMinutes = Number(btn.dataset.minutes);
+      saveSettings(settings);
+      renderMeditation();
+    }));
+    $('#meditate-start')?.addEventListener('click', startMeditation);
+    $('#meditate-pause')?.addEventListener('click', toggleMeditationPause);
+    $('#meditate-stop')?.addEventListener('click', () => finishMeditation(false));
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && meditation) {
+        tickMeditation();
+        if (meditation && meditation.status === 'running') acquireMeditationWakeLock();
+      }
+    });
+
+    // Retoma una sesión que quedó abierta (recarga, app cerrada por el sistema…).
+    const stored = safeStorageGet(MEDITATION_ACTIVE_KEY, null);
+    if (stored && stored.durationMs) {
+      meditation = stored;
+      startMeditationTicker();
+      tickMeditation();
+    }
+    renderMeditation();
+  }
+
+  function meditationBell() {
+    if (meditationPlayer && loadSettings().meditationBells !== false) meditationPlayer.bell();
+  }
+
+  function updateMeditationSound() {
+    if (!meditationPlayer) return;
+    const sound = loadSettings().meditationSound || 'ocean';
+    if (meditation && meditation.status === 'running' && sound !== 'none') meditationPlayer.play(sound);
+    else meditationPlayer.stop();
+  }
+
+  async function acquireMeditationWakeLock() {
+    if (!('wakeLock' in navigator) || meditationWakeLock) return;
+    try {
+      meditationWakeLock = await navigator.wakeLock.request('screen');
+      meditationWakeLock.addEventListener('release', () => { meditationWakeLock = null; });
+    } catch (e) { /* el sistema no lo permite ahora */ }
+  }
+
+  function releaseMeditationWakeLock() {
+    if (meditationWakeLock) {
+      try { meditationWakeLock.release(); } catch (e) { /* ya liberado */ }
+      meditationWakeLock = null;
+    }
+  }
+
+  function scheduleMeditationNotif() {
+    const at = meditation ? MeditationCore.endsAt(meditation) : null;
+    if (at) scheduleNativeNotif(NOTIF_ID_MEDITATION, 'Meditación completada', 'Buen trabajo. Vuelve con calma a tu día.', at);
+    else cancelNativeNotif(NOTIF_ID_MEDITATION);
+  }
+
+  function startMeditationTicker() {
+    clearInterval(meditationTicker);
+    meditationTicker = setInterval(tickMeditation, 250);
+  }
+
+  function startMeditation() {
+    if (meditation || typeof MeditationCore === 'undefined') return;
+    meditation = MeditationCore.create(meditationMinutesSetting());
+    saveMeditation();
+    meditationBell();
+    updateMeditationSound();
+    acquireMeditationWakeLock();
+    scheduleMeditationNotif();
+    startMeditationTicker();
+    renderMeditation();
+  }
+
+  function toggleMeditationPause() {
+    if (!meditation) return;
+    meditation = meditation.status === 'paused' ? MeditationCore.resume(meditation) : MeditationCore.pause(meditation);
+    saveMeditation();
+    updateMeditationSound();
+    if (meditation.status === 'running') acquireMeditationWakeLock(); else releaseMeditationWakeLock();
+    scheduleMeditationNotif();
+    renderMeditation();
+  }
+
+  function tickMeditation() {
+    if (!meditation) return;
+    const res = MeditationCore.tick(meditation);
+    meditation = res.state;
+    if (res.finished) { finishMeditation(true); return; }
+    renderMeditationClock();
+  }
+
+  // completed = se agotó el tiempo; si no, el usuario la terminó antes (cuenta lo meditado).
+  function finishMeditation(completed) {
+    if (!meditation) return;
+    const minutes = MeditationCore.elapsedMs(meditation) / 60000;
+    meditation = null;
+    saveMeditation();
+    clearInterval(meditationTicker);
+    meditationTicker = null;
+    updateMeditationSound();
+    releaseMeditationWakeLock();
+    cancelNativeNotif(NOTIF_ID_MEDITATION);
+    safeStorageSet(MEDITATION_LOG_KEY, MeditationCore.addToLog(safeStorageGet(MEDITATION_LOG_KEY, []), todayStr(), minutes));
+    if (completed) {
+      meditationBell();
+      if (!nativeNotifs() && document.hidden) notifyNow('Meditación completada', 'Buen trabajo. Vuelve con calma a tu día.');
+      showToast('Meditación completada 🧘', 'self_improvement', 'var(--accent-teal)');
+    } else if (minutes >= 1) {
+      showToast(`Meditaste ${Math.round(minutes)} min`, 'self_improvement', 'var(--accent-teal)');
+    }
+    renderMeditation();
+  }
+
+  function renderMeditationClock() {
+    const clock = $('#meditate-clock');
+    const breath = $('#meditate-breath');
+    const circle = $('#meditate-circle');
+    if (!clock) return;
+    if (!meditation) {
+      clock.textContent = MeditationCore.formatClock(meditationMinutesSetting() * 60000);
+      if (breath) breath.textContent = 'Elige una duración y pulsa Empezar';
+      if (circle) { circle.style.transform = 'scale(0.82)'; circle.classList.remove('is-active'); }
+      return;
+    }
+    clock.textContent = MeditationCore.formatClock(MeditationCore.remainingMs(meditation));
+    if (meditation.status === 'paused') {
+      if (breath) breath.textContent = 'En pausa';
+      if (circle) circle.classList.remove('is-active');
+      return;
+    }
+    const { phase, progress } = MeditationCore.breathPhase(MeditationCore.elapsedMs(meditation));
+    // Inhalar: el círculo crece; exhalar: se encoge. Curva suave para que se sienta natural.
+    const eased = (1 - Math.cos(Math.PI * progress)) / 2;
+    const scale = phase === 'inhale' ? 0.7 + 0.3 * eased : 1 - 0.3 * eased;
+    if (breath) breath.textContent = phase === 'inhale' ? 'Inhala…' : 'Exhala…';
+    if (circle) { circle.style.transform = `scale(${scale.toFixed(3)})`; circle.classList.add('is-active'); }
+  }
+
+  function renderMeditation() {
+    if (typeof MeditationCore === 'undefined') return;
+    const selected = meditation ? Math.round(meditation.durationMs / 60000) : meditationMinutesSetting();
+    $$('#meditate-durations .meditate-chip').forEach(btn => {
+      const on = Number(btn.dataset.minutes) === selected;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-checked', on ? 'true' : 'false');
+      btn.disabled = !!meditation && !on;
+    });
+    const start = $('#meditate-start');
+    const pause = $('#meditate-pause');
+    const stop = $('#meditate-stop');
+    if (start) start.hidden = !!meditation;
+    if (pause) pause.hidden = !meditation;
+    if (stop) stop.hidden = !meditation;
+    const paused = meditation && meditation.status === 'paused';
+    const pIcon = $('#meditate-pause-icon');
+    const pLabel = $('#meditate-pause-label');
+    if (pIcon) pIcon.textContent = paused ? 'play_arrow' : 'pause';
+    if (pLabel) pLabel.textContent = paused ? 'Seguir' : 'Pausar';
+
+    const sum = MeditationCore.summarize(safeStorageGet(MEDITATION_LOG_KEY, []), todayStr());
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    set('#meditate-today', sum.todayMinutes);
+    set('#meditate-streak', sum.streak);
+    set('#meditate-sessions', sum.sessions);
+    renderMeditationClock();
+  }
+
+  // En el APK, el aviso de fin de fase se programa en Android para que llegue aunque la app
+  // esté en segundo plano (ahí el WebView congela los temporizadores de JavaScript).
+  let focusNotifState = { status: '', at: 0 };
+  function syncFocusNativeNotif() {
+    if (!nativeNotifs()) return;
+    const t = activeFocusTimer;
+    let at = 0;
+    if (t && (t.status === 'running' || t.status === 'break') && typeof TimerCore !== 'undefined') {
+      const { remainingSeconds } = TimerCore.getElapsedAndRemaining(t);
+      if (remainingSeconds > 0) at = Date.now() + remainingSeconds * 1000;
+    }
+    const status = at ? t.status : '';
+    if (status === focusNotifState.status && Math.abs(at - focusNotifState.at) < 5000) return;
+    focusNotifState = { status, at };
+    if (!at) { cancelNativeNotif(NOTIF_ID_FOCUS); return; }
+    if (status === 'break') {
+      scheduleNativeNotif(NOTIF_ID_FOCUS, '¡Descanso Finalizado!', 'Listo para el siguiente ciclo de enfoque.', at);
+    } else {
+      scheduleNativeNotif(NOTIF_ID_FOCUS, '¡Tiempo de Enfoque Completado!', 'Toma un merecido descanso.', at);
+    }
+  }
+
   // ── Tick Loop del Temporizador ──
   function startFocusTimerTickLoop() {
     if (focusIntervalHandle) clearInterval(focusIntervalHandle);
@@ -4348,6 +4698,7 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
         }
       }
 
+      syncFocusNativeNotif();
       if (!activeFocusTimer || activeFocusTimer.status === 'idle' || activeFocusTimer.status === 'completed' || activeFocusTimer.status === 'abandoned') {
         updateFocusUIBadges();
         return;
@@ -7283,6 +7634,7 @@ SIEMPRE devuelve un JSON válido.
     // Settings
     initSettings();
     initAmbientControls();
+    initMeditation();
     initWorkoutModule();
     initNotesModule();
     updateFocusUIBadges();

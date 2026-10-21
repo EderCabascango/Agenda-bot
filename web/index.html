@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:8000 https://*.ts.net;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:8000 https://*.ts.net https://agenda-bot-omega.vercel.app;" />
   <link rel="stylesheet" href="fonts/material-icons-round.css" />
-  <link rel="stylesheet" href="style.css?v=14" />
+  <link rel="stylesheet" href="style.css?v=15" />
 </head>
 <body>
 
@@ -68,6 +68,10 @@
         <button class="nav-item" data-view="notes">
           <span class="material-icons-round">sticky_note_2</span>
           <span>Apuntes</span>
+        </button>
+        <button class="nav-item" data-view="meditate">
+          <span class="material-icons-round">self_improvement</span>
+          <span>Meditar</span>
         </button>
 
         <div class="nav-section-label">HERRAMIENTAS</div>
@@ -503,6 +507,71 @@
           <div class="notes-grid" id="notes-list"></div>
         </section>
 
+        <section class="view" id="view-meditate">
+          <div class="view-header workout-header">
+            <div>
+              <h2>Meditar</h2>
+              <p class="section-desc">Respira, calma la mente y vuelve a lo tuyo con más concentración</p>
+            </div>
+          </div>
+
+          <div class="meditate-layout">
+            <div class="meditate-stage">
+              <div class="meditate-circle" id="meditate-circle" aria-hidden="true"></div>
+              <div class="meditate-center">
+                <div class="meditate-clock" id="meditate-clock">10:00</div>
+                <div class="meditate-breath" id="meditate-breath" aria-live="polite">Elige una duración y pulsa Empezar</div>
+              </div>
+            </div>
+
+            <div class="meditate-panel">
+              <div class="meditate-group">
+                <span class="meditate-label">Duración</span>
+                <div class="meditate-durations" id="meditate-durations" role="radiogroup" aria-label="Duración de la meditación">
+                  <button type="button" class="meditate-chip" data-minutes="5" role="radio">5 min</button>
+                  <button type="button" class="meditate-chip" data-minutes="10" role="radio">10 min</button>
+                  <button type="button" class="meditate-chip" data-minutes="15" role="radio">15 min</button>
+                  <button type="button" class="meditate-chip" data-minutes="20" role="radio">20 min</button>
+                </div>
+              </div>
+
+              <div class="meditate-group">
+                <span class="meditate-label">Sonido</span>
+                <div class="focus-ambient-row meditate-sound-row">
+                  <label class="focus-ambient-field">
+                    <span class="material-icons-round" aria-hidden="true">graphic_eq</span>
+                    <select id="meditate-sound" aria-label="Sonido para meditar"></select>
+                  </label>
+                  <input type="range" id="meditate-volume" min="0" max="100" step="5" aria-label="Volumen del sonido" />
+                </div>
+                <label class="meditate-toggle">
+                  <input type="checkbox" id="meditate-bells" checked />
+                  <span>Campana al empezar y al terminar</span>
+                </label>
+              </div>
+
+              <div class="meditate-actions">
+                <button type="button" class="btn-primary btn-touch-target" id="meditate-start">
+                  <span class="material-icons-round">play_arrow</span> Empezar
+                </button>
+                <button type="button" class="btn-outline btn-touch-target" id="meditate-pause" hidden>
+                  <span class="material-icons-round" id="meditate-pause-icon">pause</span>
+                  <span id="meditate-pause-label">Pausar</span>
+                </button>
+                <button type="button" class="btn-outline btn-touch-target" id="meditate-stop" hidden>
+                  <span class="material-icons-round">stop</span> Terminar
+                </button>
+              </div>
+
+              <div class="meditate-stats">
+                <div><strong id="meditate-today">0</strong><span>min hoy</span></div>
+                <div><strong id="meditate-streak">0</strong><span>días seguidos</span></div>
+                <div><strong id="meditate-sessions">0</strong><span>sesiones</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section class="view" id="view-settings">
           <div class="view-header"><h2>Ajustes</h2></div>
           <div class="settings-list">
@@ -912,6 +981,10 @@
       <button class="bnav-item" data-view="notes">
         <span class="material-icons-round">sticky_note_2</span>
         <span>Apuntes</span>
+      </button>
+      <button class="bnav-item" data-view="meditate">
+        <span class="material-icons-round">self_improvement</span>
+        <span>Meditar</span>
       </button>
     </nav>
   </div>
@@ -1695,9 +1768,10 @@
   <script src="focus-core.js?v=9"></script>
   <script src="timer-core.js?v=9"></script>
   <script src="stats-core.js?v=9"></script>
-  <script src="ambient-core.js?v=1"></script>
+  <script src="ambient-core.js?v=2"></script>
+  <script src="meditation-core.js?v=1"></script>
   <script src="workout-core.js?v=2"></script>
   <script src="notes-core.js?v=1"></script>
-  <script src="app.js?v=18"></script>
+  <script src="app.js?v=19"></script>
 </body>
 </html>

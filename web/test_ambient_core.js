@@ -24,12 +24,12 @@ const rms = (arr) => Math.sqrt(arr.reduce((a, v) => a + v * v, 0) / arr.length);
 
 test('AmbientCore - Generación de sonidos ambientales', async (t) => {
 
-  await t.test('1. Catálogo: sin sonido, ruido blanco, rosa, marrón y lluvia', () => {
-    assert.deepEqual(AmbientCore.SOUND_IDS, ['none', 'white', 'pink', 'brown', 'rain']);
+  await t.test('1. Catálogo: sin sonido, ruidos, lluvia, olas y tono profundo', () => {
+    assert.deepEqual(AmbientCore.SOUND_IDS, ['none', 'white', 'pink', 'brown', 'rain', 'ocean', 'om']);
   });
 
   await t.test('2. Todas las muestras quedan en [-1, 1], tienen la longitud pedida y no están en silencio', () => {
-    for (const type of ['white', 'pink', 'brown', 'rain']) {
+    for (const type of ['white', 'pink', 'brown', 'rain', 'ocean', 'om']) {
       const data = AmbientCore.generateNoise(type, 44100, 44100, seededRng(7));
       assert.equal(data.length, 44100, type);
       assert.ok(data.every(v => v >= -1 && v <= 1), `${type} fuera de rango`);
@@ -52,6 +52,23 @@ test('AmbientCore - Generación de sonidos ambientales', async (t) => {
     const a = AmbientCore.generateNoise('rain', 5000, 44100, seededRng(3));
     const b = AmbientCore.generateNoise('rain', 5000, 44100, seededRng(3));
     assert.deepEqual(Array.from(a), Array.from(b));
+  });
+
+  await t.test('4b. Olas: el volumen sube y baja; OM: el bucle empalma sin salto; campana se apaga', () => {
+    const ocean = AmbientCore.generateNoise('ocean', 88200, 44100, seededRng(5));
+    const q = ocean.length / 4;
+    // Fase 0.25 de la primera ola (cresta) frente a su inicio (valle).
+    const crest = rms(ocean.slice(q * 0.8, q * 1.2));
+    const trough = rms(ocean.slice(0, q * 0.2));
+    assert.ok(crest > trough * 1.5, `la cresta (${crest}) debe sonar más que el valle (${trough})`);
+
+    const om = AmbientCore.generateNoise('om', 44100 * 2, 44100);
+    const jump = Math.abs(om[om.length - 1] - om[0]);
+    assert.ok(jump < 0.05, `el final del bucle debe empalmar con el inicio (salto ${jump})`);
+
+    const bell = AmbientCore.generateBell(44100 * 4, 44100);
+    assert.ok(bell.every(v => v >= -1 && v <= 1));
+    assert.ok(rms(bell.slice(0, 4410)) > rms(bell.slice(-4410)) * 5, 'la campana debe apagarse');
   });
 
   await t.test('5. El reproductor crea un bucle, cambia de sonido, ajusta volumen y se detiene', () => {
