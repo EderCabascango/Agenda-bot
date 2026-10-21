@@ -95,8 +95,9 @@ def _via_server(url: str) -> int:
     now = datetime.now(timezone.utc)
     # Con la nube vacía aún no hay credenciales: session_version es 0.
     token = jwt.encode(
+        # Sin "iat": si el reloj de la PC va adelantado, el servidor rechazaría el token.
         {"sub": os.getenv("OWNER_USER_ID", "me"), "sv": 0,
-         "iat": int(now.timestamp()), "exp": int((now + timedelta(minutes=10)).timestamp())},
+         "exp": int((now + timedelta(minutes=10)).timestamp())},
         secret, algorithm="HS256",
     )
     dump = export_local()
