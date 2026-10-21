@@ -26,8 +26,27 @@ def _http() -> httpx.Client:
     return _client
 
 
+def _find_env(exact: str, suffix: str, value_prefix: tuple[str, ...] = ("",)) -> str:
+    """La integración de Vercel antepone un prefijo elegido al crearla
+    (p. ej. TURSO_DATABASE_DATABASE_URL), así que se acepta cualquier prefijo."""
+    if os.getenv(exact):
+        return os.environ[exact]
+    for name, value in sorted(os.environ.items()):
+        if name.startswith("TURSO") and name.endswith(suffix) and value.startswith(value_prefix):
+            return value
+    return ""
+
+
+def database_url() -> str:
+    return _find_env("TURSO_DATABASE_URL", "_URL", ("libsql://", "https://"))
+
+
+def default_auth_token() -> str:
+    return _find_env("TURSO_AUTH_TOKEN", "_TOKEN")
+
+
 def is_configured() -> bool:
-    return bool(os.getenv("TURSO_DATABASE_URL"))
+    return bool(database_url())
 
 
 class TursoError(Exception):
@@ -117,14 +136,11 @@ def _decode(cell: dict):
 
 class Connection:
     def __init__(self, url: str | None = None, auth_token: str | None = None):
-        url = url or os.environ["TURSO_DATABASE_URL"]
+        url = url or database_url()
         if url.startswith("libsql://"):
             url = "https://" + url[len("libsql://"):]
         self._base_url = url.rstrip("/")
-        if auth_token is None:
-            # La integración de Vercel usa el prefijo elegido: TURSO_DATABASE_AUTH_TOKEN.
-            auth_token = os.getenv("TURSO_AUTH_TOKEN") or os.getenv("TURSO_DATABASE_AUTH_TOKEN", "")
-        token = auth_token
+        token = auth_token if auth_token is not None else default_auth_token()
         self._headers = {"Authorization": f"Bearer {token}"} if token else {}
         self._baton: str | None = None
         self.in_transaction = False

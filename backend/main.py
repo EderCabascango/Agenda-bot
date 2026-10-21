@@ -165,8 +165,16 @@ def put_profile(body: ProfileUpdate, user: str = Depends(auth)):
 
 @app.get("/health")
 def health():
+    import turso
+    try:
+        db.get_session_version("health-check")
+        db_status = "ok"
+    except Exception as e:  # diagnóstico sin datos sensibles: solo el tipo de error
+        db_status = f"error: {type(e).__name__}"
     return {
         "ok": True,
+        "db": "turso" if turso.is_configured() else "sqlite",
+        "db_status": db_status,
         "agent_ready": is_agent_configured(),
         "provider": os.getenv("LLM_PROVIDER", "groq"),
     }
