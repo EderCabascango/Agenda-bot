@@ -3045,3 +3045,105 @@ body.is-logged-out > *:not(.login-screen):not(#toast) { display: none !important
   .meditate-clock { font-size: 3.4rem; }
   .meditate-panel { padding: 16px; gap: 16px; }
 }
+
+/* Fila de la matriz que marca una materia / habilidad / libro */
+.subject-matrix-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill, 999px);
+  padding: 2px 8px;
+}
+.subject-matrix-tag .material-icons-round { font-size: 13px; }
+
+/* Barra inferior con muchas secciones: se desliza en horizontal en vez de apretarse */
+@media (max-width: 768px) {
+  .bottom-nav { justify-content: flex-start; overflow-x: auto; scrollbar-width: none; }
+  .bottom-nav::-webkit-scrollbar { display: none; }
+  .bnav-item { flex: 0 0 auto; min-width: 58px; }
+}
+
+/* ── Segundo cerebro: enlaces entre apuntes ── */
+.note-content-wrap { position: relative; }
+.note-link-suggest {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: calc(100% - 6px);
+  z-index: 20;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.note-suggest-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font-size: 0.88rem;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.note-suggest-item .material-icons-round { font-size: 18px; color: var(--text-muted); }
+.note-suggest-item.is-active,
+.note-suggest-item:hover { background: var(--accent-amber-soft); }
+.note-connections {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-md);
+}
+.note-conn-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.note-conn-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+.note-link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill, 999px);
+  border: 1px solid var(--border-medium);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.note-link-chip .material-icons-round { font-size: 15px; }
+.note-link-chip:hover { border-color: var(--accent-amber); }
+.note-link-chip.is-missing { border-style: dashed; color: var(--text-secondary); }
+.note-backlinks {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.note-backlinks .material-icons-round { font-size: 14px; }

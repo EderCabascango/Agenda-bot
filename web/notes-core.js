@@ -69,7 +69,7 @@
 
   /** Extracto corto del texto para la tarjeta. */
   function excerpt(note, max = 140) {
-    const text = String((note && note.content) || '').replace(/\s+/g, ' ').trim();
+    const text = plainLinks((note && note.content) || '').replace(/\s+/g, ' ').trim();
     return text.length > max ? text.slice(0, max - 1).trimEnd() + '…' : text;
   }
 
@@ -77,5 +77,50 @@
     return !String(note.title || '').trim() && !String(note.content || '').trim() && checklistProgress(note).total === 0;
   }
 
-  return { fold, parseTags, checklistProgress, filterNotes, sortNotes, allTags, notesForDate, excerpt, isEmpty };
+  // ── Segundo cerebro: enlaces [[Título]] entre apuntes ──
+
+  /** Títulos enlazados en el texto, sin repetir: "[[Idea]] y [[Idea|alias]]" -> ['Idea']. */
+  function extractLinks(content) {
+    const out = [];
+    const seen = new Set();
+    const re = /\[\[([^\[\]\n|]+)(?:\|[^\[\]\n]*)?\]\]/g;
+    let m;
+    while ((m = re.exec(String(content || ''))) !== null) {
+      const title = m[1].trim();
+      const key = fold(title);
+      if (title && !seen.has(key)) { seen.add(key); out.push(title); }
+    }
+    return out;
+  }
+
+  /** Apunte activo con ese título (sin distinguir mayúsculas ni tildes). */
+  function findByTitle(notes, title) {
+    const key = fold(title);
+    return key ? (notes || []).find(n => isActive(n) && fold(n.title) === key) || null : null;
+  }
+
+  /** Apuntes que enlazan a `note` (por su título), sin contarse a sí mismo. */
+  function backlinks(notes, note) {
+    const key = fold(note && note.title);
+    if (!key) return [];
+    return sortNotes((notes || []).filter(n => isActive(n) && n.id !== note.id &&
+      extractLinks(n.content).some(t => fold(t) === key)));
+  }
+
+  /** Títulos sugeridos al escribir "[[algo": coinciden al inicio primero, luego en cualquier parte. */
+  function suggestTitles(notes, query, { excludeId = null, limit = 6 } = {}) {
+    const q = fold(query);
+    const titles = (notes || []).filter(n => isActive(n) && n.id !== excludeId && String(n.title || '').trim());
+    const starts = titles.filter(n => fold(n.title).startsWith(q));
+    const contains = titles.filter(n => !fold(n.title).startsWith(q) && fold(n.title).includes(q));
+    return starts.concat(contains).slice(0, limit).map(n => n.title.trim());
+  }
+
+  /** Texto con los enlaces mostrados como su alias o título (para extractos). */
+  function plainLinks(text) {
+    return String(text || '').replace(/\[\[([^\[\]\n|]+)(?:\|([^\[\]\n]*))?\]\]/g, (_, t, alias) => (alias || t).trim());
+  }
+
+  return { fold, parseTags, checklistProgress, filterNotes, sortNotes, allTags, notesForDate, excerpt, isEmpty,
+    extractLinks, findByTitle, backlinks, suggestTitles, plainLinks };
 });

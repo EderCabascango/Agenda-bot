@@ -48,4 +48,23 @@ test('NotesCore - Apuntes', async (t) => {
     assert.equal(NotesCore.isEmpty({ title: ' ', content: '', checklist: [] }), true);
     assert.equal(NotesCore.isEmpty({ checklist: [{ text: 'x' }] }), false);
   });
+
+  await t.test('Segundo cerebro: enlaces [[Título]], backlinks y sugerencias', () => {
+    const notes = [
+      { id: 'a', title: 'Hábitos', content: 'Ver [[Disciplina]] y [[sistemas|mis sistemas]]. Otra vez [[disciplina]].' },
+      { id: 'b', title: 'Disciplina', content: 'Base de [[Hábitos]]' },
+      { id: 'c', title: 'Sistemas', content: '' },
+      { id: 'd', title: 'Diario', content: 'Hoy leí sobre [[Disciplína]]' },
+      { id: 'e', title: 'Borrado', content: '[[Disciplina]]', deleted_at: '2026-01-01' },
+    ];
+    assert.deepEqual(NotesCore.extractLinks(notes[0].content), ['Disciplina', 'sistemas'], 'sin repetir y sin el alias');
+    assert.deepEqual(NotesCore.extractLinks('[[ ]] [[a\nb]] nada'), [], 'enlaces vacíos o partidos no cuentan');
+    assert.equal(NotesCore.findByTitle(notes, 'habitos').id, 'a', 'sin tildes ni mayúsculas');
+    assert.equal(NotesCore.findByTitle(notes, 'Borrado'), null, 'los borrados no cuentan');
+    assert.deepEqual(NotesCore.backlinks(notes, notes[1]).map(n => n.id).sort(), ['a', 'd'], 'Disciplina es mencionada por a y d');
+    assert.deepEqual(NotesCore.backlinks(notes, notes[2]).map(n => n.id), ['a'], 'el alias también enlaza');
+    assert.deepEqual(NotesCore.suggestTitles(notes, 'di', { excludeId: 'b' }), ['Diario']);
+    assert.deepEqual(NotesCore.suggestTitles(notes, 'ma'), ['Sistemas', 'Diario'].filter(t => NotesCore.fold(t).includes('ma')));
+    assert.equal(NotesCore.excerpt(notes[0]), 'Ver Disciplina y mis sistemas. Otra vez disciplina.', 'el extracto muestra el texto, no los corchetes');
+  });
 });

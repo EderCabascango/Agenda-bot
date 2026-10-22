@@ -357,9 +357,59 @@
   }
 
   // ── Navigation ──
+  // Estudio, Capital Laboral y Lectura comparten pantalla: cambia el tipo de "materia" que se muestra.
+  const STUDY_KIND_BY_VIEW = { study: 'study', skills: 'skill', reading: 'book' };
+  const STUDY_KIND_META = {
+    study: {
+      title: 'Estudio y Rendimiento', desc: 'Gestiona tus materias, hábitos de enfoque y métricas de estudio',
+      icon: 'school', countLabel: 'materias activas', hoursLabel: 'horas estudiadas', add: 'Nueva Materia',
+      edit: 'Editar Materia', archived: 'Mostrar materias archivadas', timeLabel: 'Tiempo estudiado',
+      topics: 'Temas', placeholder: 'Ej: Inglés Avanzado', defaultIcon: 'school', defaultRow: '',
+      empty: 'No tienes materias', emptyHint: 'Crea tu primera materia o usa las sugerencias preconfiguradas para empezar a organizar tu estudio.',
+    },
+    skill: {
+      title: 'Capital Laboral', desc: 'Habilidades que estás explotando o mejorando, con su tiempo de práctica',
+      icon: 'work', countLabel: 'habilidades', hoursLabel: 'horas de práctica', add: 'Nueva habilidad',
+      edit: 'Editar habilidad', archived: 'Mostrar habilidades archivadas', timeLabel: 'Tiempo practicado',
+      topics: 'Sub-habilidades', placeholder: 'Ej: Python, Ventas, Fuyu', defaultIcon: 'work', defaultRow: 'Proyectos',
+      empty: 'Aún no tienes habilidades', emptyHint: 'Crea una habilidad (por ejemplo "Python" o "Fuyu"), elige qué fila de la matriz marca y practícala con el temporizador.',
+    },
+    book: {
+      title: 'Lectura', desc: 'Tus libros y el tiempo que les dedicas; cada sesión marca "Leer" en la matriz',
+      icon: 'menu_book', countLabel: 'libros', hoursLabel: 'horas de lectura', add: 'Nuevo libro',
+      edit: 'Editar libro', archived: 'Mostrar libros terminados/archivados', timeLabel: 'Tiempo leído',
+      topics: 'Capítulos', placeholder: 'Ej: Hábitos atómicos', defaultIcon: 'menu_book', defaultRow: 'Leer',
+      empty: 'Aún no tienes libros', emptyHint: 'Añade el libro que estás leyendo (en Kindle o en papel) y registra tu lectura con el temporizador.',
+    },
+  };
+  let studyKind = 'study';
+  const subjectKind = s => (s && STUDY_KIND_META[s.kind]) ? s.kind : 'study';
+  const kindMeta = () => STUDY_KIND_META[studyKind];
+
+  function applyStudyKindChrome() {
+    const m = kindMeta();
+    const set = (sel, text) => { const el = $(sel); if (el) el.textContent = text; };
+    set('#study-title', m.title);
+    set('#study-desc', m.desc);
+    set('#study-chip-icon', m.icon);
+    set('#study-chip-count-label', m.countLabel);
+    set('#study-chip-hours-label', m.hoursLabel);
+    set('#btn-add-subject-label', m.add);
+    set('#study-archived-label', m.archived);
+    // Las estadísticas y notas son de estudio: en las otras secciones solo se ve la lista.
+    const tabs = $('#study-subtabs');
+    if (tabs) tabs.style.display = studyKind === 'study' ? 'flex' : 'none';
+    const seed = $('#btn-seed-subjects');
+    if (seed) seed.style.display = studyKind === 'study' ? '' : 'none';
+  }
+
   function switchView(name) {
+    if (STUDY_KIND_BY_VIEW[name]) {
+      studyKind = STUDY_KIND_BY_VIEW[name];
+    }
+    const sectionName = STUDY_KIND_BY_VIEW[name] ? 'study' : name;
     $$('.view').forEach(v => v.classList.remove('active'));
-    const target = $(`#view-${name}`);
+    const target = $(`#view-${sectionName}`);
     if (target) target.classList.add('active');
     $$('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === name));
     $$('.bnav-item').forEach(n => n.classList.toggle('active', n.dataset.view === name));
@@ -367,7 +417,10 @@
     if (name === 'activities') renderActivityList();
     if (name === 'calendar') renderCalendar();
     if (name === 'stats') renderStats();
-    if (name === 'study') renderStudyView();
+    if (STUDY_KIND_BY_VIEW[name]) {
+      applyStudyKindChrome();
+      switchStudySubtab(studyKind === 'study' ? activeStudySubtab : 'subjects');
+    }
     if (name === 'workout') renderWorkoutView();
     if (name === 'notes') renderNotesView();
     if (name === 'meditate') renderMeditation();
@@ -381,7 +434,7 @@
       renderDashboard();
     } else if (viewName === 'activities') {
       renderActivityList();
-    } else if (viewName === 'study') {
+    } else if (STUDY_KIND_BY_VIEW[viewName]) {
       renderStudyView();
     }
   }
@@ -809,18 +862,22 @@
       if (a.completed) completedByDate[key].push(a.title.toLowerCase());
     });
 
-    // Los entrenos del módulo de ejercicio cuentan como "ejercicio" hecho ese día.
-    const workoutMinutesByDate = {};
-    loadWorkouts().filter(w => w && !w.deleted_at && w.date).forEach(w => {
-      if (!completedByDate[w.date]) completedByDate[w.date] = [];
-      if (!allByDate[w.date]) allByDate[w.date] = [];
-      completedByDate[w.date].push('ejercicio');
-      allByDate[w.date].push('ejercicio');
-      workoutMinutesByDate[w.date] = (workoutMinutesByDate[w.date] || 0) + (Number(w.duration_minutes) || 30);
-    });
+    // Lo que se hace en la app marca la matriz sola: sesiones de enfoque terminadas (estudio,
+    // Capital Laboral, lectura) en la fila de su materia, y entrenos completos en "Ejercicio".
+    const linked = (typeof MatrixCore !== 'undefined')
+      ? MatrixCore.linkedMinutes({
+          rows: diarioRows,
+          subjects: loadSubjects(),
+          sessions: loadFocusSessions(),
+          workouts: loadWorkouts(),
+          routines: loadWorkoutRoutines(),
+        }, toDateStr)
+      : {};
+    const linkedMins = (dateStr, rowLabel) => (linked[dateStr] && linked[dateStr][rowLabel]) || 0;
 
     // Helper to check if a row's keywords match any activity title on a given date
-    function isDone(dateStr, rowKeys) {
+    function isDone(dateStr, rowKeys, rowLabel) {
+      if (linkedMins(dateStr, rowLabel) > 0) return true;
       const done = completedByDate[dateStr] || [];
       return rowKeys.some(k => done.some(t => t.includes(k)));
     }
@@ -837,19 +894,18 @@
       const all = allByDate[dateStr] || [];
       return rowKeys.some(k => all.some(t => t.includes(k)));
     }
-    function getDoneLevel(dateStr, rowKeys) {
+    function getDoneLevel(dateStr, rowKeys, rowLabel) {
       const matchingActs = activities.filter(a =>
         a.date === dateStr &&
         !a.deleted_at &&
         a.completed &&
         rowKeys.some(k => a.title.toLowerCase().includes(k))
       );
+      const extraMins = linkedMins(dateStr, rowLabel);
       if (matchingActs.length === 0) {
-        const wMins = rowKeys.includes('ejercicio') ? (workoutMinutesByDate[dateStr] || 0) : 0;
-        if (!wMins) return 0;
-        return wMins >= 120 ? 3 : wMins >= 60 ? 2 : 1;
+        return (typeof MatrixCore !== 'undefined') ? MatrixCore.levelForMinutes(extraMins) : 0;
       }
-      let totalMins = 0;
+      let totalMins = extraMins;
       matchingActs.forEach(a => {
         if (a.startTime && a.endTime) {
           const [sh, sm] = a.startTime.split(':').map(Number);
@@ -890,7 +946,7 @@
         const monthName = MONTHS_ES[dateObj.getMonth()].substring(0, 3).toLowerCase();
         const isFuture = dateStr > todayStr();
         const isToday  = dateStr === todayStr();
-        const done = isDone(dateStr, row.keys);
+        const done = isDone(dateStr, row.keys, row.label);
         const missed = !done && isRowMissed(dateStr, row.keys);
         const has = hasAct(dateStr, row.keys);
         const pending = !done && !missed && has;
@@ -899,7 +955,7 @@
         let statusText = 'sin actividad';
 
         if (done) {
-          const lvl = getDoneLevel(dateStr, row.keys);
+          const lvl = getDoneLevel(dateStr, row.keys, row.label);
           cls += ` done lvl-${lvl}`;
           statusText = 'realizada';
         } else if (missed) {
@@ -949,7 +1005,11 @@
 
         if (matching) {
           matching.completed = !matching.completed;
+          matching.updated_at = new Date().toISOString();
+          matching.base_version = matching.version || 1;
+          matching.version = (matching.version || 1) + 1;
           saveActivities(activities);
+          enqueueChange({ ...matching, collection: 'activities' });
           renderDiarioGrid();
           renderDashboard_stats();
           renderActivityList();
@@ -969,10 +1029,13 @@
             description: 'Registrado desde la matriz del ciclo mensual',
             priority: 'medium',
             tags: ['diario'],
-            completed: true
+            completed: true,
+            updated_at: new Date().toISOString(),
+            version: 1
           };
           activities.push(newAct);
           saveActivities(activities);
+          enqueueChange({ ...newAct, collection: 'activities' });
           renderDiarioGrid();
           renderDashboard_stats();
           renderActivityList();
@@ -2982,13 +3045,19 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     focusSessions = loadFocusSessions();
     learningNotes = loadLearningNotes();
 
-    const activeSubjects = subjects.filter(s => s && !s.deleted_at);
+    const meta = kindMeta();
+    const activeSubjects = subjects.filter(s => s && !s.deleted_at && subjectKind(s) === studyKind);
     const visibleSubjects = activeSubjects.filter(s => showArchivedSubjects ? true : !s.archived);
+    // Sesiones de esta sección (las de estudio incluyen las que no tienen materia).
+    const kindIds = new Set(activeSubjects.map(s => s.id));
+    const allSubjectIds = new Set(subjects.filter(s => s && !s.deleted_at).map(s => s.id));
+    const kindSessions = focusSessions.filter(f => f && (kindIds.has(f.subject_id) ||
+      (studyKind === 'study' && (!f.subject_id || !allSubjectIds.has(f.subject_id)))));
 
     // Stats calculations
     const activeNonArchivedCount = activeSubjects.filter(s => !s.archived).length;
     let totalStudySeconds = 0;
-    focusSessions.forEach(f => {
+    kindSessions.forEach(f => {
       if (f && !f.deleted_at) {
         totalStudySeconds += Number(f.effective_seconds) || 0;
       }
@@ -2997,7 +3066,7 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
 
     let todayStudySeconds = 0;
     if (typeof StatsCore !== 'undefined' && StatsCore.aggregateDailyTotals) {
-      const dMap = StatsCore.aggregateDailyTotals(focusSessions);
+      const dMap = StatsCore.aggregateDailyTotals(kindSessions);
       const todayStr = new Date().toISOString().slice(0, 10);
       todayStudySeconds = (dMap[todayStr] && dMap[todayStr].effective_seconds) || 0;
     }
@@ -3025,19 +3094,19 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     if (visibleSubjects.length === 0) {
       grid.innerHTML = `
         <div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px dashed var(--border-medium);">
-          <span class="material-icons-round" style="font-size: 48px; color: var(--text-muted); margin-bottom: 12px;">school</span>
-          <h3 style="font-size: 1.1rem; color: var(--text-primary); margin-bottom: 6px;">No tienes materias ${showArchivedSubjects ? '' : 'activas'}</h3>
+          <span class="material-icons-round" style="font-size: 48px; color: var(--text-muted); margin-bottom: 12px;">${meta.icon}</span>
+          <h3 style="font-size: 1.1rem; color: var(--text-primary); margin-bottom: 6px;">${escHTML(meta.empty)}${studyKind === 'study' && !showArchivedSubjects ? ' activas' : ''}</h3>
           <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 20px; max-width: 400px; margin-left: auto; margin-right: auto;">
-            Crea tu primera materia o usa las sugerencias preconfiguradas para empezar a organizar tu estudio.
+            ${escHTML(meta.emptyHint)}
           </p>
           <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-            <button class="btn-outline btn-touch-target" id="btn-empty-seed" style="gap: 6px; padding: 0 14px;">
+            ${studyKind === 'study' ? `<button class="btn-outline btn-touch-target" id="btn-empty-seed" style="gap: 6px; padding: 0 14px;">
               <span class="material-icons-round">auto_awesome</span>
               <span>Cargar sugeridas</span>
-            </button>
+            </button>` : ''}
             <button class="btn-primary btn-touch-target" id="btn-empty-add" style="gap: 6px; padding: 0 16px;">
               <span class="material-icons-round">add</span>
-              <span>Crear Materia</span>
+              <span>${escHTML(meta.add)}</span>
             </button>
           </div>
         </div>
@@ -3073,17 +3142,18 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
               <div>
                 <h4 class="subject-card-title">${escHTML(sub.name || 'Sin título')}</h4>
                 ${isArchived ? '<span style="font-size: 0.7rem; color: var(--accent-amber); font-weight: 600;">(Archivada)</span>' : ''}
+                ${(() => { const r = typeof MatrixCore !== 'undefined' ? MatrixCore.rowForSubject(sub, diarioRows) : null; return r ? `<span class="subject-matrix-tag" title="Marca esta fila de la matriz al terminar una sesión"><span class="material-icons-round">grid_on</span>${escHTML(r.label)}</span>` : ''; })()}
               </div>
             </div>
           </div>
 
           <div class="subject-card-metrics">
             <div>
-              <div class="subject-metric-label">Tiempo estudiado</div>
+              <div class="subject-metric-label">${escHTML(meta.timeLabel)}</div>
               <div class="subject-metric-value">${summary.total_hours}h</div>
             </div>
             <div>
-              <div class="subject-metric-label">Temas / Sesiones</div>
+              <div class="subject-metric-label">${escHTML(meta.topics)} / Sesiones</div>
               <div class="subject-metric-value">${summary.topic_count} / ${summary.session_count}</div>
             </div>
           </div>
@@ -3103,7 +3173,7 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
           <div class="subject-card-actions">
             <button class="btn-outline btn-touch-target" data-action="detail" data-id="${escHTML(sub.id)}" style="gap: 4px; padding: 0 12px; font-size: 0.85rem;">
               <span class="material-icons-round" style="font-size: 18px;">list_alt</span>
-              <span>Temas</span>
+              <span>${escHTML(meta.topics)}</span>
             </button>
             <div style="display: flex; gap: 4px;">
               <button class="topbar-btn btn-touch-target" data-action="edit" data-id="${escHTML(sub.id)}" title="Editar materia">
@@ -3170,26 +3240,35 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     const iconInput = $('#subject-icon-input');
     const goalInput = $('#subject-goal-input');
     const errorsDiv = $('#subject-form-errors');
-
+    const rowInput = $('#subject-matrix-row-input');
+    const meta = kindMeta();
     if (errorsDiv) {
       errorsDiv.textContent = '';
       errorsDiv.style.display = 'none';
     }
-
+    if (nameInput) nameInput.placeholder = meta.placeholder;
+    if (rowInput) {
+      rowInput.innerHTML = '<option value="">Automático (por nombre)</option>' +
+        diarioRows.map(r => `<option value="${escHTML(r.label)}">${escHTML(r.label)}</option>`).join('');
+      const existing = subjectId ? subjects.find(s => s.id === subjectId) : null;
+      const wanted = existing ? (existing.matrix_row || '') : meta.defaultRow;
+      const match = wanted && typeof MatrixCore !== 'undefined' ? MatrixCore.findRowByLabel(diarioRows, wanted) : null;
+      rowInput.value = match ? match.label : '';
+    }
     if (subjectId) {
       const sub = subjects.find(s => s.id === subjectId);
       if (sub) {
-        if (titleEl) titleEl.textContent = 'Editar Materia';
+        if (titleEl) titleEl.textContent = STUDY_KIND_META[subjectKind(sub)].edit;
         if (idInput) idInput.value = sub.id;
         if (nameInput) nameInput.value = sub.name || '';
         if (iconInput) iconInput.value = sub.icon || 'school';
         if (goalInput) goalInput.value = sub.weekly_goal_minutes !== undefined ? sub.weekly_goal_minutes : 180;
       }
     } else {
-      if (titleEl) titleEl.textContent = 'Nueva Materia';
+      if (titleEl) titleEl.textContent = meta.add;
       if (idInput) idInput.value = '';
       if (nameInput) nameInput.value = '';
-      if (iconInput) iconInput.value = 'school';
+      if (iconInput) iconInput.value = meta.defaultIcon;
       if (goalInput) goalInput.value = '180';
     }
 
@@ -3215,7 +3294,7 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     const color = (previous && previous.color) || '#F5B82E';
     const icon = iconInput ? iconInput.value : 'school';
     const weeklyGoal = goalInput ? parseInt(goalInput.value, 10) : 0;
-
+    const matrixRow = $('#subject-matrix-row-input')?.value || '';
     const data = {
       name,
       color,
@@ -3248,13 +3327,15 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
           color: data.color,
           icon: data.icon,
           weekly_goal_minutes: data.weekly_goal_minutes,
+          kind: subjectKind(existing),
+          matrix_row: matrixRow,
           updated_at: now,
           base_version: existing.version || 1
         };
         subjects[idx] = updated;
         saveSubjects(subjects);
         enqueueChange({ ...updated, collection: 'subjects' });
-        showToast('Materia actualizada ✓');
+        showToast('Cambios guardados ✓');
       }
     } else {
       const newSub = {
@@ -3263,6 +3344,8 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
         color: data.color,
         icon: data.icon,
         weekly_goal_minutes: data.weekly_goal_minutes,
+        kind: studyKind,
+        matrix_row: matrixRow,
         archived: 0,
         version: 1,
         created_at: now,
@@ -3272,7 +3355,7 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
       subjects.push(newSub);
       saveSubjects(subjects);
       enqueueChange({ ...newSub, collection: 'subjects' });
-      showToast('Materia creada ✓');
+      showToast(`"${data.name}" creado ✓`);
     }
 
     closeSubjectModal();
@@ -4155,9 +4238,12 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     const subSelect = $('#focus-subject-select');
     if (subSelect) {
       const activeSubs = subjects.filter(s => s && !s.deleted_at && !s.archived);
+      const groups = [['study', 'Estudio'], ['skill', 'Capital Laboral'], ['book', 'Lectura']];
       subSelect.innerHTML = '<option value="">-- Sin materia asignada --</option>' +
-        activeSubs.map(s => `<option value="${escHTML(s.id)}">${escHTML(s.name)}</option>`).join('');
-
+        groups.map(([k, label]) => {
+          const list = activeSubs.filter(s => subjectKind(s) === k);
+          return list.length ? `<optgroup label="${label}">${list.map(s => `<option value="${escHTML(s.id)}">${escHTML(s.name)}</option>`).join('')}</optgroup>` : '';
+        }).join('');
       if (presetData.subject_id) {
         subSelect.value = presetData.subject_id;
       }
@@ -4587,10 +4673,39 @@ ${nextStepEscaped ? `## Próximo paso\n${nextStepEscaped}\n` : ''}
     renderMeditationClock();
   }
 
+  // Meditación completa → la fila "Meditar" de la matriz queda hecha (como actividad, para que se sincronice).
+  function markMeditationInMatrix(startMs, endMs) {
+    const row = diarioRows.find(r => r.keys.some(k => k.includes('medit'))) || MatrixCore.findRowByLabel(diarioRows, 'Meditar');
+    if (!row) return;
+    const hhmm = ms => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+    const today = todayStr();
+    const nowIso = new Date().toISOString();
+    activities = loadActivities();
+    const planned = activities.find(a => a && !a.deleted_at && a.date === today && !a.completed &&
+      row.keys.some(k => (a.title || '').toLowerCase().includes(k)));
+    if (planned) {
+      Object.assign(planned, { completed: true, updated_at: nowIso, base_version: planned.version || 1, version: (planned.version || 1) + 1 });
+      saveActivities(activities);
+      enqueueChange({ ...planned, collection: 'activities' });
+    } else {
+      const act = {
+        id: uid(), title: row.label, date: today, startTime: hhmm(startMs), endTime: hhmm(endMs),
+        description: 'Registrado al completar una meditación', priority: 'medium', tags: ['meditacion'],
+        completed: true, updated_at: nowIso, version: 1,
+      };
+      activities.push(act);
+      saveActivities(activities);
+      enqueueChange({ ...act, collection: 'activities' });
+    }
+    renderDiarioGrid();
+    syncWithBackend();
+  }
+
   // completed = se agotó el tiempo; si no, el usuario la terminó antes (cuenta lo meditado).
   function finishMeditation(completed) {
     if (!meditation) return;
     const minutes = MeditationCore.elapsedMs(meditation) / 60000;
+    if (completed) markMeditationInMatrix(Date.now() - meditation.durationMs, Date.now());
     meditation = null;
     saveMeditation();
     clearInterval(meditationTicker);
@@ -6774,6 +6889,7 @@ SIEMPRE devuelve un JSON válido.
           ${prog.total ? `<span class="note-progress ${prog.complete ? 'is-complete' : ''}">${prog.done}/${prog.total}</span>` : ''}
           ${(n.tags || []).map(t => `<span class="note-tag">#${escHTML(t)}</span>`).join('')}
           ${n.date ? `<span class="note-date"><span class="material-icons-round">event</span>${escHTML(n.date)}</span>` : ''}
+          ${(() => { const b = NotesCore.backlinks(activeNotes(), n).length; return b ? `<span class="note-backlinks" title="Apuntes que enlazan aquí"><span class="material-icons-round">link</span>${b}</span>` : ''; })()}
         </div>
       </article>`;
   }
@@ -6830,7 +6946,7 @@ SIEMPRE devuelve un JSON válido.
     label.textContent = n ? `Apuntes de hoy (${n})` : 'Apuntes de hoy';
   }
 
-  function openNoteEditor(noteId = null, presetDate = '') {
+  function openNoteEditor(noteId = null, presetDate = '', presetTitle = '') {
     const note = noteId ? activeNotes().find(n => n.id === noteId) : null;
     noteEditing = {
       id: note ? note.id : null,
@@ -6838,7 +6954,7 @@ SIEMPRE devuelve un JSON válido.
       pinned: note ? !!note.pinned : false
     };
     $('#note-editor-heading').textContent = note ? 'Editar apunte' : 'Nuevo apunte';
-    $('#note-editor-title').value = note ? note.title || '' : '';
+    $('#note-editor-title').value = note ? note.title || '' : presetTitle;
     $('#note-editor-content').value = note ? note.content || '' : '';
     $('#note-editor-tags').value = note ? (note.tags || []).join(', ') : (notesFilter.tag || '');
     $('#note-editor-date').value = note ? note.date || '' : (presetDate || notesFilter.date || '');
@@ -6847,8 +6963,90 @@ SIEMPRE devuelve un JSON válido.
     $('#note-editor-errors').hidden = true;
     renderNotePin();
     renderNoteChecklist();
+    hideLinkSuggest();
+    renderNoteConnections();
     $('#note-editor-overlay').classList.add('open');
     setTimeout(() => (note ? $('#note-editor-content') : $('#note-editor-title')).focus(), 50);
+  }
+
+  // ── Segundo cerebro: [[enlaces]] entre apuntes, sugerencias y backlinks ──
+  function renderNoteConnections() {
+    const box = $('#note-connections');
+    if (!box || !noteEditing || typeof NotesCore === 'undefined') return;
+    const all = activeNotes();
+    const links = NotesCore.extractLinks($('#note-editor-content').value);
+    const title = $('#note-editor-title').value.trim();
+    const back = title ? NotesCore.backlinks(all, { id: noteEditing.id, title }) : [];
+    box.hidden = !links.length && !back.length;
+    if (box.hidden) { box.innerHTML = ''; return; }
+    const chip = (label, attrs, icon, missing) =>
+      `<button type="button" class="note-link-chip ${missing ? 'is-missing' : ''}" ${attrs}><span class="material-icons-round">${icon}</span>${escHTML(label)}</button>`;
+    box.innerHTML = `
+      ${links.length ? `<div class="note-conn-group"><span class="note-conn-label">Enlaza a</span>${links.map(t => {
+        const target = NotesCore.findByTitle(all, t);
+        return chip(t, `data-link-title="${escHTML(t)}" title="${target ? 'Abrir apunte' : 'Aún no existe: pulsa para crearlo'}"`, target ? 'north_east' : 'add', !target);
+      }).join('')}</div>` : ''}
+      ${back.length ? `<div class="note-conn-group"><span class="note-conn-label">Mencionado en</span>${back.map(n =>
+        chip(n.title || 'Sin título', `data-backlink-id="${escHTML(n.id)}"`, 'subdirectory_arrow_left', false)).join('')}</div>` : ''}`;
+  }
+
+  // Guarda lo que se está escribiendo (si hay algo) y abre otro apunte, o lo crea con ese título.
+  function followNoteLink({ title = '', noteId = null }) {
+    const content = $('#note-editor-content').value;
+    const hasContent = $('#note-editor-title').value.trim() || content.trim() || (noteEditing && noteEditing.checklist.length);
+    if (hasContent) saveNoteFromEditor();
+    else { $('#note-editor-overlay').classList.remove('open'); noteEditing = null; }
+    const target = noteId ? activeNotes().find(n => n.id === noteId) : NotesCore.findByTitle(activeNotes(), title);
+    setTimeout(() => (target ? openNoteEditor(target.id) : openNoteEditor(null, '', title)), 60);
+  }
+
+  let linkSuggestState = null;
+  function hideLinkSuggest() {
+    const box = $('#note-link-suggest');
+    if (box) { box.hidden = true; box.innerHTML = ''; }
+    linkSuggestState = null;
+  }
+
+  // Al escribir "[[algo" se proponen títulos de otros apuntes.
+  function updateLinkSuggest() {
+    const ta = $('#note-editor-content');
+    const box = $('#note-link-suggest');
+    if (!ta || !box || !noteEditing) return;
+    const before = ta.value.slice(0, ta.selectionStart);
+    const m = before.match(/\[\[([^\[\]\n|]*)$/);
+    if (!m) { hideLinkSuggest(); return; }
+    const query = m[1];
+    const options = NotesCore.suggestTitles(activeNotes(), query, { excludeId: noteEditing.id });
+    if (query.trim() && !options.some(t => NotesCore.fold(t) === NotesCore.fold(query))) options.push(query.trim());
+    if (!options.length) { hideLinkSuggest(); return; }
+    linkSuggestState = { start: before.length - query.length, end: ta.selectionStart, options, active: 0 };
+    renderLinkSuggest();
+  }
+
+  function renderLinkSuggest() {
+    const box = $('#note-link-suggest');
+    if (!box || !linkSuggestState) return;
+    const existing = new Set(activeNotes().map(n => NotesCore.fold(n.title)));
+    box.innerHTML = linkSuggestState.options.map((t, i) => `
+      <button type="button" class="note-suggest-item ${i === linkSuggestState.active ? 'is-active' : ''}" data-suggest="${i}" role="option">
+        <span class="material-icons-round">${existing.has(NotesCore.fold(t)) ? 'sticky_note_2' : 'add'}</span>
+        ${existing.has(NotesCore.fold(t)) ? escHTML(t) : `Nuevo: ${escHTML(t)}`}
+      </button>`).join('');
+    box.hidden = false;
+  }
+
+  function applyLinkSuggestion(i) {
+    const ta = $('#note-editor-content');
+    if (!ta || !linkSuggestState) return;
+    const title = linkSuggestState.options[i];
+    const { start, end } = linkSuggestState;
+    const after = ta.value.slice(end).startsWith(']]') ? ta.value.slice(end + 2) : ta.value.slice(end);
+    ta.value = ta.value.slice(0, start) + title + ']]' + after;
+    const caret = start + title.length + 2;
+    ta.setSelectionRange(caret, caret);
+    ta.focus();
+    hideLinkSuggest();
+    renderNoteConnections();
   }
 
   function renderNotePin() {
@@ -7003,6 +7201,44 @@ SIEMPRE devuelve un JSON válido.
         noteEditing.checklist.splice(i, 1);
         renderNoteChecklist();
       }
+    });
+    const noteContent = $('#note-editor-content');
+    let connTimer = null;
+    noteContent?.addEventListener('input', () => {
+      updateLinkSuggest();
+      clearTimeout(connTimer);
+      connTimer = setTimeout(renderNoteConnections, 250);
+    });
+    noteContent?.addEventListener('click', updateLinkSuggest);
+    noteContent?.addEventListener('blur', () => setTimeout(hideLinkSuggest, 150));
+    noteContent?.addEventListener('keydown', (e) => {
+      if (!linkSuggestState) return;
+      const n = linkSuggestState.options.length;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        linkSuggestState.active = (linkSuggestState.active + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+        renderLinkSuggest();
+      } else if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        applyLinkSuggestion(linkSuggestState.active);
+      } else if (e.key === 'Escape') {
+        e.stopPropagation();
+        hideLinkSuggest();
+      }
+    });
+    // mousedown (no click) para que el textarea no pierda el foco antes de insertar.
+    $('#note-link-suggest')?.addEventListener('mousedown', (e) => {
+      const item = e.target.closest('[data-suggest]');
+      if (!item) return;
+      e.preventDefault();
+      applyLinkSuggestion(Number(item.dataset.suggest));
+    });
+    $('#note-editor-title')?.addEventListener('input', () => { clearTimeout(connTimer); connTimer = setTimeout(renderNoteConnections, 250); });
+    $('#note-connections')?.addEventListener('click', (e) => {
+      const link = e.target.closest('[data-link-title]');
+      if (link) { followNoteLink({ title: link.dataset.linkTitle }); return; }
+      const back = e.target.closest('[data-backlink-id]');
+      if (back) followNoteLink({ noteId: back.dataset.backlinkId });
     });
     $('#note-editor-pin')?.addEventListener('click', () => { noteEditing.pinned = !noteEditing.pinned; renderNotePin(); });
     $('#note-editor-save')?.addEventListener('click', saveNoteFromEditor);

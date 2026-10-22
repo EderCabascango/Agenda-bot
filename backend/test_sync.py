@@ -1465,3 +1465,36 @@ def test_new_device_full_pull_receives_all_server_data():
     other = {"Authorization": f"Bearer {issue_session('otro_usuario_nd')['token']}"}
     other_data = client.post("/sync", json=new_device, headers=other).json()
     assert all(not r["changes"] for r in other_data["results"].values())
+
+
+def test_subject_kind_and_matrix_row_roundtrip():
+    """Materias con tipo (estudio / habilidad / libro) y fila de la matriz vinculada."""
+    user = "user_subject_kind"
+    db.sync_collections(user, {"subjects": [
+        {"id": "sk1", "name": "Python", "kind": "skill", "matrix_row": "Fuyu"},
+        {"id": "bk1", "name": "Hábitos atómicos", "kind": "book", "matrix_row": "Leer"},
+        {"id": "st1", "name": "Spark"},
+    ]})
+    res = db.sync_collections(user, {"subjects": []}, full_pull=True)
+    subs = {s["id"]: s for s in res["results"]["subjects"]["changes"]}
+    assert subs["sk1"]["kind"] == "skill" and subs["sk1"]["matrix_row"] == "Fuyu"
+    assert subs["bk1"]["kind"] == "book" and subs["bk1"]["matrix_row"] == "Leer"
+    assert subs["st1"]["kind"] == "study" and subs["st1"]["matrix_row"] == ""
+
+
+def test_old_subjects_table_gets_kind_columns(tmp_path):
+    """Una base anterior (sin kind/matrix_row) se migra al abrirla."""
+    path = str(tmp_path / "vieja_subjects.db")
+    conn = sqlite3.connect(path)
+    conn.execute("""CREATE TABLE subjects (user_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL,
+        color TEXT DEFAULT '#5B6FA0', icon TEXT DEFAULT 'book', weekly_goal_minutes INTEGER DEFAULT 0,
+        archived INTEGER DEFAULT 0, created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '',
+        deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1, PRIMARY KEY (user_id, id))""")
+    conn.execute("INSERT INTO subjects (user_id, id, name, updated_at) VALUES ('u', 's', 'Vieja', '2026-01-01T00:00:00Z')")
+    conn.commit()
+    conn.close()
+    with db._conn(path) as c:
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(subjects)").fetchall()}
+        row = c.execute("SELECT kind, matrix_row FROM subjects WHERE id='s'").fetchone()
+    assert {"kind", "matrix_row"} <= cols
+    assert row["kind"] == "study" and row["matrix_row"] == ""

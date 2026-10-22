@@ -164,10 +164,18 @@ def _migrate_schema_if_needed(conn: sqlite3.Connection, db_path: str):
                 user_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL,
                 color TEXT DEFAULT '#5B6FA0', icon TEXT DEFAULT 'book',
                 weekly_goal_minutes INTEGER DEFAULT 0, archived INTEGER DEFAULT 0,
+                kind TEXT DEFAULT 'study', matrix_row TEXT DEFAULT '',
                 created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '', deleted_at TEXT DEFAULT NULL, version INTEGER DEFAULT 1,
                 PRIMARY KEY (user_id, id))"""
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_subjects_user_sync ON subjects (user_id, updated_at)")
+    else:
+        # Tipo (estudio / habilidad de Capital Laboral / libro) y fila de la matriz que marca.
+        subject_cols = {row["name"] for row in conn.execute("PRAGMA table_info(subjects)").fetchall()}
+        if "kind" not in subject_cols:
+            conn.execute("ALTER TABLE subjects ADD COLUMN kind TEXT DEFAULT 'study'")
+        if "matrix_row" not in subject_cols:
+            conn.execute("ALTER TABLE subjects ADD COLUMN matrix_row TEXT DEFAULT ''")
 
     # 3. Topics
     if "topics" not in existing_tables:
@@ -312,6 +320,8 @@ COLLECTION_SCHEMAS = {
             "icon": {"type": str, "max_length": 50, "default": "book", "sql_col": "icon"},
             "weekly_goal_minutes": {"type": int, "min_val": 0, "default": 0, "sql_col": "weekly_goal_minutes"},
             "archived": {"type": bool, "default": False, "sql_col": "archived", "serialize": lambda v: int(bool(v)), "deserialize": lambda v: bool(v)},
+            "kind": {"type": str, "enum": ["study", "skill", "book"], "default": "study", "sql_col": "kind"},
+            "matrix_row": {"type": str, "max_length": 100, "default": "", "sql_col": "matrix_row"},
         },
         "order_by": "name ASC"
     },
