@@ -6201,7 +6201,10 @@ SIEMPRE devuelve un JSON válido.
               <button type="button" class="btn-icon material-icons-round" data-remove-set="${si}" aria-label="Quitar serie">close</button>
             </div>`).join('')}
         </div>
-        ${ex.measure !== 'cardio' ? `<button type="button" class="btn-text" data-add-set="${ei}">+ Serie</button>` : ''}
+        ${ex.measure !== 'cardio' ? `<div class="workout-exercise-foot">
+          <button type="button" class="btn-text" data-add-set="${ei}">+ Serie</button>
+          <label class="routine-rest"><span class="material-icons-round" aria-hidden="true">hourglass_bottom</span><input type="number" inputmode="numeric" min="0" max="600" step="5" data-field="rest_seconds" value="${ex.rest_seconds == null ? WorkoutCore.DEFAULT_REST_SECONDS : Number(ex.rest_seconds)}" aria-label="Descanso entre series en segundos" /> s desc. entre series</label>
+        </div>` : ''}
       </div>`).join('');
   }
 
@@ -6679,6 +6682,7 @@ SIEMPRE devuelve un JSON válido.
     $$('[data-workout-tab]').forEach(btn => btn.addEventListener('click', () => { workoutTab = btn.dataset.workoutTab; renderWorkoutView(); }));
     $('#btn-workout-free')?.addEventListener('click', () => openWorkoutModal({ routineId: null, activityId: null }));
     $('#btn-new-routine')?.addEventListener('click', () => openRoutineEditor(null));
+    $('#btn-train-new-routine')?.addEventListener('click', () => openRoutineEditor(null));
     $('#btn-load-plan')?.addEventListener('click', loadSuggestedPlan);
     $('#workout-progress-exercise')?.addEventListener('change', (e) => { workoutProgressExercise = e.target.value; renderWorkoutProgress(); });
 
@@ -6719,6 +6723,7 @@ SIEMPRE devuelve un JSON válido.
           else st[field] = Number(e.target.value) || 0;
           st.done = true;
         } else if (field === 'name') ex.name = e.target.value;
+        else if (field === 'rest_seconds') ex.rest_seconds = Math.min(600, Math.max(0, Number(e.target.value) || 0));
       });
     });
     exBox?.addEventListener('change', (e) => {

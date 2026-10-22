@@ -173,6 +173,23 @@ def run():
             assert '0.85 km' in page.text_content('#workout-week-summary')
             print("  [OK] Cambiar el día por correr: cardio de 5 min y 0.85 km guardado y en el resumen.")
 
+            # ── 7. "Crear rutina" en Entrenar y descanso editable en el entreno libre ──
+            page.click('#btn-train-new-routine')
+            page.wait_for_selector('#routine-editor-overlay.open')
+            assert page.text_content('#routine-editor-title') == 'Nueva rutina'
+            page.click('#routine-editor-cancel')
+            page.click('#btn-workout-free')
+            page.wait_for_selector('#workout-overlay.open')
+            page.click('[data-workout-mode="table"]')
+            page.fill('#workout-exercises .workout-ex-name', 'Flexiones')
+            page.click('[data-add-set="0"]')
+            page.fill('#workout-exercises [data-field="rest_seconds"]', '90')
+            page.click('[data-workout-mode="guided"]')
+            assert '90s desc.' in page.text_content('#workout-guided')
+            draft = page.evaluate("() => JSON.parse(localStorage.getItem('diary_workout_draft'))")
+            assert draft['exercises'][0]['rest_seconds'] == 90
+            print("  [OK] Botón 'Crear rutina' en Entrenar y descanso entre series editable en el entreno libre (90 s).")
+
             browser.close()
             print("Plan semanal y entreno guiado: verificación PASSED 100%!")
     finally:
