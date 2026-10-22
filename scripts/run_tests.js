@@ -68,6 +68,11 @@ const steps = [
     args: ['--test', path.join(ROOT_DIR, 'web/test_matrix_core.js')]
   },
   {
+    name: '1.f4 Tests Unitarios Frontend (GraphCore)',
+    cmd: process.execPath,
+    args: ['--test', path.join(ROOT_DIR, 'web/test_graph_core.js')]
+  },
+  {
     name: '1.g Tests Unitarios Frontend (NotesCore)',
     cmd: process.execPath,
     args: ['--test', path.join(ROOT_DIR, 'web/test_notes_core.js')]

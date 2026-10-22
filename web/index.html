@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:8000 https://*.ts.net https://agenda-bot-omega.vercel.app;" />
   <link rel="stylesheet" href="fonts/material-icons-round.css" />
-  <link rel="stylesheet" href="style.css?v=16" />
+  <link rel="stylesheet" href="style.css?v=17" />
 </head>
 <body>
 
@@ -499,6 +499,14 @@
               <span class="material-icons-round">add</span> Nuevo apunte
             </button>
           </div>
+          <div class="notes-mode" role="tablist" aria-label="Cómo ver los apuntes">
+            <button type="button" class="notes-mode-btn" data-notes-mode="list" role="tab">
+              <span class="material-icons-round" aria-hidden="true">grid_view</span> Lista
+            </button>
+            <button type="button" class="notes-mode-btn" data-notes-mode="graph" role="tab">
+              <span class="material-icons-round" aria-hidden="true">hub</span> Grafo
+            </button>
+          </div>
           <div class="notes-toolbar">
             <label class="notes-search">
               <span class="material-icons-round" aria-hidden="true">search</span>
@@ -513,6 +521,20 @@
           <div class="notes-tags" id="notes-tags"></div>
           <p class="workout-muted" id="notes-filter-info" hidden></p>
           <div class="notes-grid" id="notes-list"></div>
+          <div class="notes-graph" id="notes-graph" hidden>
+            <div class="notes-graph-tools">
+              <label class="meditate-toggle">
+                <input type="checkbox" id="notes-graph-orphans" checked />
+                <span>Mostrar apuntes sin enlaces</span>
+              </label>
+              <button type="button" class="btn-outline" id="notes-graph-fit">
+                <span class="material-icons-round" aria-hidden="true">fit_screen</span> Encuadrar
+              </button>
+            </div>
+            <svg class="notes-graph-svg" id="notes-graph-svg" role="group" aria-label="Grafo de apuntes y sus enlaces"></svg>
+            <p class="notes-graph-empty" id="notes-graph-empty" hidden>Aún no hay apuntes. Crea algunos y enlázalos con [[Título]] para ver cómo se conectan.</p>
+            <p class="notes-graph-hint">Toca un punto para abrir el apunte · arrastra para mover · rueda o pellizco para acercar · los puntos con borde discontinuo son apuntes por crear</p>
+          </div>
         </section>
 
         <section class="view" id="view-meditate">
@@ -1799,8 +1821,9 @@
   <script src="ambient-core.js?v=2"></script>
   <script src="meditation-core.js?v=1"></script>
   <script src="matrix-core.js?v=1"></script>
+  <script src="graph-core.js?v=2"></script>
   <script src="workout-core.js?v=2"></script>
   <script src="notes-core.js?v=2"></script>
-  <script src="app.js?v=20"></script>
+  <script src="app.js?v=21"></script>
 </body>
 </html>

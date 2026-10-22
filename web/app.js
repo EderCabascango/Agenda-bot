@@ -6894,8 +6894,251 @@ SIEMPRE devuelve un JSON válido.
       </article>`;
   }
 
+  // ── Segundo cerebro: grafo de apuntes ──
+  const NOTES_MODE_KEY = 'diary_notes_mode';
+  let notesMode = (safeStorageGet(NOTES_MODE_KEY, null) || {}).mode === 'graph' ? 'graph' : 'list';
+  let graphState = null;   // simulación (GraphCore)
+  let graphView = { x: 0, y: 0, k: 1 };
+  let graphRaf = null;
+  let graphDom = null;     // { svg, viewport, lines, nodes }
+  let graphNeedsFit = true;
+
+  function setNotesMode(mode) {
+    notesMode = mode === 'graph' ? 'graph' : 'list';
+    safeStorageSet(NOTES_MODE_KEY, { mode: notesMode });
+    graphNeedsFit = true;
+    renderNotesView();
+  }
+
+  function applyNotesModeChrome() {
+    $$('[data-notes-mode]').forEach(b => {
+      const on = b.dataset.notesMode === notesMode;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    const list = $('#notes-list');
+    const graph = $('#notes-graph');
+    if (list) list.hidden = notesMode === 'graph';
+    if (graph) graph.hidden = notesMode !== 'graph';
+    if (notesMode !== 'graph') stopGraphAnimation();
+  }
+
+  function stopGraphAnimation() {
+    if (graphRaf) cancelAnimationFrame(graphRaf);
+    graphRaf = null;
+  }
+
+  function renderNotesGraph() {
+    const svg = $('#notes-graph-svg');
+    if (!svg || typeof GraphCore === 'undefined' || typeof NotesCore === 'undefined') return;
+    if (!svg.clientWidth) return; // pantalla oculta: se dibuja al abrir Apuntes
+    const includeOrphans = $('#notes-graph-orphans')?.checked !== false;
+    const graph = GraphCore.buildGraph(activeNotes(), NotesCore, { includeOrphans });
+    const empty = $('#notes-graph-empty');
+    if (empty) empty.hidden = graph.nodes.length > 0;
+
+    // Conserva las posiciones de los nodos que ya estaban (al guardar un apunte no se "re-baraja" todo).
+    const prev = graphState ? graphState.pos : null;
+    const W = svg.clientWidth || 800;
+    const H = svg.clientHeight || 520;
+    graphState = GraphCore.createLayout(graph, { width: W, height: H, seed: 11 });
+    let reused = 0;
+    if (prev) {
+      graph.nodes.forEach(n => { if (prev[n.id]) { graphState.pos[n.id] = { ...prev[n.id], fixed: false }; reused++; } });
+    }
+    graphState.alpha = reused && reused === graph.nodes.length ? 0.15 : (reused ? 0.5 : 1);
+    GraphCore.run(graphState, reused ? 120 : 320);
+
+    const q = NotesCore.fold(notesFilter.query || '');
+    const tag = notesFilter.tag || '';
+    const matches = n => (!q || NotesCore.fold(n.title).includes(q)) && (!tag || (n.tags || []).includes(tag));
+    const filtering = !!(q || tag);
+
+    svg.innerHTML = `
+      <g class="graph-viewport">
+        <g class="graph-edges">${graph.edges.map(e => `<line data-s="${escHTML(e.source)}" data-t="${escHTML(e.target)}"></line>`).join('')}</g>
+        <g class="graph-nodes">${graph.nodes.map(n => {
+          const r = 5 + Math.min(n.degree, 10) * 1.6;
+          const label = n.title.length > 26 ? n.title.slice(0, 25) + '…' : n.title;
+          const cls = ['graph-node', n.missing ? 'is-missing' : '', n.degree ? '' : 'is-orphan', filtering && !matches(n) ? 'is-faded' : '', filtering && matches(n) ? 'is-match' : ''].join(' ');
+          return `<g class="${cls}" data-node="${escHTML(n.id)}" tabindex="0" role="button" aria-label="${escHTML(n.missing ? `Crear apunte ${n.title}` : `Abrir apunte ${n.title}`)}">
+            <circle r="${r}"></circle><text dy="${r + 13}">${escHTML(label)}</text></g>`;
+        }).join('')}</g>
+      </g>`;
+    graphDom = {
+      svg,
+      viewport: svg.querySelector('.graph-viewport'),
+      lines: [...svg.querySelectorAll('.graph-edges line')],
+      nodes: [...svg.querySelectorAll('.graph-node')],
+      graph,
+    };
+    if (graphNeedsFit || !prev) { fitGraph(); graphNeedsFit = false; }
+    drawGraph();
+    if (graphState.alpha > 0) animateGraph();
+  }
+
+  function drawGraph() {
+    if (!graphDom || !graphState) return;
+    const { pos } = graphState;
+    graphDom.viewport.setAttribute('transform', `translate(${graphView.x.toFixed(1)},${graphView.y.toFixed(1)}) scale(${graphView.k.toFixed(3)})`);
+    graphDom.lines.forEach(l => {
+      const a = pos[l.dataset.s];
+      const b = pos[l.dataset.t];
+      if (!a || !b) return;
+      l.setAttribute('x1', a.x.toFixed(1)); l.setAttribute('y1', a.y.toFixed(1));
+      l.setAttribute('x2', b.x.toFixed(1)); l.setAttribute('y2', b.y.toFixed(1));
+    });
+    graphDom.nodes.forEach(g => {
+      const p = pos[g.dataset.node];
+      if (p) g.setAttribute('transform', `translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
+    });
+  }
+
+  function animateGraph() {
+    if (graphRaf) return;
+    const frame = () => {
+      graphRaf = null;
+      if (!graphState || notesMode !== 'graph') return;
+      GraphCore.step(graphState);
+      GraphCore.step(graphState);
+      drawGraph();
+      if (graphState.alpha > 0) graphRaf = requestAnimationFrame(frame);
+    };
+    graphRaf = requestAnimationFrame(frame);
+  }
+
+  function fitGraph() {
+    const svg = $('#notes-graph-svg');
+    if (!svg || !graphState) return;
+    const W = svg.clientWidth || 800;
+    const H = svg.clientHeight || 520;
+    const b = GraphCore.bounds(graphState, 50);
+    const k = Math.max(0.2, Math.min(2, W / b.w, H / b.h));
+    graphView = { k, x: W / 2 - k * (b.x + b.w / 2), y: H / 2 - k * (b.y + b.h / 2) };
+    drawGraph();
+  }
+
+  function graphPoint(e) {
+    const rect = graphDom.svg.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    return { sx, sy, x: (sx - graphView.x) / graphView.k, y: (sy - graphView.y) / graphView.k };
+  }
+
+  function highlightGraphNode(id) {
+    if (!graphDom) return;
+    const near = id ? GraphCore.neighbors(graphDom.graph, id) : null;
+    graphDom.nodes.forEach(g => g.classList.toggle('is-dim', !!id && g.dataset.node !== id && !near.has(g.dataset.node)));
+    graphDom.lines.forEach(l => l.classList.toggle('is-active', !!id && (l.dataset.s === id || l.dataset.t === id)));
+  }
+
+  function openGraphNode(id) {
+    const node = graphDom && graphDom.graph.nodes.find(n => n.id === id);
+    if (!node) return;
+    if (node.noteId) openNoteEditor(node.noteId);
+    else openNoteEditor(null, '', node.title); // enlace a un apunte que aún no existe: se crea
+  }
+
+  function initNotesGraph() {
+    const svg = $('#notes-graph-svg');
+    if (!svg) return;
+    $$('[data-notes-mode]').forEach(b => b.addEventListener('click', () => setNotesMode(b.dataset.notesMode)));
+    $('#notes-graph-fit')?.addEventListener('click', fitGraph);
+    $('#notes-graph-orphans')?.addEventListener('change', () => { graphNeedsFit = true; renderNotesGraph(); });
+
+    // Puntero: arrastrar un nodo lo mueve; arrastrar el fondo desplaza; dos dedos hacen zoom.
+    const pointers = new Map();
+    let drag = null;
+    let pinch = null;
+    svg.addEventListener('pointerdown', (e) => {
+      if (!graphDom) return;
+      svg.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), k: graphView.k };
+        drag = null;
+        return;
+      }
+      const nodeEl = e.target.closest('[data-node]');
+      const pt = graphPoint(e);
+      if (nodeEl) {
+        const id = nodeEl.dataset.node;
+        const p = graphState.pos[id];
+        drag = { type: 'node', id, startX: e.clientX, startY: e.clientY, moved: false, dx: p.x - pt.x, dy: p.y - pt.y };
+        highlightGraphNode(id);
+      } else {
+        drag = { type: 'pan', startX: e.clientX, startY: e.clientY, vx: graphView.x, vy: graphView.y, moved: false };
+      }
+    });
+    svg.addEventListener('pointermove', (e) => {
+      if (!pointers.has(e.pointerId)) {
+        // Sin botón pulsado: resaltar al pasar el ratón.
+        if (e.pointerType === 'mouse') {
+          const nodeEl = e.target.closest('[data-node]');
+          highlightGraphNode(nodeEl ? nodeEl.dataset.node : null);
+        }
+        return;
+      }
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch && pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        const rect = svg.getBoundingClientRect();
+        zoomGraphAt((a.x + b.x) / 2 - rect.left, (a.y + b.y) / 2 - rect.top, (pinch.k * Math.hypot(a.x - b.x, a.y - b.y) / pinch.dist) / graphView.k);
+        return;
+      }
+      if (!drag) return;
+      if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 4) drag.moved = true;
+      if (drag.type === 'pan') {
+        graphView.x = drag.vx + (e.clientX - drag.startX);
+        graphView.y = drag.vy + (e.clientY - drag.startY);
+        drawGraph();
+      } else if (drag.moved) {
+        const pt = graphPoint(e);
+        const p = graphState.pos[drag.id];
+        Object.assign(p, { x: pt.x + drag.dx, y: pt.y + drag.dy, vx: 0, vy: 0, fixed: true });
+        graphState.alpha = Math.max(graphState.alpha, 0.3);
+        drawGraph();
+        animateGraph();
+      }
+    });
+    const release = (e) => {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+      if (!drag) return;
+      if (drag.type === 'node') {
+        const p = graphState && graphState.pos[drag.id];
+        if (p) p.fixed = false;
+        if (!drag.moved && e.type === 'pointerup') openGraphNode(drag.id);
+        if (e.pointerType !== 'mouse') highlightGraphNode(null);
+      }
+      drag = null;
+    };
+    svg.addEventListener('pointerup', release);
+    svg.addEventListener('pointercancel', release);
+    svg.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse' && !drag) highlightGraphNode(null); });
+    svg.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = svg.getBoundingClientRect();
+      zoomGraphAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+    }, { passive: false });
+    svg.addEventListener('keydown', (e) => {
+      const nodeEl = e.target.closest('[data-node]');
+      if (nodeEl && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openGraphNode(nodeEl.dataset.node); }
+    });
+    window.addEventListener('resize', () => { if (notesMode === 'graph' && $('#view-notes')?.classList.contains('active')) fitGraph(); });
+  }
+
+  function zoomGraphAt(sx, sy, factor) {
+    const k = Math.max(0.2, Math.min(4, graphView.k * factor));
+    const f = k / graphView.k;
+    graphView = { k, x: sx - (sx - graphView.x) * f, y: sy - (sy - graphView.y) * f };
+    drawGraph();
+  }
+
   function renderNotesView() {
     if (typeof NotesCore === 'undefined') return;
+    applyNotesModeChrome();
     const all = activeNotes();
     const tagsEl = $('#notes-tags');
     if (tagsEl) {
@@ -6910,6 +7153,7 @@ SIEMPRE devuelve un JSON válido.
       info.hidden = !notesFilter.date;
       info.innerHTML = notesFilter.date ? `Mostrando los apuntes del ${escHTML(notesFilter.date)} · <button type="button" class="btn-text" data-clear-note-date>ver todos</button>` : '';
     }
+    if (notesMode === 'graph') { renderNotesGraph(); return; }
     const list = $('#notes-list');
     if (!list) return;
     const shown = NotesCore.sortNotes(NotesCore.filterNotes(all, notesFilter));
@@ -7873,6 +8117,7 @@ SIEMPRE devuelve un JSON válido.
     initMeditation();
     initWorkoutModule();
     initNotesModule();
+    initNotesGraph();
     updateFocusUIBadges();
 
     renderProfileUI();

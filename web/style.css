@@ -3147,3 +3147,71 @@ body.is-logged-out > *:not(.login-screen):not(#toast) { display: none !important
   color: var(--text-secondary);
 }
 .note-backlinks .material-icons-round { font-size: 14px; }
+
+/* ── Segundo cerebro: grafo de apuntes ── */
+.notes-mode {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill, 999px);
+}
+.notes-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 16px;
+  border-radius: var(--radius-pill, 999px);
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.notes-mode-btn .material-icons-round { font-size: 18px; }
+.notes-mode-btn.active { background: var(--accent-teal); color: #111; }
+.notes-graph { display: flex; flex-direction: column; gap: 10px; }
+.notes-graph[hidden] { display: none; }
+.notes-graph-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.notes-graph-tools .btn-outline { gap: 6px; }
+.notes-graph-svg {
+  width: 100%;
+  height: min(68vh, 640px);
+  min-height: 360px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+.notes-graph-svg:active { cursor: grabbing; }
+.graph-edges line { stroke: var(--border-medium); stroke-width: 1.4; transition: stroke 0.15s; }
+.graph-edges line.is-active { stroke: var(--accent-teal); stroke-width: 2.2; }
+.graph-node { cursor: pointer; transition: opacity 0.15s; }
+.graph-node circle { fill: var(--accent-teal); stroke: var(--bg-card); stroke-width: 2; }
+.graph-node.is-orphan circle { fill: var(--text-muted); }
+.graph-node.is-missing circle { fill: var(--bg-card); stroke: var(--text-muted); stroke-dasharray: 3 2; stroke-width: 1.6; }
+.graph-node.is-match circle { stroke: var(--text-primary); stroke-width: 2.5; }
+.graph-node text {
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--text-secondary);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--bg-card);
+  stroke-width: 3px;
+  pointer-events: none;
+}
+.graph-node:hover circle, .graph-node:focus-visible circle { stroke: var(--text-primary); stroke-width: 2.5; }
+.graph-node:focus { outline: none; }
+.graph-node.is-dim, .graph-node.is-faded { opacity: 0.18; }
+.notes-graph-empty, .notes-graph-hint { font-size: 0.8rem; color: var(--text-muted); text-align: center; }
+@media (max-width: 640px) {
+  .notes-graph-svg { height: 60vh; min-height: 300px; }
+}
+.notes-grid[hidden] { display: none; }
