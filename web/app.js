@@ -416,6 +416,7 @@
     if (name === 'dashboard') renderDashboard();
     if (name === 'activities') renderActivityList();
     if (name === 'calendar') renderCalendar();
+    if (name === 'schedule') renderScheduleSheetView();
     if (name === 'stats') renderStats();
     if (STUDY_KIND_BY_VIEW[name]) {
       applyStudyKindChrome();
@@ -8269,6 +8270,9 @@ SIEMPRE devuelve un JSON válido.
       });
     }
 
+    // Inicializar Horario Semanal estilo Excel
+    initScheduleSheet();
+
     // Initial render
     switchView('dashboard');
 
@@ -8294,6 +8298,777 @@ SIEMPRE devuelve un JSON válido.
 
     // Auto-refresh the active view every 30 seconds to update missed status
     setInterval(refreshActiveView, 30000);
+  }
+
+  // ── HORARIO SEMANAL TIPO EXCEL (HOJA DE CÁLCULO INTERACTIVA) ──
+  const SCHEDULE_SHEET_KEY = 'diary_weekly_schedule_sheet_v1';
+  const SCHEDULE_COLS = ['hora', 'lun', 'mar', 'mie', 'jue', 'vie', 'sab', 'dom'];
+  const SCHEDULE_COL_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+  const SCHEDULE_DAY_KEYS = ['lun', 'mar', 'mie', 'jue', 'vie', 'sab', 'dom'];
+
+  function getDefaultScheduleSheet() {
+    return {
+      rows: [
+        { hora: '23:00 - 6:30',  lun: 'Dormir',             mar: 'Dormir',             mie: 'Dormir',             jue: 'Dormir',             vie: 'Dormir',             sab: 'Dormir',             dom: 'Dormir',             colors: {} },
+        { hora: '6:30 - 7:30',   lun: 'Calistenia',         mar: 'Correr',             mie: 'Calistenia',         jue: 'Correr',             vie: 'Calistenia',         sab: 'Correr',             dom: 'Dormir',             colors: {} },
+        { hora: '7:30 - 8:00',   lun: 'Desayunar',          mar: 'Desayunar',          mie: 'Desayunar',          jue: 'Desayunar',          vie: 'Desayunar',          sab: 'Desayunar',          dom: 'Desayunar',          colors: { hora: 'meal' } },
+        { hora: '8:00 - 10:00',  lun: 'Ingles',             mar: 'Ingles',             mie: 'Ingles',             jue: 'Ingles',             vie: 'Ingles',             sab: 'Ingles',             dom: 'Libro/Meditar',      colors: {} },
+        { hora: '10:00 - 10:45', lun: 'Buscar Trabajo',     mar: 'Buscar Trabajo',     mie: 'Buscar Trabajo',     jue: 'Buscar Trabajo',     vie: 'Buscar Trabajo',     sab: 'Buscar Trabajo',     dom: 'Libro',              colors: {} },
+        { hora: '10:45 - 11:10', lun: 'Fuyu',               mar: 'Fuyu',               mie: 'Fuyu',               jue: 'Fuyu',               vie: 'Fuyu',               sab: 'Fuyu',               dom: 'Estudiar/Proyectos', colors: {} },
+        { hora: '11:10 - 11:45', lun: 'Fuyu',               mar: 'Fuyu',               mie: 'Fuyu',               jue: 'Fuyu',               vie: 'Benja Recorrido',    sab: 'Fuyu',               dom: 'Estudiar/Proyectos', colors: { sab: 'white' } },
+        { hora: '12:00 - 13:00', lun: 'Fuyu',               mar: 'Fuyu',               mie: 'Fuyu',               jue: 'Fuyu',               vie: 'Entretenimiento',    sab: 'Entretenimiento',    dom: 'Estudiar/Proyectos', colors: {} },
+        { hora: '13:00 - 14:00', lun: 'Almuerzo',           mar: 'Almuerzo',           mie: 'Almuerzo',           jue: 'Almuerzo',           vie: 'Almuerzo',           sab: 'Almuerzo',           dom: 'Almuerzo',           colors: { hora: 'meal' } },
+        { hora: '14:20 - 15:15', lun: 'Benja Recorrido',    mar: 'Benja Recorrido',    mie: 'Benja Recorrido',    jue: 'Benja Recorrido',    vie: 'Benja Recorrido',    sab: 'Entretenimiento',    dom: 'Entretenimiento',    colors: {} },
+        { hora: '15:10 - 15:40', lun: '',                   mar: '',                   mie: '',                   jue: '',                   vie: '',                   sab: 'Estudiar/Proyectos', dom: 'Entretenimiento',    colors: {} },
+        { hora: '15:40 - 16:20', lun: 'Benja Recorrido',    mar: 'Benja Recorrido',    mie: 'Benja Recorrido',    jue: 'Benja Recorrido',    vie: 'Benja Recorrido',    sab: 'Estudiar/Proyectos', dom: 'Entretenimiento',    colors: {} },
+        { hora: '16:50 - 17:20', lun: '',                   mar: '',                   mie: '',                   jue: '',                   vie: '',                   sab: 'Estudiar/Proyectos', dom: 'Entretenimiento',    colors: {} },
+        { hora: '17:20 - 19:00', lun: 'Estudiar/Proyectos', mar: 'Estudiar/Proyectos', mie: 'Estudiar/Proyectos', jue: 'Estudiar/Proyectos', vie: 'Estudiar/Proyectos', sab: 'Estudiar/Proyectos', dom: 'Entretenimiento',    colors: {} },
+        { hora: '19:00 - 21:00', lun: 'AI-300',             mar: 'MLOPS',              mie: 'AI-300',             jue: 'MLOPS',              vie: 'AI-300',             sab: 'Entretenimiento',    dom: 'Entretenimiento',    colors: {} },
+        { hora: '21:00 - 22:00', lun: 'Entretenimiento',    mar: 'Entretenimiento',    mie: 'Entretenimiento',    jue: 'Entretenimiento',    vie: 'Entretenimiento',    sab: 'Entretenimiento',    dom: 'Entretenimiento',    colors: {} },
+        { hora: '22:00 - 23:00', lun: 'Libro/Meditar',      mar: 'Libro/Meditar',      mie: 'Libro/Meditar',      jue: 'Libro/Meditar',      vie: 'Libro/Meditar',      sab: 'Entretenimiento',    dom: 'Planificación',      colors: {} }
+      ]
+    };
+  }
+
+  function loadScheduleSheet() {
+    const saved = safeStorageGet(SCHEDULE_SHEET_KEY, null);
+    if (saved && Array.isArray(saved.rows) && saved.rows.length > 0) {
+      return saved;
+    }
+    const def = getDefaultScheduleSheet();
+    safeStorageSet(SCHEDULE_SHEET_KEY, def);
+    return def;
+  }
+
+  function saveScheduleSheet(sheetData) {
+    safeStorageSet(SCHEDULE_SHEET_KEY, sheetData);
+  }
+
+  function inferScheduleCellColor(text, colKey, rowObj) {
+    if (rowObj && rowObj.colors && rowObj.colors[colKey] && rowObj.colors[colKey] !== 'auto') {
+      return rowObj.colors[colKey];
+    }
+    if (colKey === 'hora') {
+      const rowValues = SCHEDULE_DAY_KEYS.map(k => String(rowObj[k] || '').trim().toLowerCase()).filter(Boolean);
+      if (rowValues.length > 0 && rowValues.every(v => v.includes('desayunar') || v.includes('almuerzo') || v.includes('cena'))) {
+        return 'meal';
+      }
+      return 'white';
+    }
+    const val = String(text || '').trim().toLowerCase();
+    if (!val) return 'white';
+    if (val.includes('desayunar') || val.includes('almuerzo') || val.includes('cena')) return 'meal';
+    if (val.includes('planificación') || val.includes('planificacion')) return 'plan';
+    if (val.includes('dormir') || val.includes('calistenia') || val.includes('correr') || val.includes('libro') || val.includes('meditar')) return 'sleep';
+    if (val.includes('ingles') || val.includes('inglés') || val.includes('estudiar') || val.includes('estudio') || val.includes('proyectos') || val.includes('ai-300') || val.includes('mlops') || val.includes('ia')) return 'study';
+    if (val.includes('fuyu')) return 'work';
+    if (val.includes('entretenimiento')) return 'leisure';
+    return 'white';
+  }
+
+  function inferActivityMetadataFromTitle(title) {
+    const t = String(title || '').trim().toLowerCase();
+    if (t.includes('dormir')) return { priority: 'high', tags: ['salud'] };
+    if (t.includes('calistenia') || t.includes('correr') || t.includes('ejercicio')) return { priority: 'high', tags: ['salud', 'ejercicio'] };
+    if (t.includes('desayunar') || t.includes('almuerzo') || t.includes('cena')) return { priority: 'medium', tags: ['personal'] };
+    if (t.includes('ingles') || t.includes('inglés')) return { priority: 'high', tags: ['estudio', 'idiomas'] };
+    if (t.includes('estudiar') || t.includes('proyectos')) return { priority: 'high', tags: ['estudio', 'proyectos'] };
+    if (t.includes('ai-300') || t.includes('mlops')) return { priority: 'high', tags: ['estudio', 'ia'] };
+    if (t.includes('fuyu') || t.includes('buscar trabajo')) return { priority: 'high', tags: ['trabajo', 'proyectos'] };
+    if (t.includes('benja')) return { priority: 'medium', tags: ['personal', 'familia'] };
+    if (t.includes('libro') || t.includes('meditar')) return { priority: 'medium', tags: ['personal', 'lectura'] };
+    if (t.includes('planificación') || t.includes('planificacion')) return { priority: 'high', tags: ['personal'] };
+    if (t.includes('entretenimiento')) return { priority: 'low', tags: ['personal'] };
+    return { priority: 'medium', tags: ['general'] };
+  }
+
+  let scheduleSheetState = {
+    rowIdx: 0,
+    colIdx: 1,
+    editing: false
+  };
+
+  function setScheduleWeekDatesToCurrent() {
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const diffToMonday = (dayOfWeek === 0) ? -6 : 1 - dayOfWeek;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + diffToMonday);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+
+    const startInput = $('#schedule-apply-start');
+    const endInput = $('#schedule-apply-end');
+    if (startInput) startInput.value = toDateStr(monday);
+    if (endInput) endInput.value = toDateStr(sunday);
+  }
+
+  function updateScheduleToolbarFormula() {
+    const sheet = loadScheduleSheet();
+    const r = Math.max(0, Math.min(scheduleSheetState.rowIdx, sheet.rows.length - 1));
+    const c = Math.max(0, Math.min(scheduleSheetState.colIdx, SCHEDULE_COLS.length - 1));
+    scheduleSheetState.rowIdx = r;
+    scheduleSheetState.colIdx = c;
+
+    const colKey = SCHEDULE_COLS[c];
+    const rowObj = sheet.rows[r] || {};
+    const refEl = $('#excel-cell-ref');
+    const formulaEl = $('#excel-formula-input');
+    if (refEl) refEl.textContent = `${SCHEDULE_COL_LETTERS[c]}${r + 1}`;
+    if (formulaEl && document.activeElement !== formulaEl) {
+      formulaEl.value = rowObj[colKey] || '';
+    }
+
+    const activeColor = (rowObj.colors && rowObj.colors[colKey]) ? rowObj.colors[colKey] : 'auto';
+    $$('#excel-color-picker .excel-color-swatch').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.color === activeColor);
+    });
+  }
+
+  function renderScheduleSheetView() {
+    const tbody = $('#schedule-sheet-tbody');
+    if (!tbody) return;
+
+    const startInput = $('#schedule-apply-start');
+    if (startInput && !startInput.value) {
+      setScheduleWeekDatesToCurrent();
+    }
+
+    const sheet = loadScheduleSheet();
+    if (!sheet.rows || sheet.rows.length === 0) {
+      sheet.rows = [{ hora: '08:00 - 09:00', lun: '', mar: '', mie: '', jue: '', vie: '', sab: '', dom: '', colors: {} }];
+      saveScheduleSheet(sheet);
+    }
+
+    scheduleSheetState.rowIdx = Math.max(0, Math.min(scheduleSheetState.rowIdx, sheet.rows.length - 1));
+    scheduleSheetState.colIdx = Math.max(0, Math.min(scheduleSheetState.colIdx, SCHEDULE_COLS.length - 1));
+
+    let html = '';
+    sheet.rows.forEach((rowObj, rIdx) => {
+      const isSelectedRow = rIdx === scheduleSheetState.rowIdx;
+      html += `<tr data-row-idx="${rIdx}" class="${isSelectedRow ? 'is-selected-row' : ''}">`;
+      html += `<td class="sheet-row-num" data-row-num="${rIdx}" title="Seleccionar fila ${rIdx + 1}">${rIdx + 1}</td>`;
+
+      SCHEDULE_COLS.forEach((colKey, cIdx) => {
+        const isActive = (rIdx === scheduleSheetState.rowIdx && cIdx === scheduleSheetState.colIdx);
+        const val = rowObj[colKey] || '';
+        const colorClass = inferScheduleCellColor(val, colKey, rowObj);
+        const cellRef = `${SCHEDULE_COL_LETTERS[cIdx]}${rIdx + 1}`;
+
+        html += `
+          <td class="sheet-cell sheet-cell--${colorClass} ${isActive ? 'is-active-cell' : ''}"
+              role="gridcell"
+              tabindex="${isActive ? '0' : '-1'}"
+              data-row="${rIdx}"
+              data-col="${cIdx}"
+              data-col-key="${colKey}"
+              aria-label="${cellRef}: ${escHTML(val || 'vacío')}">
+            <div class="sheet-cell-text">${escHTML(val)}</div>
+          </td>
+        `;
+      });
+      html += `</tr>`;
+    });
+
+    tbody.innerHTML = html;
+    updateScheduleToolbarFormula();
+  }
+
+  function startInlineScheduleCellEdit(rIdx, cIdx, initialChar = null) {
+    const tbody = $('#schedule-sheet-tbody');
+    if (!tbody) return;
+    const td = tbody.querySelector(`td.sheet-cell[data-row="${rIdx}"][data-col="${cIdx}"]`);
+    if (!td) return;
+
+    const sheet = loadScheduleSheet();
+    const colKey = SCHEDULE_COLS[cIdx];
+    const currentVal = (sheet.rows[rIdx] && sheet.rows[rIdx][colKey]) ? String(sheet.rows[rIdx][colKey]) : '';
+    const startValue = initialChar !== null ? initialChar : currentVal;
+
+    scheduleSheetState.editing = true;
+    td.innerHTML = `<input type="text" class="sheet-cell-editor" value="${escHTML(startValue)}" />`;
+    const input = td.querySelector('input.sheet-cell-editor');
+    if (!input) return;
+
+    input.focus();
+    if (initialChar !== null) {
+      input.setSelectionRange(input.value.length, input.value.length);
+    } else {
+      input.select();
+    }
+
+    let committed = false;
+    const commit = (save, moveDeltaRow = 0, moveDeltaCol = 0) => {
+      if (committed) return;
+      committed = true;
+      scheduleSheetState.editing = false;
+      if (save) {
+        const fresh = loadScheduleSheet();
+        if (fresh.rows[rIdx]) {
+          fresh.rows[rIdx][colKey] = input.value.trim();
+          saveScheduleSheet(fresh);
+        }
+      }
+      const nextR = Math.max(0, Math.min(rIdx + moveDeltaRow, sheet.rows.length - 1));
+      const nextC = Math.max(0, Math.min(cIdx + moveDeltaCol, SCHEDULE_COLS.length - 1));
+      scheduleSheetState.rowIdx = nextR;
+      scheduleSheetState.colIdx = nextC;
+      renderScheduleSheetView();
+      const nextTd = tbody.querySelector(`td.sheet-cell[data-row="${nextR}"][data-col="${nextC}"]`);
+      nextTd?.focus();
+    };
+
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commit(true, e.shiftKey ? -1 : 1, 0);
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        commit(true, 0, e.shiftKey ? -1 : 1);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        commit(false, 0, 0);
+      }
+    });
+
+    input.addEventListener('input', () => {
+      const formulaEl = $('#excel-formula-input');
+      if (formulaEl) formulaEl.value = input.value;
+    });
+
+    input.addEventListener('blur', () => {
+      commit(true, 0, 0);
+    });
+  }
+
+  async function applyScheduleSheetToAgenda() {
+    const startVal = $('#schedule-apply-start')?.value;
+    const endVal = $('#schedule-apply-end')?.value;
+    if (!startVal || !endVal) {
+      showToast('Selecciona el rango de fechas (Desde / Hasta)', 'warning', 'var(--accent-amber)');
+      return;
+    }
+
+    const start = new Date(startVal + 'T00:00:00');
+    const end = new Date(endVal + 'T23:59:59');
+    if (end < start) {
+      showToast('La fecha final debe ser igual o posterior a la inicial', 'warning', 'var(--accent-amber)');
+      return;
+    }
+
+    const replaceExisting = $('#schedule-replace-existing')?.checked !== false;
+    if (replaceExisting) {
+      const ok = await confirmAction({
+        title: 'Aplicar Horario Semanal a la Agenda',
+        message: `Se programarán las actividades de la tabla entre ${startVal} y ${endVal}, reemplazando las actividades existentes en esas fechas.`,
+        confirmLabel: 'Aplicar a mi Agenda'
+      });
+      if (!ok) return;
+    }
+
+    const sheet = loadScheduleSheet();
+    const datesToPopulate = [];
+    const curr = new Date(start);
+    while (curr <= end) {
+      datesToPopulate.push(toDateStr(curr));
+      curr.setDate(curr.getDate() + 1);
+    }
+
+    const dateSet = new Set(datesToPopulate);
+    const nowIso = new Date().toISOString();
+
+    if (replaceExisting) {
+      activities.filter(a => a && !a.deleted_at && dateSet.has(a.date)).forEach(a => {
+        enqueueChange({
+          ...a,
+          collection: 'activities',
+          deleted_at: nowIso,
+          updated_at: nowIso,
+          base_version: a.version || 1,
+          version: (a.version || 1) + 1
+        });
+      });
+      activities = activities.filter(a => !a || a.deleted_at || !dateSet.has(a.date));
+    }
+
+    const dayKeyByJsDay = {
+      0: 'dom',
+      1: 'lun',
+      2: 'mar',
+      3: 'mie',
+      4: 'jue',
+      5: 'vie',
+      6: 'sab'
+    };
+
+    const currentSettings = loadSettings();
+    let createdCount = 0;
+
+    datesToPopulate.forEach(dateStr => {
+      const dObj = new Date(dateStr + 'T12:00:00');
+      const dayKey = dayKeyByJsDay[dObj.getDay()];
+      if (!dayKey) return;
+
+      sheet.rows.forEach(rowObj => {
+        const rawTitle = String(rowObj[dayKey] || '').trim();
+        if (!rawTitle) return;
+
+        const { start: rawStart, end: rawEnd } = parseTimeRange(String(rowObj.hora || ''));
+        // Si es 23:00 - 06:30 (Dormir), normalizamos o mantenemos el inicio/fin válido para la agenda
+        const startTime = rawStart || '';
+        const endTime = rawEnd || '';
+
+        const meta = inferActivityMetadataFromTitle(rawTitle);
+        const allowFocus = (typeof FocusCore !== 'undefined' && FocusCore.shouldAllowFocusDefault)
+          ? FocusCore.shouldAllowFocusDefault({ tags: meta.tags, title: rawTitle }, currentSettings)
+          : false;
+
+        const newAct = {
+          id: uid(),
+          title: rawTitle,
+          date: dateStr,
+          startTime,
+          endTime,
+          description: '',
+          priority: meta.priority,
+          tags: meta.tags,
+          allow_focus: allowFocus,
+          completed: false,
+          version: 1,
+          updated_at: nowIso
+        };
+
+        activities.push(newAct);
+        enqueueChange({ ...newAct, collection: 'activities' });
+        createdCount++;
+      });
+    });
+
+    saveActivities(activities);
+    renderDashboard();
+    renderActivityList();
+    renderCalendar();
+    scheduleWebAlarms();
+    if (loadSession()) syncWithBackend();
+
+    showToast(`Horario aplicado: ${createdCount} actividades creadas ✓`, 'event_available', 'var(--accent-teal)');
+  }
+
+  function pullWeekActivitiesIntoScheduleSheet() {
+    const startVal = $('#schedule-apply-start')?.value;
+    if (!startVal) {
+      setScheduleWeekDatesToCurrent();
+    }
+    const baseDateStr = $('#schedule-apply-start')?.value || todayStr();
+    const baseDate = new Date(baseDateStr + 'T12:00:00');
+    const dayOfWeek = baseDate.getDay();
+    const diffToMonday = (dayOfWeek === 0) ? -6 : 1 - dayOfWeek;
+    const monday = new Date(baseDate);
+    monday.setDate(baseDate.getDate() + diffToMonday);
+
+    const weekDatesByKey = {};
+    SCHEDULE_DAY_KEYS.forEach((k, idx) => {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + idx);
+      weekDatesByKey[k] = toDateStr(d);
+    });
+
+    const weekDateSet = new Set(Object.values(weekDatesByKey));
+    const weekActs = activities.filter(a => a && !a.deleted_at && weekDateSet.has(a.date) && a.startTime);
+
+    if (weekActs.length === 0) {
+      showToast('No hay actividades con hora en esa semana para traer a la tabla', 'info', 'var(--accent-amber)');
+      return;
+    }
+
+    const slotMap = new Map();
+    weekActs.forEach(a => {
+      const slotLabel = a.endTime ? `${a.startTime} - ${a.endTime}` : a.startTime;
+      if (!slotMap.has(slotLabel)) {
+        slotMap.set(slotLabel, {
+          hora: slotLabel,
+          sortKey: a.startTime,
+          lun: '', mar: '', mie: '', jue: '', vie: '', sab: '', dom: '',
+          colors: {}
+        });
+      }
+      const row = slotMap.get(slotLabel);
+      const dayEntry = Object.entries(weekDatesByKey).find(([, dStr]) => dStr === a.date);
+      if (dayEntry) {
+        const dayKey = dayEntry[0];
+        row[dayKey] = row[dayKey] ? `${row[dayKey]} / ${a.title}` : a.title;
+      }
+    });
+
+    const sortedRows = Array.from(slotMap.values())
+      .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+      .map(({ sortKey, ...rest }) => rest);
+
+    saveScheduleSheet({ rows: sortedRows });
+    scheduleSheetState.rowIdx = 0;
+    scheduleSheetState.colIdx = 1;
+    renderScheduleSheetView();
+    showToast(`Se cargaron ${sortedRows.length} franjas horarias desde tu agenda ✓`, 'sync_alt', 'var(--accent-teal)');
+  }
+
+  function exportScheduleSheetToXlsx() {
+    try {
+      const sheet = loadScheduleSheet();
+      const headers = ['Hora', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado', 'Domingo'];
+      const aoa = [headers];
+      sheet.rows.forEach(r => {
+        aoa.push([
+          r.hora || '',
+          r.lun || '',
+          r.mar || '',
+          r.mie || '',
+          r.jue || '',
+          r.vie || '',
+          r.sab || '',
+          r.dom || ''
+        ]);
+      });
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      XLSX.utils.book_append_sheet(wb, ws, 'Horario Semanal');
+      XLSX.writeFile(wb, 'horario_semanal.xlsx');
+      showToast('Archivo horario_semanal.xlsx descargado ✓', 'download', 'var(--accent-teal)');
+    } catch (err) {
+      console.error(err);
+      showToast('Error al exportar el archivo Excel', 'error', 'var(--accent-red)');
+    }
+  }
+
+  function importScheduleSheetFromXlsx(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        if (!rawRows || rawRows.length < 2) {
+          showToast('El archivo Excel no contiene filas válidas', 'warning', 'var(--accent-amber)');
+          return;
+        }
+
+        const headers = rawRows[0].map(h => String(h || '').trim().toLowerCase());
+        const findCol = (names, fallbackIdx) => {
+          const idx = headers.findIndex(h => names.includes(h));
+          return idx !== -1 ? idx : fallbackIdx;
+        };
+
+        const cHora = findCol(['hora', 'horario', 'time'], 0);
+        const cLun  = findCol(['lunes', 'monday', 'lun'], 1);
+        const cMar  = findCol(['martes', 'tuesday', 'mar'], 2);
+        const cMie  = findCol(['miercoles', 'miércoles', 'wednesday', 'mie'], 3);
+        const cJue  = findCol(['jueves', 'thursday', 'jue'], 4);
+        const cVie  = findCol(['viernes', 'friday', 'vie'], 5);
+        const cSab  = findCol(['sabado', 'sábado', 'saturday', 'sab'], 6);
+        const cDom  = findCol(['domingo', 'sunday', 'dom'], 7);
+
+        const newRows = [];
+        for (let i = 1; i < rawRows.length; i++) {
+          const r = rawRows[i];
+          if (!r || r.every(cell => cell === undefined || cell === null || String(cell).trim() === '')) continue;
+          newRows.push({
+            hora: String(r[cHora] ?? '').trim(),
+            lun:  String(r[cLun]  ?? '').trim(),
+            mar:  String(r[cMar]  ?? '').trim(),
+            mie:  String(r[cMie]  ?? '').trim(),
+            jue:  String(r[cJue]  ?? '').trim(),
+            vie:  String(r[cVie]  ?? '').trim(),
+            sab:  String(r[cSab]  ?? '').trim(),
+            dom:  String(r[cDom]  ?? '').trim(),
+            colors: {}
+          });
+        }
+
+        if (newRows.length === 0) {
+          showToast('No se encontraron filas con datos en el archivo', 'warning', 'var(--accent-amber)');
+          return;
+        }
+
+        saveScheduleSheet({ rows: newRows });
+        scheduleSheetState.rowIdx = 0;
+        scheduleSheetState.colIdx = 1;
+        renderScheduleSheetView();
+        showToast(`Horario importado desde Excel (${newRows.length} filas) ✓`, 'table_chart', 'var(--accent-teal)');
+      } catch (err) {
+        console.error(err);
+        showToast('No se pudo leer el archivo Excel', 'error', 'var(--accent-red)');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function initScheduleSheet() {
+    setScheduleWeekDatesToCurrent();
+
+    const tbody = $('#schedule-sheet-tbody');
+    if (tbody) {
+      tbody.addEventListener('click', (e) => {
+        if (e.target.closest('input.sheet-cell-editor')) return;
+        const rowNumTd = e.target.closest('td.sheet-row-num');
+        if (rowNumTd) {
+          scheduleSheetState.rowIdx = parseInt(rowNumTd.dataset.rowNum, 10) || 0;
+          scheduleSheetState.colIdx = 0;
+          renderScheduleSheetView();
+          const firstCell = tbody.querySelector(`td.sheet-cell[data-row="${scheduleSheetState.rowIdx}"][data-col="0"]`);
+          firstCell?.focus();
+          return;
+        }
+
+        const td = e.target.closest('td.sheet-cell');
+        if (!td) return;
+        const rIdx = parseInt(td.dataset.row, 10);
+        const cIdx = parseInt(td.dataset.col, 10);
+        if (rIdx === scheduleSheetState.rowIdx && cIdx === scheduleSheetState.colIdx && !scheduleSheetState.editing) {
+          startInlineScheduleCellEdit(rIdx, cIdx);
+          return;
+        }
+        scheduleSheetState.rowIdx = rIdx;
+        scheduleSheetState.colIdx = cIdx;
+        renderScheduleSheetView();
+        const activeTd = tbody.querySelector(`td.sheet-cell[data-row="${rIdx}"][data-col="${cIdx}"]`);
+        activeTd?.focus();
+      });
+
+      tbody.addEventListener('dblclick', (e) => {
+        const td = e.target.closest('td.sheet-cell');
+        if (!td) return;
+        const rIdx = parseInt(td.dataset.row, 10);
+        const cIdx = parseInt(td.dataset.col, 10);
+        scheduleSheetState.rowIdx = rIdx;
+        scheduleSheetState.colIdx = cIdx;
+        startInlineScheduleCellEdit(rIdx, cIdx);
+      });
+
+      tbody.addEventListener('keydown', (e) => {
+        if (scheduleSheetState.editing) return;
+        const sheet = loadScheduleSheet();
+        const maxR = sheet.rows.length - 1;
+        const maxC = SCHEDULE_COLS.length - 1;
+        let { rowIdx, colIdx } = scheduleSheetState;
+
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          scheduleSheetState.rowIdx = Math.min(maxR, rowIdx + 1);
+          renderScheduleSheetView();
+          tbody.querySelector(`td.sheet-cell[data-row="${scheduleSheetState.rowIdx}"][data-col="${colIdx}"]`)?.focus();
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          scheduleSheetState.rowIdx = Math.max(0, rowIdx - 1);
+          renderScheduleSheetView();
+          tbody.querySelector(`td.sheet-cell[data-row="${scheduleSheetState.rowIdx}"][data-col="${colIdx}"]`)?.focus();
+        } else if (e.key === 'ArrowRight' || (e.key === 'Tab' && !e.shiftKey)) {
+          e.preventDefault();
+          scheduleSheetState.colIdx = Math.min(maxC, colIdx + 1);
+          renderScheduleSheetView();
+          tbody.querySelector(`td.sheet-cell[data-row="${rowIdx}"][data-col="${scheduleSheetState.colIdx}"]`)?.focus();
+        } else if (e.key === 'ArrowLeft' || (e.key === 'Tab' && e.shiftKey)) {
+          e.preventDefault();
+          scheduleSheetState.colIdx = Math.max(0, colIdx - 1);
+          renderScheduleSheetView();
+          tbody.querySelector(`td.sheet-cell[data-row="${rowIdx}"][data-col="${scheduleSheetState.colIdx}"]`)?.focus();
+        } else if (e.key === 'Enter' || e.key === 'F2') {
+          e.preventDefault();
+          startInlineScheduleCellEdit(rowIdx, colIdx);
+        } else if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault();
+          const colKey = SCHEDULE_COLS[colIdx];
+          if (sheet.rows[rowIdx]) {
+            sheet.rows[rowIdx][colKey] = '';
+            saveScheduleSheet(sheet);
+            renderScheduleSheetView();
+            tbody.querySelector(`td.sheet-cell[data-row="${rowIdx}"][data-col="${colIdx}"]`)?.focus();
+          }
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+          const colKey = SCHEDULE_COLS[colIdx];
+          const val = sheet.rows[rowIdx]?.[colKey] || '';
+          navigator.clipboard?.writeText(val).catch(() => {});
+          showToast('Celda copiada', 'content_copy');
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+          navigator.clipboard?.readText().then(text => {
+            if (typeof text === 'string') {
+              const fresh = loadScheduleSheet();
+              const colKey = SCHEDULE_COLS[scheduleSheetState.colIdx];
+              if (fresh.rows[scheduleSheetState.rowIdx]) {
+                fresh.rows[scheduleSheetState.rowIdx][colKey] = text.trim();
+                saveScheduleSheet(fresh);
+                renderScheduleSheetView();
+              }
+            }
+          }).catch(() => {});
+        } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          startInlineScheduleCellEdit(rowIdx, colIdx, e.key);
+        }
+      });
+    }
+
+    const formulaInput = $('#excel-formula-input');
+    if (formulaInput) {
+      formulaInput.addEventListener('input', () => {
+        const sheet = loadScheduleSheet();
+        const { rowIdx, colIdx } = scheduleSheetState;
+        const colKey = SCHEDULE_COLS[colIdx];
+        if (sheet.rows[rowIdx]) {
+          sheet.rows[rowIdx][colKey] = formulaInput.value;
+          saveScheduleSheet(sheet);
+          const td = tbody?.querySelector(`td.sheet-cell[data-row="${rowIdx}"][data-col="${colIdx}"]`);
+          if (td) {
+            const textDiv = td.querySelector('.sheet-cell-text');
+            if (textDiv) textDiv.textContent = formulaInput.value;
+            const newColor = inferScheduleCellColor(formulaInput.value, colKey, sheet.rows[rowIdx]);
+            td.className = `sheet-cell sheet-cell--${newColor} is-active-cell`;
+          }
+        }
+      });
+      formulaInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const sheet = loadScheduleSheet();
+          scheduleSheetState.rowIdx = Math.min(sheet.rows.length - 1, scheduleSheetState.rowIdx + 1);
+          renderScheduleSheetView();
+        }
+      });
+    }
+
+    $('#btn-schedule-add-row')?.addEventListener('click', () => {
+      const sheet = loadScheduleSheet();
+      sheet.rows.push({ hora: '00:00 - 00:00', lun: '', mar: '', mie: '', jue: '', vie: '', sab: '', dom: '', colors: {} });
+      saveScheduleSheet(sheet);
+      scheduleSheetState.rowIdx = sheet.rows.length - 1;
+      scheduleSheetState.colIdx = 0;
+      renderScheduleSheetView();
+    });
+
+    $('#btn-schedule-insert-above')?.addEventListener('click', () => {
+      const sheet = loadScheduleSheet();
+      const idx = Math.max(0, Math.min(scheduleSheetState.rowIdx, sheet.rows.length));
+      sheet.rows.splice(idx, 0, { hora: '00:00 - 00:00', lun: '', mar: '', mie: '', jue: '', vie: '', sab: '', dom: '', colors: {} });
+      saveScheduleSheet(sheet);
+      renderScheduleSheetView();
+    });
+
+    $('#btn-schedule-move-up')?.addEventListener('click', () => {
+      const sheet = loadScheduleSheet();
+      const r = scheduleSheetState.rowIdx;
+      if (r > 0 && sheet.rows[r]) {
+        const tmp = sheet.rows[r - 1];
+        sheet.rows[r - 1] = sheet.rows[r];
+        sheet.rows[r] = tmp;
+        scheduleSheetState.rowIdx = r - 1;
+        saveScheduleSheet(sheet);
+        renderScheduleSheetView();
+      }
+    });
+
+    $('#btn-schedule-move-down')?.addEventListener('click', () => {
+      const sheet = loadScheduleSheet();
+      const r = scheduleSheetState.rowIdx;
+      if (r < sheet.rows.length - 1 && sheet.rows[r]) {
+        const tmp = sheet.rows[r + 1];
+        sheet.rows[r + 1] = sheet.rows[r];
+        sheet.rows[r] = tmp;
+        scheduleSheetState.rowIdx = r + 1;
+        saveScheduleSheet(sheet);
+        renderScheduleSheetView();
+      }
+    });
+
+    $('#btn-schedule-fill-mon-fri')?.addEventListener('click', () => {
+      const sheet = loadScheduleSheet();
+      const { rowIdx, colIdx } = scheduleSheetState;
+      const row = sheet.rows[rowIdx];
+      if (!row) return;
+      const sourceKey = colIdx >= 1 ? SCHEDULE_COLS[colIdx] : 'lun';
+      const val = row[sourceKey] || '';
+      ['lun', 'mar', 'mie', 'jue', 'vie'].forEach(k => { row[k] = val; });
+      saveScheduleSheet(sheet);
+      renderScheduleSheetView();
+      showToast('Copiado de Lunes a Viernes ✓');
+    });
+
+    $('#btn-schedule-fill-all-week')?.addEventListener('click', () => {
+      const sheet = loadScheduleSheet();
+      const { rowIdx, colIdx } = scheduleSheetState;
+      const row = sheet.rows[rowIdx];
+      if (!row) return;
+      const sourceKey = colIdx >= 1 ? SCHEDULE_COLS[colIdx] : 'lun';
+      const val = row[sourceKey] || '';
+      SCHEDULE_DAY_KEYS.forEach(k => { row[k] = val; });
+      saveScheduleSheet(sheet);
+      renderScheduleSheetView();
+      showToast('Copiado de Lunes a Domingo ✓');
+    });
+
+    $('#btn-schedule-delete-row')?.addEventListener('click', () => {
+      const sheet = loadScheduleSheet();
+      if (sheet.rows.length <= 1) {
+        sheet.rows[0] = { hora: '', lun: '', mar: '', mie: '', jue: '', vie: '', sab: '', dom: '', colors: {} };
+      } else {
+        sheet.rows.splice(scheduleSheetState.rowIdx, 1);
+        scheduleSheetState.rowIdx = Math.max(0, Math.min(scheduleSheetState.rowIdx, sheet.rows.length - 1));
+      }
+      saveScheduleSheet(sheet);
+      renderScheduleSheetView();
+      showToast('Fila eliminada');
+    });
+
+    $$('#excel-color-picker .excel-color-swatch').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const color = btn.dataset.color || 'auto';
+        const sheet = loadScheduleSheet();
+        const { rowIdx, colIdx } = scheduleSheetState;
+        const row = sheet.rows[rowIdx];
+        if (!row) return;
+        if (!row.colors) row.colors = {};
+        const colKey = SCHEDULE_COLS[colIdx];
+        if (color === 'auto') {
+          delete row.colors[colKey];
+        } else {
+          row.colors[colKey] = color;
+        }
+        saveScheduleSheet(sheet);
+        renderScheduleSheetView();
+      });
+    });
+
+    $('#btn-schedule-this-week')?.addEventListener('click', () => {
+      setScheduleWeekDatesToCurrent();
+      showToast('Rango ajustado a la semana actual');
+    });
+
+    $('#btn-schedule-apply-agenda')?.addEventListener('click', applyScheduleSheetToAgenda);
+    $('#btn-schedule-pull-week')?.addEventListener('click', pullWeekActivitiesIntoScheduleSheet);
+    $('#btn-schedule-export-xlsx')?.addEventListener('click', exportScheduleSheetToXlsx);
+
+    const xlsxInput = $('#schedule-xlsx-input');
+    $('#btn-schedule-import-xlsx')?.addEventListener('click', () => xlsxInput?.click());
+    xlsxInput?.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        importScheduleSheetFromXlsx(file);
+        xlsxInput.value = '';
+      }
+    });
+
+    $('#btn-schedule-reset')?.addEventListener('click', async () => {
+      const ok = await confirmAction({
+        title: 'Restaurar Horario Predeterminado',
+        message: 'Se restaurará la tabla con tu horario base original (23:00-6:30 Dormir, Calistenia/Correr, Inglés, Fuyu, AI-300, MLOPS, etc.).',
+        confirmLabel: 'Restaurar'
+      });
+      if (!ok) return;
+      saveScheduleSheet(getDefaultScheduleSheet());
+      scheduleSheetState.rowIdx = 0;
+      scheduleSheetState.colIdx = 1;
+      renderScheduleSheetView();
+      showToast('Horario base restaurado ✓');
+    });
   }
 
   function buildBaseRoutine() {

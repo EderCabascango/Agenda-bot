@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:8000 https://*.ts.net https://agenda-bot-omega.vercel.app;" />
   <link rel="stylesheet" href="fonts/material-icons-round.css" />
-  <link rel="stylesheet" href="style.css?v=17" />
+  <link rel="stylesheet" href="style.css?v=18" />
 </head>
 <body>
 
@@ -56,6 +56,10 @@
         <button class="nav-item" data-view="calendar">
           <span class="material-icons-round">calendar_month</span>
           <span>Calendario</span>
+        </button>
+        <button class="nav-item" data-view="schedule">
+          <span class="material-icons-round">table_chart</span>
+          <span>Horario Semanal</span>
         </button>
         <button class="nav-item" data-view="study">
           <span class="material-icons-round">school</span>
@@ -607,6 +611,128 @@
           </div>
         </section>
 
+        <!-- ========== HORARIO SEMANAL (TIPO EXCEL) ========== -->
+        <section class="view" id="view-schedule">
+          <div class="view-header schedule-header">
+            <div>
+              <h2>Horario Semanal</h2>
+              <p class="section-desc">Gestiona tu rutina semanal como una hoja de cálculo y aplícala a tu agenda con un clic</p>
+            </div>
+            <div class="schedule-top-actions">
+              <button type="button" class="btn-outline" id="btn-schedule-import-xlsx" title="Importar desde archivo Excel (.xlsx)">
+                <span class="material-icons-round">upload_file</span>
+                <span>Importar .xlsx</span>
+              </button>
+              <input type="file" id="schedule-xlsx-input" accept=".xlsx,.xls" hidden />
+              <button type="button" class="btn-outline" id="btn-schedule-export-xlsx" title="Descargar horario como archivo Excel (.xlsx)">
+                <span class="material-icons-round">download</span>
+                <span>Exportar .xlsx</span>
+              </button>
+              <button type="button" class="btn-outline" id="btn-schedule-reset" title="Restaurar el horario predeterminado">
+                <span class="material-icons-round">restart_alt</span>
+                <span>Restaurar Base</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Barra de sincronización con la agenda real -->
+          <div class="schedule-sync-bar">
+            <div class="schedule-sync-dates">
+              <div class="schedule-date-group">
+                <label for="schedule-apply-start">Desde</label>
+                <input type="date" id="schedule-apply-start" />
+              </div>
+              <div class="schedule-date-group">
+                <label for="schedule-apply-end">Hasta</label>
+                <input type="date" id="schedule-apply-end" />
+              </div>
+              <button type="button" class="btn-outline btn-sm" id="btn-schedule-this-week" title="Seleccionar Lunes a Domingo de la semana actual">
+                Esta semana
+              </button>
+              <label class="schedule-replace-check">
+                <input type="checkbox" id="schedule-replace-existing" checked />
+                <span>Reemplazar actividades existentes en esas fechas</span>
+              </label>
+            </div>
+            <div class="schedule-sync-cta">
+              <button type="button" class="btn-outline" id="btn-schedule-pull-week" title="Cargar en la tabla las actividades que ya tienes programadas en esta semana">
+                <span class="material-icons-round">sync_alt</span>
+                <span>Traer de mi agenda</span>
+              </button>
+              <button type="button" class="btn-primary" id="btn-schedule-apply-agenda">
+                <span class="material-icons-round">event_available</span>
+                <span>Aplicar a mi Agenda</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Barra de herramientas estilo Excel -->
+          <div class="schedule-excel-toolbar" role="toolbar" aria-label="Herramientas de hoja de cálculo">
+            <div class="excel-cell-indicator">
+              <span class="excel-cell-ref" id="excel-cell-ref">A1</span>
+              <input type="text" class="excel-formula-input" id="excel-formula-input" placeholder="Selecciona una celda para editar su contenido..." aria-label="Valor de la celda seleccionada" />
+            </div>
+            <div class="excel-toolbar-btns">
+              <button type="button" class="btn-outline btn-sm" id="btn-schedule-add-row" title="Añadir nueva fila de horario al final">
+                <span class="material-icons-round">add</span> Fila
+              </button>
+              <button type="button" class="btn-outline btn-sm" id="btn-schedule-insert-above" title="Insertar fila arriba de la seleccionada">
+                <span class="material-icons-round">vertical_align_top</span> Insertar arriba
+              </button>
+              <button type="button" class="btn-outline btn-sm" id="btn-schedule-move-up" title="Subir fila seleccionada">
+                <span class="material-icons-round">arrow_upward</span>
+              </button>
+              <button type="button" class="btn-outline btn-sm" id="btn-schedule-move-down" title="Bajar fila seleccionada">
+                <span class="material-icons-round">arrow_downward</span>
+              </button>
+              <button type="button" class="btn-outline btn-sm" id="btn-schedule-fill-mon-fri" title="Copiar el valor de la celda actual de Lunes a Viernes en esta fila">
+                <span class="material-icons-round">content_copy</span> L-V
+              </button>
+              <button type="button" class="btn-outline btn-sm" id="btn-schedule-fill-all-week" title="Copiar el valor de la celda actual de Lunes a Domingo en esta fila">
+                <span class="material-icons-round">date_range</span> L-D
+              </button>
+              <button type="button" class="btn-outline btn-sm" id="btn-schedule-delete-row" title="Eliminar la fila seleccionada">
+                <span class="material-icons-round">delete_outline</span> Eliminar fila
+              </button>
+            </div>
+            <div class="excel-color-picker" id="excel-color-picker" aria-label="Color de celda">
+              <span class="excel-color-label"><span class="material-icons-round" style="font-size:16px;">format_color_fill</span> Color:</span>
+              <button type="button" class="excel-color-swatch active" data-color="auto" title="Automático según la actividad">Auto</button>
+              <button type="button" class="excel-color-swatch swatch-sleep" data-color="sleep" title="Celeste (Dormir / Correr / Lectura)"></button>
+              <button type="button" class="excel-color-swatch swatch-meal" data-color="meal" title="Azul (Desayunar / Almuerzo)"></button>
+              <button type="button" class="excel-color-swatch swatch-study" data-color="study" title="Verde (Inglés / Estudio / IA / MLOPS)"></button>
+              <button type="button" class="excel-color-swatch swatch-work" data-color="work" title="Amarillo (Fuyu / Trabajo)"></button>
+              <button type="button" class="excel-color-swatch swatch-leisure" data-color="leisure" title="Salmón / Naranja (Entretenimiento)"></button>
+              <button type="button" class="excel-color-swatch swatch-plan" data-color="plan" title="Azul Marino (Planificación)"></button>
+              <button type="button" class="excel-color-swatch swatch-white" data-color="white" title="Blanco (Sin relleno)"></button>
+            </div>
+          </div>
+
+          <!-- Contenedor de la tabla estilo Excel -->
+          <div class="schedule-sheet-wrap">
+            <table class="schedule-sheet-table" id="schedule-sheet-table" role="grid" aria-label="Hoja de cálculo de horario semanal">
+              <thead>
+                <tr>
+                  <th class="sheet-row-num-head">#</th>
+                  <th class="sheet-hora-head">Hora</th>
+                  <th data-day-col="lun">Lunes</th>
+                  <th data-day-col="mar">Martes</th>
+                  <th data-day-col="mie">Miercoles</th>
+                  <th data-day-col="jue">Jueves</th>
+                  <th data-day-col="vie">Viernes</th>
+                  <th data-day-col="sab">Sabado</th>
+                  <th data-day-col="dom">Domingo</th>
+                </tr>
+              </thead>
+              <tbody id="schedule-sheet-tbody"></tbody>
+            </table>
+          </div>
+          <p class="schedule-sheet-hint">
+            <span class="material-icons-round" style="font-size:15px; vertical-align:middle;">info</span>
+            Haz clic en cualquier celda para seleccionarla o escribe directamente. Usa las flechas del teclado, <kbd>Enter</kbd>, <kbd>Tab</kbd>, <kbd>Ctrl+C</kbd> / <kbd>Ctrl+V</kbd> o <kbd>Supr</kbd> igual que en Excel.
+          </p>
+        </section>
+
         <section class="view" id="view-settings">
           <div class="view-header"><h2>Ajustes</h2></div>
           <div class="settings-list">
@@ -1000,6 +1126,10 @@
       <button class="bnav-item" data-view="calendar">
         <span class="material-icons-round">calendar_month</span>
         <span>Agenda</span>
+      </button>
+      <button class="bnav-item" data-view="schedule">
+        <span class="material-icons-round">table_chart</span>
+        <span>Horario</span>
       </button>
       <button class="bnav-item" data-view="stats">
         <span class="material-icons-round">analytics</span>
@@ -1829,6 +1959,6 @@
   <script src="graph-core.js?v=2"></script>
   <script src="workout-core.js?v=2"></script>
   <script src="notes-core.js?v=2"></script>
-  <script src="app.js?v=21"></script>
+  <script src="app.js?v=22"></script>
 </body>
 </html>

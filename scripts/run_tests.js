@@ -171,6 +171,11 @@ const steps = [
     name: '5.p E2E Plan Semanal y Entreno Guiado (Series y Descansos Cronometrados)',
     cmd: PYTHON,
     args: [path.join(ROOT_DIR, 'scripts/test_e2e_guided_workout.py')]
+  },
+  {
+    name: '5.q E2E Horario Semanal (Tipo Excel) y Sincronización con Agenda',
+    cmd: PYTHON,
+    args: [path.join(ROOT_DIR, 'scripts/test_e2e_schedule_sheet.py')]
   }
 ];
 

@@ -3222,3 +3222,350 @@ body.is-logged-out > *:not(.login-screen):not(#toast) { display: none !important
   .notes-graph-svg { height: 60vh; min-height: 300px; }
 }
 .notes-grid[hidden] { display: none; }
+
+/* ── Horario Semanal (Estilo Excel) ── */
+.schedule-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.schedule-top-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.schedule-top-actions .btn-outline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  padding: 8px 14px;
+}
+.schedule-sync-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow-sm);
+}
+.schedule-sync-dates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.schedule-date-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.schedule-date-group label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.schedule-date-group input[type="date"] {
+  width: auto;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  height: 36px;
+}
+.schedule-replace-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  margin-left: 4px;
+}
+.schedule-replace-check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+}
+.schedule-sync-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.schedule-sync-cta .btn-outline,
+.schedule-sync-cta .btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 14px;
+  font-size: 0.84rem;
+}
+.btn-sm {
+  height: 34px !important;
+  padding: 0 10px !important;
+  font-size: 0.78rem !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.schedule-excel-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  border-bottom: none;
+  padding: 10px 14px;
+}
+.excel-cell-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 220px;
+}
+.excel-cell-ref {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  height: 34px;
+  padding: 0 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-medium);
+  border-radius: 6px;
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+}
+.excel-formula-input {
+  height: 34px;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+  border-radius: 6px;
+}
+.excel-toolbar-btns {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.excel-color-picker {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.excel-color-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-right: 2px;
+}
+.excel-color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.1s;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+.excel-color-swatch[data-color="auto"] {
+  width: auto;
+  padding: 0 7px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+.excel-color-swatch.active {
+  outline: 2px solid #107C41;
+  outline-offset: 1px;
+  transform: scale(1.06);
+}
+.swatch-sleep   { background: #BDD7EE; }
+.swatch-meal    { background: #2F75B5; }
+.swatch-study   { background: #C6E0B4; }
+.swatch-work    { background: #FFE699; }
+.swatch-leisure { background: #F8CBAD; }
+.swatch-plan    { background: #1F4E78; }
+.swatch-white   { background: #FFFFFF; }
+
+.schedule-sheet-wrap {
+  width: 100%;
+  overflow-x: auto;
+  background: var(--bg-card);
+  border: 1px solid #9BC2E6;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+.schedule-sheet-table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: 'Calibri', 'Plus Jakarta Sans', 'Segoe UI', sans-serif;
+  font-size: 0.86rem;
+  user-select: none;
+}
+.schedule-sheet-table thead th {
+  background: #2F75B5;
+  color: #FFFFFF;
+  font-weight: 600;
+  text-align: center;
+  padding: 7px 6px;
+  border: 1px solid #1F4E78;
+  font-size: 0.88rem;
+  letter-spacing: 0.1px;
+}
+.schedule-sheet-table th.sheet-row-num-head {
+  width: 34px;
+  background: #1F4E78;
+  font-size: 0.75rem;
+}
+.schedule-sheet-table th.sheet-hora-head {
+  width: 118px;
+}
+.schedule-sheet-table tbody td {
+  border: 1px solid #8EA9DB;
+  padding: 0;
+  height: 30px;
+  text-align: center;
+  vertical-align: middle;
+  position: relative;
+  transition: box-shadow 0.08s;
+}
+.schedule-sheet-table td.sheet-row-num {
+  background: #F2F4F8;
+  color: #52525B;
+  font-size: 0.73rem;
+  font-weight: 600;
+  font-family: monospace;
+  cursor: pointer;
+  user-select: none;
+}
+[data-theme="dark"] .schedule-sheet-table td.sheet-row-num {
+  background: #202024;
+  color: #A1A1AA;
+  border-color: #3F3F46;
+}
+.schedule-sheet-table tr.is-selected-row td.sheet-row-num {
+  background: #D9E1F2;
+  color: #111111;
+  font-weight: 800;
+}
+
+/* Colores de celda fieles al Excel del usuario */
+.schedule-sheet-table td.sheet-cell--white {
+  background: #FFFFFF;
+  color: #111111;
+}
+.schedule-sheet-table td.sheet-cell--sleep {
+  background: #BDD7EE;
+  color: #111111;
+}
+.schedule-sheet-table td.sheet-cell--meal {
+  background: #2F75B5;
+  color: #FFFFFF;
+  font-weight: 500;
+}
+.schedule-sheet-table td.sheet-cell--study {
+  background: #C6E0B4;
+  color: #111111;
+}
+.schedule-sheet-table td.sheet-cell--work {
+  background: #FFE699;
+  color: #111111;
+}
+.schedule-sheet-table td.sheet-cell--leisure {
+  background: #F8CBAD;
+  color: #111111;
+}
+.schedule-sheet-table td.sheet-cell--plan {
+  background: #1F4E78;
+  color: #FFFFFF;
+  font-weight: 500;
+}
+
+[data-theme="dark"] .schedule-sheet-table td.sheet-cell--white {
+  background: #1C1C1E;
+  color: #F4F4F5;
+  border-color: #3F3F46;
+}
+
+/* Selección estilo Excel (borde verde esmeralda con esquina inferior derecha) */
+.schedule-sheet-table td.is-active-cell {
+  outline: 2.5px solid #107C41;
+  outline-offset: -2px;
+  z-index: 3;
+}
+.schedule-sheet-table td.is-active-cell::after {
+  content: '';
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 6px;
+  height: 6px;
+  background: #107C41;
+  border: 1px solid #FFFFFF;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.sheet-cell-text {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 29px;
+  padding: 2px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: cell;
+  font-size: 0.85rem;
+}
+.sheet-cell-editor {
+  width: 100%;
+  height: 100%;
+  min-height: 29px;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 2px 6px !important;
+  text-align: center;
+  font-family: inherit;
+  font-size: 0.85rem;
+  background: #FFFFFF !important;
+  color: #111111 !important;
+  box-shadow: inset 0 0 0 2px #107C41 !important;
+}
+.schedule-sheet-hint {
+  margin-top: 10px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.schedule-sheet-hint kbd {
+  background: var(--bg-card);
+  border: 1px solid var(--border-medium);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.73rem;
+  font-family: monospace;
+}
+
